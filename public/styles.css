@@ -1,0 +1,391 @@
+/* ============================================================
+   IndyCar — App de Atendimento
+   Paleta: preto / vermelho-corrida / branco
+   ============================================================ */
+:root{
+  --preto:#0a0a0b; --grafite:#121214; --carta:#161619; --linha:#26262b;
+  --vermelho:#e50914; --vermelho-esc:#b00710; --vermelho-luz:rgba(229,9,20,.5);
+  --branco:#f5f5f7; --cinza:#9a9aa0; --cinza-2:#6c6c72;
+  --verde:#25d366; --amarelo:#f59e0b;
+  --fonte-cond:'Barlow Condensed',sans-serif;
+  --fonte:'DM Sans',system-ui,sans-serif;
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{font-family:var(--fonte);background:var(--preto);color:var(--branco);line-height:1.55;
+  overflow:hidden}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+button{background:none;border:none;cursor:pointer}
+svg{display:block}
+::selection{background:var(--vermelho);color:#fff}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2e2e35;border-radius:9px}
+::-webkit-scrollbar-thumb:hover{background:#3d3d46}
+[hidden]{display:none !important}
+
+/* ---------- Marca ---------- */
+.lg-indy{font-family:var(--fonte-cond);font-style:italic;font-weight:800;font-size:1.5rem;color:#fff;letter-spacing:.01em}
+.lg-car{font-family:var(--fonte-cond);font-style:italic;font-weight:800;font-size:1.5rem;color:#fff;
+  background:linear-gradient(135deg,var(--vermelho),var(--vermelho-esc));padding:1px 8px 0;margin-left:5px;
+  border-radius:3px;box-shadow:0 0 16px var(--vermelho-luz)}
+.lg-sub{display:block;font-family:var(--fonte-cond);font-weight:600;font-size:.56rem;
+  letter-spacing:.34em;color:var(--cinza);margin-top:7px}
+
+/* ---------- Botões ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  font-family:var(--fonte-cond);font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:12px 20px;border-radius:10px;transition:transform .2s var(--ease),box-shadow .2s,background .2s;
+  white-space:nowrap}
+.btn.sm{padding:9px 15px;font-size:.9rem}
+.btn.full{width:100%}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:linear-gradient(135deg,var(--vermelho),var(--vermelho-esc));color:#fff}
+.btn-primary:not(:disabled):hover{transform:translateY(-2px);box-shadow:0 8px 22px var(--vermelho-luz)}
+.btn-ghost{border:1px solid var(--linha);color:var(--cinza)}
+.btn-ghost:hover{color:#fff;border-color:var(--vermelho)}
+.btn-ia{border:1px solid rgba(229,9,20,.4);color:#ff6b73;background:rgba(229,9,20,.08)}
+.btn-ia:hover{background:rgba(229,9,20,.16);color:#fff}
+.link{color:var(--cinza);text-decoration:underline;text-underline-offset:3px;font-size:.9rem}
+.link:hover{color:var(--vermelho)}
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+.login-wrap{display:grid;grid-template-columns:1fr 1fr;height:100vh}
+.login-card{display:flex;flex-direction:column;justify-content:center;padding:48px 8%;
+  max-width:560px;width:100%;margin:0 auto}
+.login-logo{margin-bottom:34px}
+.login-card h1{font-family:var(--fonte-cond);font-weight:700;font-size:2.6rem;line-height:1.1;margin-bottom:6px}
+.login-sub{color:var(--cinza);margin-bottom:26px}
+#formLogin{display:flex;flex-direction:column;gap:16px}
+#formLogin label,.form-vertical label{display:flex;flex-direction:column;gap:7px;
+  font-family:var(--fonte-cond);font-weight:600;font-size:.95rem;letter-spacing:.02em;color:#d5d5da}
+#formLogin input,.form-vertical input,.form-vertical textarea,.form-vertical select{
+  padding:13px 15px;border-radius:11px;background:rgba(255,255,255,.04);
+  border:1px solid var(--linha);color:#fff;font-size:.97rem;
+  transition:border-color .2s,box-shadow .2s;width:100%}
+#formLogin input:focus,.form-vertical input:focus,.form-vertical textarea:focus{
+  outline:none;border-color:var(--vermelho);box-shadow:0 0 0 3px rgba(229,9,20,.16)}
+.login-rodape{margin-top:22px;text-align:center}
+.alerta{background:rgba(229,9,20,.12);border:1px solid rgba(229,9,20,.35);color:#ff9ea3;
+  padding:11px 14px;border-radius:10px;font-size:.9rem}
+
+.login-lado{background:
+  radial-gradient(900px 600px at 70% 20%,rgba(229,9,20,.22),transparent 60%),
+  linear-gradient(160deg,#1a1a1f,#08080a);
+  display:flex;align-items:center;padding:48px 7%;position:relative;overflow:hidden}
+.login-lado::after{content:'';position:absolute;inset:0;
+  background-image:repeating-linear-gradient(115deg,transparent 0 58px,rgba(229,9,20,.07) 58px 60px);
+  pointer-events:none}
+.lado-conteudo{position:relative;z-index:2;max-width:440px}
+.lado-conteudo h2{font-family:var(--fonte-cond);font-weight:700;font-size:3.2rem;line-height:1.02;margin-bottom:16px}
+.vermelho{color:var(--vermelho)}
+.lado-conteudo p{color:#c9c9d0;margin-bottom:22px}
+.lado-lista{list-style:none;display:flex;flex-direction:column;gap:11px}
+.lado-lista li{display:flex;align-items:flex-start;gap:11px;color:#c9c9d0;font-size:.96rem}
+.lado-lista li::before{content:'✓';color:var(--vermelho);font-weight:700;flex:none}
+
+/* ============================================================
+   APLICAÇÃO
+   ============================================================ */
+.app{display:flex;height:100vh;overflow:hidden}
+
+.sidebar{width:238px;flex:none;background:var(--grafite);border-right:1px solid var(--linha);
+  display:flex;flex-direction:column;padding:20px 14px}
+.marca{padding:0 6px 22px}
+.nav-item{display:flex;align-items:center;gap:12px;width:100%;padding:11px 12px;border-radius:10px;
+  font-family:var(--fonte-cond);font-weight:600;font-size:1.02rem;letter-spacing:.02em;
+  color:var(--cinza);transition:.2s;text-align:left;margin-bottom:3px}
+.nav-item svg{width:19px;height:19px;flex:none}
+.nav-item span{flex:1}
+.nav-item:hover{background:rgba(255,255,255,.05);color:#fff}
+.nav-item.ativo{background:linear-gradient(135deg,rgba(229,9,20,.22),rgba(229,9,20,.05));color:#fff;
+  box-shadow:inset 3px 0 0 var(--vermelho)}
+.badge{background:var(--vermelho);color:#fff;font-size:.7rem;font-weight:700;
+  padding:2px 7px;border-radius:20px;min-width:20px;text-align:center}
+
+.sidebar-fim{margin-top:auto;padding-top:16px;border-top:1px solid var(--linha)}
+.usuario{display:flex;align-items:center;gap:10px;padding:8px 6px}
+.usuario-txt{min-width:0}
+.usuario-txt strong{display:block;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.usuario-txt small{color:var(--cinza-2);font-size:.76rem}
+.avatar{width:36px;height:36px;flex:none;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--fonte-cond);font-weight:700;font-size:.95rem;color:#fff;
+  background:linear-gradient(135deg,var(--vermelho),var(--vermelho-esc))}
+.sair{margin-top:6px;padding-left:6px}
+
+.aba{flex:1;min-width:0;display:none;overflow:hidden}
+.aba.ativa{display:flex;flex-direction:column}
+.conteudo{padding:26px 30px;overflow-y:auto;width:100%}
+.pagina-topo{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;
+  flex-wrap:wrap;margin-bottom:24px}
+.pagina-topo h1{font-family:var(--fonte-cond);font-weight:700;font-size:2rem;line-height:1.1}
+.pagina-topo p{color:var(--cinza);font-size:.95rem}
+.selo{font-family:var(--fonte-cond);font-weight:700;font-size:.76rem;letter-spacing:.08em;
+  text-transform:uppercase;padding:5px 12px;border-radius:30px;
+  background:rgba(120,120,130,.2);color:#a0a0aa;white-space:nowrap}
+.selo.on{background:rgba(37,211,102,.16);color:#4ade80}
+.selo.off{background:rgba(229,9,20,.16);color:#ff8a90}
+
+.cartoes{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:18px;align-items:start}
+.cartao{background:linear-gradient(160deg,var(--carta),var(--grafite));border:1px solid var(--linha);
+  border-radius:15px;padding:22px}
+.cartao h3{font-family:var(--fonte-cond);font-weight:700;font-size:1.3rem;margin-bottom:6px}
+.cartao-sub{color:var(--cinza);font-size:.9rem;margin-bottom:14px}
+.form-vertical{display:flex;flex-direction:column;gap:13px}
+.form-vertical label small{font-weight:400;color:var(--cinza-2);text-transform:none;letter-spacing:0}
+.mascara{color:#4ade80;font-size:.78rem;letter-spacing:.05em}
+.passos{list-style:none;counter-reset:p;display:flex;flex-direction:column;gap:13px}
+.passos li{counter-increment:p;position:relative;padding-left:34px;color:var(--cinza);font-size:.92rem}
+.passos li::before{content:counter(p);position:absolute;left:0;top:0;width:23px;height:23px;
+  border-radius:50%;background:rgba(229,9,20,.15);color:var(--vermelho);
+  display:grid;place-items:center;font-weight:700;font-size:.78rem}
+.passos b{color:#fff}
+.switch{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:.92rem;color:#d5d5da}
+.switch input{width:auto;accent-color:var(--vermelho)}
+.aviso{color:var(--cinza-2);font-size:.82rem;margin-top:10px}
+.ia-saida{margin-top:14px;padding:15px;border-radius:11px;background:rgba(229,9,20,.06);
+  border:1px solid rgba(229,9,20,.25);white-space:pre-wrap;font-size:.94rem;line-height:1.6}
+.equipe{display:flex;flex-direction:column;gap:9px}
+.equipe-item{display:flex;align-items:center;gap:11px;padding:9px;border-radius:10px;
+  background:rgba(255,255,255,.03)}
+.equipe-item small{color:var(--cinza-2);font-size:.78rem}
+
+/* ============================================================
+   CONVERSAS
+   ============================================================ */
+.conversas-layout{display:grid;grid-template-columns:320px 1fr 300px;height:100vh;overflow:hidden}
+.col-lista{border-right:1px solid var(--linha);display:flex;flex-direction:column;min-height:0;
+  background:var(--grafite)}
+.lista-topo{padding:16px 14px 12px;border-bottom:1px solid var(--linha)}
+.busca{position:relative;margin-bottom:11px}
+.busca svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--cinza-2)}
+.busca input{width:100%;padding:10px 12px 10px 36px;border-radius:10px;
+  background:rgba(255,255,255,.05);border:1px solid var(--linha);color:#fff;font-size:.9rem}
+.busca input:focus{outline:none;border-color:var(--vermelho)}
+.filtros-status{display:flex;gap:5px;flex-wrap:wrap}
+.chip{padding:5px 11px;border-radius:20px;font-family:var(--fonte-cond);font-weight:600;
+  font-size:.82rem;letter-spacing:.03em;color:var(--cinza);border:1px solid var(--linha);transition:.2s}
+.chip:hover{color:#fff}
+.chip.ativo{background:var(--vermelho);border-color:var(--vermelho);color:#fff}
+
+.lista-conversas{flex:1;overflow-y:auto;min-height:0}
+.conversa{display:flex;gap:11px;padding:13px 14px;border-bottom:1px solid rgba(38,38,43,.6);
+  cursor:pointer;transition:background .18s;position:relative}
+.conversa:hover{background:rgba(255,255,255,.035)}
+.conversa.ativa{background:rgba(229,9,20,.1);box-shadow:inset 3px 0 0 var(--vermelho)}
+.conversa-txt{flex:1;min-width:0}
+.conversa-topo{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.conversa-nome{font-weight:700;font-size:.93rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.conversa-hora{color:var(--cinza-2);font-size:.73rem;flex:none}
+.conversa-previa{color:var(--cinza);font-size:.84rem;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;margin-top:2px}
+.conversa-tags{display:flex;gap:5px;margin-top:5px;align-items:center}
+.tag{font-size:.68rem;padding:2px 7px;border-radius:20px;font-weight:600;letter-spacing:.02em}
+.tag.aberta{background:rgba(37,211,102,.16);color:#4ade80}
+.tag.pendente{background:rgba(245,158,11,.16);color:#fbbf24}
+.tag.resolvida{background:rgba(120,120,130,.2);color:#a0a0aa}
+.tag.ia{background:rgba(229,9,20,.18);color:#ff8a90}
+.nao-lidas{background:var(--vermelho);color:#fff;font-size:.7rem;font-weight:700;
+  padding:1px 7px;border-radius:20px;min-width:19px;text-align:center}
+.vazio{padding:40px 20px;text-align:center;color:var(--cinza-2);font-size:.9rem}
+
+/* Chat */
+.col-chat{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--preto)}
+.chat-vazio{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;color:var(--cinza-2)}
+.chat-vazio svg{width:56px;height:56px;opacity:.25}
+.chat{display:flex;flex-direction:column;height:100%;min-height:0}
+.chat-topo{display:flex;justify-content:space-between;align-items:center;gap:14px;
+  padding:13px 18px;border-bottom:1px solid var(--linha);background:var(--grafite);flex:none}
+.chat-quem{display:flex;align-items:center;gap:11px;min-width:0}
+.chat-quem strong{display:block;font-size:.98rem}
+.chat-quem small{color:var(--cinza-2);font-size:.8rem}
+.chat-acoes{display:flex;align-items:center;gap:8px}
+.mini-select{padding:7px 10px;border-radius:9px;background:rgba(255,255,255,.05);
+  border:1px solid var(--linha);color:#fff;font-size:.85rem}
+.mini-select:focus{outline:none;border-color:var(--vermelho)}
+
+.mensagens{flex:1;overflow-y:auto;padding:20px 18px;display:flex;flex-direction:column;gap:9px;min-height:0}
+.msg{max-width:min(74%,560px);padding:10px 14px;border-radius:14px;font-size:.94rem;
+  line-height:1.5;word-wrap:break-word;position:relative}
+.msg.entrada{align-self:flex-start;background:var(--carta);border:1px solid var(--linha);
+  border-bottom-left-radius:4px}
+.msg.saida{align-self:flex-end;background:linear-gradient(135deg,var(--vermelho),var(--vermelho-esc));
+  color:#fff;border-bottom-right-radius:4px}
+.msg-hora{display:block;font-size:.68rem;opacity:.65;margin-top:5px;text-align:right}
+.msg.ia-tag::after{content:'✨ IA';position:absolute;top:-8px;right:8px;font-size:.6rem;
+  background:var(--preto);color:#ff8a90;padding:1px 6px;border-radius:20px;border:1px solid rgba(229,9,20,.4)}
+.dia-sep{align-self:center;font-size:.74rem;color:var(--cinza-2);background:var(--carta);
+  padding:3px 12px;border-radius:20px;margin:6px 0}
+
+.chat-envio{display:flex;align-items:flex-end;gap:9px;padding:12px 16px;
+  border-top:1px solid var(--linha);background:var(--grafite);flex:none}
+.chat-envio textarea{flex:1;resize:none;max-height:130px;padding:11px 14px;border-radius:12px;
+  background:rgba(255,255,255,.05);border:1px solid var(--linha);color:#fff;font-size:.95rem;
+  line-height:1.5}
+.chat-envio textarea:focus{outline:none;border-color:var(--vermelho)}
+
+/* Ficha do cliente */
+.col-ficha{border-left:1px solid var(--linha);background:var(--grafite);overflow-y:auto;
+  padding:18px 16px}
+.ficha-vazia{color:var(--cinza-2);font-size:.88rem;text-align:center;padding-top:40px}
+.ficha-cab{text-align:center;padding-bottom:16px;border-bottom:1px solid var(--linha);margin-bottom:16px}
+.ficha-cab .avatar{width:58px;height:58px;font-size:1.4rem;margin:0 auto 10px}
+.ficha-cab strong{display:block;font-size:1.05rem}
+.ficha-cab small{color:var(--cinza-2);font-size:.83rem}
+.ficha-bloco{margin-bottom:18px}
+.ficha-titulo{font-family:var(--fonte-cond);font-weight:700;font-size:.8rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--cinza-2);margin-bottom:9px}
+.ficha-linha{display:flex;justify-content:space-between;gap:10px;font-size:.87rem;
+  padding:5px 0;border-bottom:1px solid rgba(38,38,43,.5)}
+.ficha-linha span{color:var(--cinza)}
+.ficha-linha b{text-align:right}
+.ficha-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px}
+.mini-kpi{background:rgba(255,255,255,.04);border:1px solid var(--linha);border-radius:10px;
+  padding:10px;text-align:center}
+.mini-kpi b{display:block;font-family:var(--fonte-cond);font-size:1.3rem;line-height:1.1}
+.mini-kpi small{color:var(--cinza-2);font-size:.72rem}
+.item-hist{background:rgba(255,255,255,.035);border:1px solid var(--linha);border-radius:10px;
+  padding:10px 11px;margin-bottom:7px;font-size:.85rem}
+.item-hist .ih-topo{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}
+.item-hist small{color:var(--cinza-2);font-size:.76rem}
+
+/* Voltar para a lista (só aparece no celular) */
+.chat-voltar{display:none;align-items:center;justify-content:center;width:34px;height:34px;
+  border-radius:50%;border:1px solid var(--linha);background:transparent;color:var(--texto);
+  font-size:1.5rem;line-height:1;cursor:pointer;flex:none}
+.chat-voltar:hover{border-color:var(--vermelho)}
+
+/* ---------- Modal ---------- */
+.modal-bg{position:fixed;inset:0;background:rgba(4,4,5,.8);backdrop-filter:blur(5px);z-index:100;
+  display:grid;place-items:center;padding:20px;opacity:0;pointer-events:none;visibility:hidden;
+  transition:opacity .28s}
+.modal-bg.aberto{opacity:1;pointer-events:auto;visibility:visible}
+.modal{background:linear-gradient(165deg,#1a1a1e,#0e0e11);border:1px solid var(--linha);
+  border-radius:17px;padding:26px;width:100%;max-width:430px;position:relative;
+  transform:translateY(18px) scale(.97);transition:transform .3s var(--ease)}
+.modal-bg.aberto .modal{transform:none}
+.modal h3{font-family:var(--fonte-cond);font-weight:700;font-size:1.5rem;margin-bottom:16px}
+.modal-x{position:absolute;top:12px;right:14px;width:31px;height:31px;border-radius:50%;
+  background:rgba(255,255,255,.07);color:var(--cinza);font-size:1.25rem;display:grid;place-items:center;
+  transition:.2s}
+.modal-x:hover{background:var(--vermelho);color:#fff;transform:rotate(90deg)}
+
+/* ---------- Toast ---------- */
+.toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,140%);z-index:200;
+  background:var(--carta);border:1px solid var(--linha);border-left:3px solid var(--vermelho);
+  padding:13px 20px;border-radius:11px;box-shadow:0 14px 40px rgba(0,0,0,.55);
+  font-size:.92rem;opacity:0;transition:transform .35s var(--ease),opacity .35s;max-width:min(90vw,420px)}
+.toast.mostra{transform:translate(-50%,0);opacity:1}
+
+/* ---------- Carregando ---------- */
+.girando{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.25);
+  border-top-color:#fff;border-radius:50%;animation:gira .7s linear infinite;vertical-align:-2px;margin-right:7px}
+@keyframes gira{to{transform:rotate(360deg)}}
+
+/* ============================================================
+   ATALHOS  (/comando)
+   ============================================================ */
+.atalho-dica{display:inline-grid;place-items:center;min-width:19px;height:19px;padding:0 5px;
+  background:rgba(229,9,20,.2);color:#ff8a90;border-radius:5px;font-family:monospace;
+  font-size:.82rem;font-weight:700;vertical-align:1px}
+.nav-externo{text-decoration:none}
+.nav-externo .ico-sai{width:12px;height:12px;opacity:.45;flex:none}
+.nav-externo:hover .ico-sai{opacity:.9}
+
+/* menu que abre ao digitar "/" */
+.atalho-menu{position:absolute;bottom:calc(100% + 9px);left:14px;right:14px;max-height:330px;
+  overflow-y:auto;background:linear-gradient(165deg,#1c1c21,#131317);border:1px solid var(--linha);
+  border-radius:14px;box-shadow:0 -12px 44px rgba(0,0,0,.6);z-index:40}
+.atalho-menu-topo{padding:10px 14px;border-bottom:1px solid var(--linha);
+  font-family:var(--fonte-cond);font-weight:700;font-size:.82rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--cinza-2);position:sticky;top:0;background:#1c1c21}
+.atalho-menu-topo small{display:block;font-family:var(--fonte);font-weight:400;font-size:.7rem;
+  letter-spacing:0;text-transform:none;color:var(--cinza-2);margin-top:2px}
+.atalho-op{display:flex;gap:11px;padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(38,38,43,.5);
+  transition:background .15s}
+.atalho-op:hover,.atalho-op.marcado{background:rgba(229,9,20,.13)}
+.atalho-op-cmd{font-family:monospace;color:#ff8a90;font-size:.85rem;font-weight:700;flex:none;min-width:86px}
+.atalho-op-txt{min-width:0}
+.atalho-op-txt strong{display:block;font-size:.9rem}
+.atalho-op-txt small{color:var(--cinza);font-size:.79rem;display:block;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.chat-envio{position:relative}
+
+/* grade da aba de atalhos */
+.atalhos-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
+.atalho-cartao{background:linear-gradient(160deg,var(--carta),var(--grafite));border:1px solid var(--linha);
+  border-radius:13px;padding:16px;cursor:pointer;transition:border-color .2s,transform .2s var(--ease)}
+.atalho-cartao:hover{border-color:var(--vermelho);transform:translateY(-2px)}
+.atalho-cartao.inativo{opacity:.5}
+.ac-topo{display:flex;justify-content:space-between;align-items:center;gap:9px;margin-bottom:7px}
+.ac-cmd{font-family:monospace;color:#ff8a90;font-weight:700;font-size:.9rem}
+.ac-cat{font-size:.66rem;padding:2px 8px;border-radius:20px;background:rgba(255,255,255,.07);
+  color:var(--cinza);letter-spacing:.04em;text-transform:uppercase}
+.atalho-cartao h4{font-family:var(--fonte-cond);font-weight:700;font-size:1.06rem;margin-bottom:5px}
+.ac-corpo{color:var(--cinza);font-size:.85rem;line-height:1.5;white-space:pre-wrap;
+  display:-webkit-box;-webkit-line-clamp:3;line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ac-rodape{margin-top:9px;font-size:.72rem;color:var(--cinza-2)}
+
+.vars{display:flex;flex-wrap:wrap;gap:7px}
+.vars code{background:rgba(229,9,20,.12);color:#ff8a90;padding:3px 9px;border-radius:6px;
+  font-size:.79rem;cursor:pointer;transition:.15s}
+.vars code:hover{background:rgba(229,9,20,.25);color:#fff}
+.vars-mini code{font-size:.72rem;padding:2px 7px}
+.linha-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* ---------- CodeWords ---------- */
+.int-cab{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.int-cab h3{display:flex;align-items:center;gap:9px}
+.int-acoes{display:flex;align-items:center;gap:9px;margin-top:4px}
+.webhook-box{margin-top:16px;padding:14px;border-radius:11px;background:rgba(255,255,255,.03);
+  border:1px solid var(--linha)}
+.url-webhook{display:block;background:var(--preto);border:1px solid var(--linha);border-radius:8px;
+  padding:10px 12px;font-family:monospace;font-size:.79rem;color:#8fd3a0;word-break:break-all}
+.cw-status{margin-top:12px;font-size:.82rem;color:var(--cinza-2)}
+.cw-status b{color:#4ade80}
+.cw-status.erro b{color:#ff8a90}
+
+.btn-agendar{border:1px solid rgba(37,211,102,.4);color:#4ade80;background:rgba(37,211,102,.09)}
+.btn-agendar:hover{background:rgba(37,211,102,.18);color:#fff}
+
+/* ============================================================
+   RESPONSIVO
+   ============================================================ */
+@media (max-width:1180px){
+  .conversas-layout{grid-template-columns:290px 1fr}
+  .col-ficha{position:fixed;right:0;top:0;bottom:0;width:300px;z-index:60;
+    box-shadow:-14px 0 40px rgba(0,0,0,.5);transform:translateX(100%);transition:transform .3s var(--ease)}
+  .col-ficha.aberta{transform:none}
+}
+@media (max-width:900px){
+  .login-wrap{grid-template-columns:1fr}
+  .login-lado{display:none}
+  .app{flex-direction:column}
+  .sidebar{width:100%;flex-direction:row;align-items:center;gap:6px;padding:10px 12px;
+    border-right:none;border-bottom:1px solid var(--linha);overflow-x:auto}
+  .marca{padding:0 8px 0 0;flex:none}
+  .lg-sub{display:none}
+  .lg-indy,.lg-car{font-size:1.15rem}
+  .nav-item{width:auto;padding:9px;margin:0}
+  .nav-item span{display:none}
+  .sidebar-fim{margin:0 0 0 auto;padding:0;border:none;display:flex;align-items:center;gap:8px}
+  .usuario-txt,.sair{display:none}
+  .conversas-layout{grid-template-columns:1fr;height:calc(100vh - 57px)}
+  .linha-2{grid-template-columns:1fr}
+  .atalhos-grade{grid-template-columns:1fr}
+  /* No celular mostra UMA coluna por vez: a lista por padrão,
+     o chat quando .vendo-chat está no layout (nunca as duas sumirem juntas) */
+  .col-lista{display:flex}
+  .col-chat{display:none}
+  .conversas-layout.vendo-chat .col-lista{display:none}
+  .conversas-layout.vendo-chat .col-chat{display:flex}
+  .chat-voltar{display:inline-flex}
+  .conteudo{padding:18px 15px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms !important;transition-duration:.1s !important}
+}

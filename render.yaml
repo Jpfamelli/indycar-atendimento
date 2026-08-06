@@ -1,0 +1,28 @@
+# Deploy no Render — IndyCar Central de Atendimento
+#
+# Este arquivo documenta a configuração esperada. Atenção: se o serviço for
+# criado pela API (e não a partir deste blueprint), o Render IGNORA o arquivo
+# e as variáveis precisam ser criadas à mão ou por Environment Group.
+services:
+  - type: web
+    name: indycar-atendimento
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # O navegador fala direto com o Supabase usando a chave publicável;
+      # quem protege os dados é o login + RLS.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      # Necessária para o /api/enviar e o teste do CodeWords (gravam sem
+      # usuário logado). SEGREDO — ignora o RLS.
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Sugestão de resposta da IA (a chave nunca vai para o navegador)
+      - key: ANTHROPIC_API_KEY
+        sync: false

@@ -1,0 +1,16 @@
+{
+  "name": "indycar-atendimento",
+  "version": "0.1.0",
+  "description": "Central de atendimento WhatsApp da IndyCar — conversas, IA e integração com CRM e Agenda",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@supabase/supabase-js": "^2.112.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

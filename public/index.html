@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a0a0b" />
+  <title>IndyCar · Atendimento</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;1,800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' font-weight='bold' fill='%23e50914'>I</text></svg>" />
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="telaLogin" class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">
+      <span class="lg-indy">INDY</span><span class="lg-car">CAR</span>
+      <span class="lg-sub">CENTRO AUTOMOTIVO</span>
+    </div>
+    <h1>Bem-vindo!</h1>
+    <p class="login-sub">Informe seu e-mail e senha para entrar:</p>
+
+    <form id="formLogin" novalidate>
+      <label>E-mail
+        <input id="loginEmail" type="email" placeholder="seu@email.com" autocomplete="email" required />
+      </label>
+      <label>Senha
+        <input id="loginSenha" type="password" placeholder="••••••••" autocomplete="current-password" required />
+      </label>
+      <div id="loginErro" class="alerta" hidden></div>
+      <button type="submit" class="btn btn-primary full" id="btnEntrar">Entrar</button>
+    </form>
+
+    <div class="login-rodape">
+      <button type="button" class="link" id="btnCriarConta">Primeiro acesso? Criar conta</button>
+    </div>
+  </div>
+
+  <aside class="login-lado">
+    <div class="lado-conteudo">
+      <h2>Central de<br><span class="vermelho">Atendimento</span></h2>
+      <p>Todas as conversas do WhatsApp num lugar só — já ligadas ao cadastro
+         do cliente, ao funil do CRM e à agenda da oficina.</p>
+      <ul class="lado-lista">
+        <li>Histórico completo de cada cliente</li>
+        <li>Vê o horário marcado sem sair da conversa</li>
+        <li>Sugestão de resposta com IA</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+
+<!-- ============ APLICAÇÃO ============ -->
+<div id="telaApp" class="app" hidden>
+
+  <!-- Barra lateral -->
+  <nav class="sidebar">
+    <div class="marca">
+      <span class="lg-indy">INDY</span><span class="lg-car">CAR</span>
+      <span class="lg-sub">ATENDIMENTO</span>
+    </div>
+
+    <button class="nav-item ativo" data-aba="conversas">
+      <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z" fill="currentColor"/></svg>
+      <span>Conversas</span>
+      <b class="badge" id="badgeNaoLidas" hidden>0</b>
+    </button>
+    <button class="nav-item" data-aba="atalhos">
+      <svg viewBox="0 0 24 24"><path d="M13 2L4.5 13.5H11l-1 8.5 9.5-12.5H13l0-7.5z" fill="currentColor"/></svg>
+      <span>Atalhos <b class="atalho-dica">/</b></span>
+    </button>
+    <button class="nav-item" data-aba="ia">
+      <svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.2L21 9.3l-4.8 4.3 1.3 6.4L12 16.8 6.5 20l1.3-6.4L3 9.3l6.6-1.1L12 2z" fill="currentColor"/></svg>
+      <span>Inteligência Artificial</span>
+    </button>
+    <a class="nav-item nav-externo" id="linkCRM" href="http://localhost:3100" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
+      <span>Abrir o CRM</span>
+      <svg class="ico-sai" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M19 14v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+    </a>
+    <a class="nav-item nav-externo" id="linkAgenda" href="http://localhost:3000" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24"><path d="M7 2v3M17 2v3M3 8h18M5 5h14a2 2 0 012 2v13a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+      <span>Abrir a Agenda</span>
+      <svg class="ico-sai" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M19 14v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+    </a>
+    <button class="nav-item" data-aba="config">
+      <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 003.6 15a1.65 1.65 0 00-1.51-1H2a2 2 0 110-4h.09A1.65 1.65 0 003.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 008 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+      <span>Configurações</span>
+    </button>
+
+    <div class="sidebar-fim">
+      <div class="usuario" id="usuarioBox">
+        <span class="avatar" id="usuarioAvatar">?</span>
+        <div class="usuario-txt">
+          <strong id="usuarioNome">—</strong>
+          <small id="usuarioPapel">—</small>
+        </div>
+      </div>
+      <button class="link sair" id="btnSair">Sair</button>
+    </div>
+  </nav>
+
+  <!-- ---------- ABA: CONVERSAS ---------- -->
+  <section class="aba ativa" id="aba-conversas">
+    <div class="conversas-layout">
+
+      <!-- Lista -->
+      <div class="col-lista">
+        <div class="lista-topo">
+          <div class="busca">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <input id="buscaConversa" placeholder="Buscar cliente ou telefone…" />
+          </div>
+          <div class="filtros-status">
+            <button class="chip ativo" data-status="">Todas</button>
+            <button class="chip" data-status="aberta">Abertas</button>
+            <button class="chip" data-status="pendente">Pendentes</button>
+            <button class="chip" data-status="resolvida">Resolvidas</button>
+          </div>
+        </div>
+        <div class="lista-conversas" id="listaConversas"></div>
+      </div>
+
+      <!-- Chat -->
+      <div class="col-chat">
+        <div class="chat-vazio" id="chatVazio">
+          <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z" fill="currentColor"/></svg>
+          <p>Escolha uma conversa à esquerda para começar.</p>
+        </div>
+
+        <div class="chat" id="chat" hidden>
+          <header class="chat-topo">
+            <div class="chat-quem">
+              <button class="chat-voltar" id="btnVoltarLista" title="Voltar para as conversas">‹</button>
+              <span class="avatar" id="chatAvatar">?</span>
+              <div>
+                <strong id="chatNome">—</strong>
+                <small id="chatTelefone">—</small>
+              </div>
+            </div>
+            <div class="chat-acoes">
+              <button class="btn btn-agendar sm" id="btnAgendar" title="Agendar este cliente">
+                📅 Agendar
+              </button>
+              <select id="chatStatus" class="mini-select" title="Situação da conversa">
+                <option value="aberta">Aberta</option>
+                <option value="pendente">Pendente</option>
+                <option value="resolvida">Resolvida</option>
+              </select>
+              <button class="btn btn-ghost sm" id="btnPainelCliente" title="Mostrar/ocultar ficha">Ficha</button>
+            </div>
+          </header>
+
+          <div class="mensagens" id="mensagens"></div>
+
+          <footer class="chat-envio">
+            <!-- Menu que abre ao digitar "/" -->
+            <div class="atalho-menu" id="atalhoMenu" hidden>
+              <div class="atalho-menu-topo">
+                Atalhos <small>↑↓ para escolher · Enter para usar · Esc para fechar</small>
+              </div>
+              <div id="atalhoLista"></div>
+            </div>
+
+            <button class="btn btn-ia sm" id="btnSugerir" title="Sugerir resposta com IA">
+              <span class="ia-ico">✨</span> Sugerir
+            </button>
+            <textarea id="campoMensagem" rows="1"
+              placeholder="Escreva a resposta…  (digite / para usar um atalho)"></textarea>
+            <button class="btn btn-primary sm" id="btnEnviar">Enviar</button>
+          </footer>
+        </div>
+      </div>
+
+      <!-- Ficha do cliente: a integração com CRM + Agenda -->
+      <aside class="col-ficha" id="colFicha">
+        <div class="ficha-vazia" id="fichaVazia"><p>Sem conversa selecionada.</p></div>
+        <div id="fichaConteudo" hidden></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: ATALHOS ---------- -->
+  <section class="aba" id="aba-atalhos">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Atalhos de mensagem</h1>
+          <p>No chat, digite <b class="atalho-dica">/</b> e o nome do atalho para inserir a mensagem pronta.</p>
+        </div>
+        <button class="btn btn-primary sm" id="btnNovoAtalho">+ Novo atalho</button>
+      </header>
+
+      <div class="cartao" style="margin-bottom:18px">
+        <h3>Variáveis disponíveis</h3>
+        <p class="cartao-sub">Escreva na mensagem e o sistema troca pelo dado real do cliente na hora de usar.</p>
+        <div class="vars">
+          <code>{nome}</code><code>{primeiro_nome}</code><code>{carro}</code><code>{placa}</code>
+          <code>{servico}</code><code>{horario}</code><code>{consultor}</code><code>{atendente}</code>
+        </div>
+      </div>
+
+      <div class="filtros-status" id="filtrosCategoria" style="margin-bottom:14px">
+        <button class="chip ativo" data-cat="">Todos</button>
+        <button class="chip" data-cat="saudacao">Saudação</button>
+        <button class="chip" data-cat="venda">Venda</button>
+        <button class="chip" data-cat="agenda">Agenda</button>
+        <button class="chip" data-cat="pos_venda">Pós-venda</button>
+        <button class="chip" data-cat="geral">Geral</button>
+      </div>
+
+      <div class="atalhos-grade" id="atalhosGrade"></div>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: IA ---------- -->
+  <section class="aba" id="aba-ia">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Inteligência Artificial</h1>
+          <p>A IA lê o histórico do cliente no CRM e na agenda antes de sugerir a resposta.</p>
+        </div>
+        <span class="selo" id="seloIA">verificando…</span>
+      </header>
+
+      <div class="cartoes">
+        <div class="cartao">
+          <h3>Como funciona</h3>
+          <ol class="passos">
+            <li><b>Ela conhece a oficina.</b> Endereço, horário, serviços, garantia,
+                leva e traz e a especialidade em câmbio automático já estão na cabeça dela.</li>
+            <li><b>Ela conhece o cliente.</b> Antes de escrever, consulta o que a pessoa
+                já gastou, os serviços feitos e se tem horário marcado.</li>
+            <li><b>Você tem a palavra final.</b> A sugestão cai no campo de texto —
+                você lê, ajusta e só então envia.</li>
+          </ol>
+        </div>
+
+        <div class="cartao">
+          <h3>Testar agora</h3>
+          <p class="cartao-sub">Escreva uma mensagem como se fosse o cliente e veja o que a IA responderia.</p>
+          <textarea id="iaTeste" rows="3" placeholder="Ex.: Bom dia, quanto fica pra trocar o óleo do câmbio de um Corolla 2019?"></textarea>
+          <button class="btn btn-primary sm" id="btnTestarIA">Gerar resposta</button>
+          <div id="iaResultado" class="ia-saida" hidden></div>
+        </div>
+
+        <div class="cartao">
+          <h3>Resposta automática <span class="selo">em breve</span></h3>
+          <p class="cartao-sub">Hoje a IA <b>sugere</b> e você revisa antes de enviar — o botão
+            <b>✨ Sugerir</b> no chat. Ninguém responde ao cliente sem passar por você.</p>
+          <p class="aviso">Quem responde sozinho no WhatsApp é o <b>CodeWords</b>, do lado dele.
+            Uma chavinha para deixar a IA responder direto por aqui ainda não existe —
+            quando existir, ela aparece nesta parte.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: CONFIGURAÇÕES ---------- -->
+  <section class="aba" id="aba-config">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Configurações</h1>
+          <p>Conexão do WhatsApp e equipe de atendimento.</p>
+        </div>
+      </header>
+
+      <div class="cartoes">
+        <div class="cartao">
+          <h3>Meu perfil</h3>
+          <form id="formPerfil" class="form-vertical">
+            <label>Nome<input id="perfilNome" placeholder="Seu nome" /></label>
+            <label>E-mail<input id="perfilEmail" disabled /></label>
+            <label>Função<input id="perfilPapel" disabled /></label>
+            <button type="submit" class="btn btn-primary sm">Salvar</button>
+          </form>
+        </div>
+
+        <div class="cartao" id="cartaoWhatsapp">
+          <h3>WhatsApp (Cloud API)</h3>
+          <p class="cartao-sub">Sem isso, as mensagens entram manualmente. Com isso, o envio
+            e o recebimento acontecem de verdade pelo número da oficina.</p>
+          <form id="formWhatsapp" class="form-vertical">
+            <label>Número exibido<input name="numero_exibicao" placeholder="+55 12 99683-0272" /></label>
+            <label>Phone Number ID<input name="phone_number_id" placeholder="ID do número na Meta" /></label>
+            <label>WABA ID<input name="business_account_id" placeholder="ID da conta comercial" /></label>
+            <label>Access Token
+              <input name="access_token" type="password" placeholder="token permanente" data-secreto="1" />
+              <small class="mascara" id="maskToken"></small>
+            </label>
+            <label class="switch"><input type="checkbox" name="ativo" /><span>Enviar pela Cloud API</span></label>
+            <button type="submit" class="btn btn-primary sm">Salvar</button>
+          </form>
+          <p class="aviso" id="avisoAdmin" hidden>Só quem é admin pode alterar esta seção.</p>
+        </div>
+
+        <div class="cartao" id="cartaoCodeWords">
+          <div class="int-cab">
+            <h3>CodeWords <span class="selo" id="seloCW">—</span></h3>
+          </div>
+          <p class="cartao-sub">O CodeWords é quem fala com o WhatsApp. Este painel administra
+            os leads e manda as mensagens através dele.</p>
+
+          <form id="formCodeWords" class="form-vertical">
+            <label>Service ID do fluxo <small>o código que aparece no link do seu fluxo no CodeWords</small>
+              <input name="service_id" placeholder="ex.: 7f3a9c1b-…" autocomplete="off" />
+            </label>
+            <label>Chave de API
+              <input name="api_key" type="password" placeholder="cwk-…" autocomplete="off" data-secreto="1" />
+              <small class="mascara" id="maskCW"></small>
+            </label>
+            <label>URL de envio <small>deixe em branco — montamos sozinho:
+                https://runtime.codewords.ai/run/&lt;service id&gt;</small>
+              <input name="url_envio" placeholder="(automático)" autocomplete="off" />
+            </label>
+            <label>Token do webhook <small>segredo que o CodeWords manda de volta</small>
+              <input name="token_webhook" placeholder="invente uma senha qualquer" autocomplete="off" />
+            </label>
+            <label class="switch"><input type="checkbox" name="ativo" />
+              <span>Entregar mensagens pelo CodeWords</span></label>
+            <label class="switch"><input type="checkbox" name="responder_auto" />
+              <span>Deixar o CodeWords responder sozinho</span></label>
+
+            <div class="int-acoes">
+              <button type="button" class="btn btn-ghost sm" id="btnTestarCW">Testar conexão</button>
+              <div style="flex:1"></div>
+              <button type="submit" class="btn btn-primary sm">Salvar</button>
+            </div>
+          </form>
+
+          <div class="webhook-box">
+            <div class="ficha-titulo">Cole isto no CodeWords</div>
+            <p class="cartao-sub" style="margin-bottom:8px">Endereço que ele deve chamar quando o cliente mandar mensagem:</p>
+            <code class="url-webhook" id="urlWebhook">—</code>
+            <button class="btn btn-ghost sm" id="btnCopiarWebhook" style="margin-top:9px">Copiar</button>
+            <p class="aviso" id="avisoWebhook">Precisa de <b>dois</b> cabeçalhos:
+              <code>apikey</code> (a chave publicável, exigida pelo Supabase) e
+              <code>x-codewords-token</code> (o token acima, que é quem autentica).
+              O botão Copiar leva tudo pronto. Este endereço fica no ar 24h —
+              não depende deste computador.</p>
+          </div>
+
+          <div id="cwStatus" class="cw-status"></div>
+        </div>
+
+        <div class="cartao">
+          <h3>Equipe</h3>
+          <p class="cartao-sub">Quem tem acesso ao atendimento.</p>
+          <div id="listaEquipe" class="equipe"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Nova conversa -->
+<div class="modal-bg" id="modalNovaBg">
+  <div class="modal">
+    <button class="modal-x" data-fechar-modal>×</button>
+    <h3>Nova conversa</h3>
+    <form id="formNovaConversa" class="form-vertical">
+      <label>Telefone do cliente
+        <input id="novaTelefone" placeholder="(12) 99999-8888" required />
+      </label>
+      <label>Nome <small>opcional se o cliente já for cadastrado</small>
+        <input id="novaNome" placeholder="Nome do cliente" />
+      </label>
+      <button type="submit" class="btn btn-primary full">Abrir conversa</button>
+    </form>
+  </div>
+</div>
+
+<!-- Agendar: cria cliente + lead (CRM) + horário (Agenda) de uma vez -->
+<div class="modal-bg" id="modalAgendarBg">
+  <div class="modal">
+    <button class="modal-x" data-fechar="modalAgendarBg">×</button>
+    <h3>Agendar cliente</h3>
+    <p class="cartao-sub" id="agendarQuem">—</p>
+
+    <form id="formAgendar" class="form-vertical">
+      <div class="linha-2">
+        <label>Data<input type="date" name="data" required /></label>
+        <label>Hora<input type="time" name="hora" value="09:00" required /></label>
+      </div>
+      <label>Serviço
+        <select name="servico_id" id="agendarServico" required></select>
+      </label>
+      <div class="linha-2">
+        <label>Consultor<select name="consultor_id" id="agendarConsultor"></select></label>
+        <label>Valor previsto (R$)<input type="number" name="valor" min="0" step="0.01" placeholder="0,00" /></label>
+      </div>
+      <div class="linha-2">
+        <label>Carro<input name="veiculo" placeholder="Ex.: Corolla 2020" /></label>
+        <label>Placa<input name="placa" placeholder="ABC-1D23" /></label>
+      </div>
+      <label>Como chegou até nós
+        <select name="origem" id="agendarOrigem">
+          <option value="whatsapp">WhatsApp</option>
+          <option value="meta">Meta / Instagram</option>
+          <option value="google">Google</option>
+          <option value="indicacao">Indicação</option>
+          <option value="organico">Orgânico</option>
+          <option value="passagem">Passagem / Fachada</option>
+          <option value="telefone">Telefone</option>
+        </select>
+      </label>
+      <label>Observações<textarea name="observacoes" rows="2" placeholder="Algo importante sobre o serviço"></textarea></label>
+
+      <p class="aviso">Ao salvar, o cliente entra na <b>Agenda</b> e um lead é criado no <b>CRM</b>
+        com essa origem. Quando o serviço for concluído, o CRM fecha sozinho com o valor real.</p>
+      <button type="submit" class="btn btn-primary full">Confirmar agendamento</button>
+    </form>
+  </div>
+</div>
+
+<!-- Criar / editar atalho -->
+<div class="modal-bg" id="modalAtalhoBg">
+  <div class="modal">
+    <button class="modal-x" data-fechar="modalAtalhoBg">×</button>
+    <h3 id="tituloModalAtalho">Novo atalho</h3>
+
+    <form id="formAtalho" class="form-vertical">
+      <div class="linha-2">
+        <label>Comando <small>sem a barra</small>
+          <input name="comando" placeholder="bomdia" required />
+        </label>
+        <label>Categoria
+          <select name="categoria">
+            <option value="geral">Geral</option>
+            <option value="saudacao">Saudação</option>
+            <option value="venda">Venda</option>
+            <option value="agenda">Agenda</option>
+            <option value="pos_venda">Pós-venda</option>
+          </select>
+        </label>
+      </div>
+      <label>Título <small>como aparece na lista</small>
+        <input name="titulo" placeholder="Bom dia" required />
+      </label>
+      <label>Consultor <small>opcional — para mensagens de alguém específico</small>
+        <select name="consultor_id" id="atalhoConsultor"><option value="">Qualquer um</option></select>
+      </label>
+      <label>Mensagem
+        <textarea name="corpo" rows="6" required
+          placeholder="Bom dia, {primeiro_nome}! Aqui é da IndyCar…"></textarea>
+      </label>
+      <div class="vars vars-mini" id="varsAtalho"></div>
+      <label class="switch"><input type="checkbox" name="ativo" checked /><span>Atalho ativo</span></label>
+
+      <div class="int-acoes">
+        <button type="button" class="btn btn-ghost sm" id="btnExcluirAtalho" hidden>Excluir</button>
+        <div style="flex:1"></div>
+        <button type="submit" class="btn btn-primary sm">Salvar atalho</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
