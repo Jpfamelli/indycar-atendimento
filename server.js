@@ -23,7 +23,11 @@ try {
 }
 
 const PORT   = process.env.PORT || 3200;
-const HOST   = process.env.HOST || '127.0.0.1';
+/* Na nuvem (Render) TEM de ser 0.0.0.0 — preso em 127.0.0.1 o roteador do
+   Render nunca alcança o processo e o serviço responde por timeout.
+   Na máquina da oficina fica em 127.0.0.1. */
+const NA_NUVEM = !!(process.env.RENDER || process.env.PORT);
+const HOST   = process.env.HOST || (NA_NUVEM ? '0.0.0.0' : '127.0.0.1');
 const PUBLIC = path.join(__dirname, 'public');
 
 const SUPABASE_URL      = process.env.SUPABASE_URL || '';
