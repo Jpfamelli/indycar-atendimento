@@ -18,8 +18,9 @@
 <div id="telaLogin" class="login-wrap">
   <div class="login-card">
     <div class="login-logo">
-      <span class="lg-indy">INDY</span><span class="lg-car">CAR</span>
-      <span class="lg-sub">CENTRO AUTOMOTIVO</span>
+      <span class="logo-caixa">
+        <img class="logo-img" src="logo.png" alt="IndyCar Centro Automotivo" width="225" height="225" />
+      </span>
     </div>
     <h1>Bem-vindo!</h1>
     <p class="login-sub">Informe seu e-mail e senha para entrar:</p>
@@ -60,14 +61,24 @@
   <!-- Barra lateral -->
   <nav class="sidebar">
     <div class="marca">
-      <span class="lg-indy">INDY</span><span class="lg-car">CAR</span>
-      <span class="lg-sub">ATENDIMENTO</span>
+      <span class="logo-caixa">
+        <img class="logo-img" src="logo.png" alt="IndyCar Centro Automotivo" width="225" height="225" />
+      </span>
+      <span class="marca-sub">Atendimento</span>
     </div>
 
     <button class="nav-item ativo" data-aba="conversas">
       <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z" fill="currentColor"/></svg>
       <span>Conversas</span>
       <b class="badge" id="badgeNaoLidas" hidden>0</b>
+    </button>
+    <button class="nav-item" data-aba="funil">
+      <svg viewBox="0 0 24 24"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
+      <span>Funil</span>
+    </button>
+    <button class="nav-item" data-aba="etapas">
+      <svg viewBox="0 0 24 24"><path d="M4 6h11l3 3-3 3H4zM4 15h9l3 3-3 3H4z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M4 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Etapas</span>
     </button>
     <button class="nav-item" data-aba="atalhos">
       <svg viewBox="0 0 24 24"><path d="M13 2L4.5 13.5H11l-1 8.5 9.5-12.5H13l0-7.5z" fill="currentColor"/></svg>
@@ -76,6 +87,10 @@
     <button class="nav-item" data-aba="ia">
       <svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.2L21 9.3l-4.8 4.3 1.3 6.4L12 16.8 6.5 20l1.3-6.4L3 9.3l6.6-1.1L12 2z" fill="currentColor"/></svg>
       <span>Inteligência Artificial</span>
+    </button>
+    <button class="nav-item" data-aba="relatorios">
+      <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      <span>Relatórios</span>
     </button>
     <a class="nav-item nav-externo" id="linkCRM" href="http://localhost:3100" target="_blank" rel="noopener">
       <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
@@ -87,6 +102,10 @@
       <span>Abrir a Agenda</span>
       <svg class="ico-sai" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M19 14v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
     </a>
+    <button class="nav-item" data-aba="integracoes">
+      <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7L12.2 19" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      <span>Integrações</span>
+    </button>
     <button class="nav-item" data-aba="config">
       <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 003.6 15a1.65 1.65 0 00-1.51-1H2a2 2 0 110-4h.09A1.65 1.65 0 003.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 008 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
       <span>Configurações</span>
@@ -140,9 +159,14 @@
               <div>
                 <strong id="chatNome">—</strong>
                 <small id="chatTelefone">—</small>
+                <div id="chatEtapa" class="chat-etapa"></div>
               </div>
             </div>
             <div class="chat-acoes">
+              <button class="btn btn-ia sm" id="btnClassificar"
+                title="Deixar a IA dizer em que etapa do funil esta conversa está">
+                <span class="ia-ico">✨</span> Classificar
+              </button>
               <button class="btn btn-agendar sm" id="btnAgendar" title="Agendar este cliente">
                 📅 Agendar
               </button>
@@ -181,6 +205,50 @@
         <div class="ficha-vazia" id="fichaVazia"><p>Sem conversa selecionada.</p></div>
         <div id="fichaConteudo" hidden></div>
       </aside>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: FUNIL ---------- -->
+  <section class="aba" id="aba-funil">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Funil de atendimento</h1>
+          <p>Cada coluna é uma etapa. Arraste o cartão para mudar a etapa do cliente —
+             o CRM acompanha sozinho. No celular, toque no cartão para escolher a etapa.</p>
+        </div>
+        <button class="btn btn-ghost sm" id="btnRecarregarFunil">Atualizar</button>
+      </header>
+
+      <div id="funilResumo" class="kpis"></div>
+      <div id="funilQuadro" class="funil-quadro"></div>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: ETAPAS ---------- -->
+  <section class="aba" id="aba-etapas">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Etapas do funil</h1>
+          <p>As plaquinhas que aparecem em cada conversa. A <b>descrição</b> e os
+             <b>gatilhos</b> são exatamente o que a IA lê para decidir a etapa —
+             escreva pensando nela.</p>
+        </div>
+        <button class="btn btn-primary sm" id="btnNovaEtapa">+ Nova etapa</button>
+      </header>
+
+      <div class="cartao" id="cartaoIaFunil" style="margin-bottom:18px">
+        <h3>Classificação automática</h3>
+        <p class="cartao-sub">Com a chavinha ligada, toda vez que o cliente mandar uma
+          mensagem a IA relê a conversa e atualiza a plaquinha sozinha. Quando ela não
+          tiver certeza, deixa como está.</p>
+        <label class="switch"><input type="checkbox" id="chaveIaClassifica" />
+          <span>Deixar a IA classificar sozinha</span></label>
+        <p class="aviso" id="avisoIaFunil"></p>
+      </div>
+
+      <div id="listaEtapas" class="etapas-lista"></div>
     </div>
   </section>
 
@@ -261,45 +329,45 @@
     </div>
   </section>
 
-  <!-- ---------- ABA: CONFIGURAÇÕES ---------- -->
-  <section class="aba" id="aba-config">
+  <!-- ---------- ABA: RELATÓRIOS ---------- -->
+  <section class="aba" id="aba-relatorios">
     <div class="conteudo">
       <header class="pagina-topo">
         <div>
-          <h1>Configurações</h1>
-          <p>Conexão do WhatsApp e equipe de atendimento.</p>
+          <h1>Relatórios</h1>
+          <p>Leads, conversão e atendimento no período escolhido. Todo número vem do banco —
+             quando não houver dado, o gráfico avisa em vez de mostrar zero.</p>
+        </div>
+        <div class="periodo">
+          <div class="chips-periodo" id="relAtalhos">
+            <button class="chip" data-dias="7">7 dias</button>
+            <button class="chip ativo" data-dias="30">30 dias</button>
+            <button class="chip" data-dias="90">90 dias</button>
+          </div>
+          <div class="periodo-campos">
+            <label>De<input type="date" id="relDe" /></label>
+            <label>Até<input type="date" id="relAte" /></label>
+            <button class="btn btn-primary sm" id="btnRelAplicar">Aplicar</button>
+          </div>
+        </div>
+      </header>
+
+      <div id="relCorpo"></div>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: INTEGRAÇÕES ---------- -->
+  <section class="aba" id="aba-integracoes">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Integrações</h1>
+          <p>Os serviços de fora que este painel usa: o CodeWords, que fala com o WhatsApp,
+             e a Claude, que escreve as sugestões de resposta.</p>
         </div>
       </header>
 
       <div class="cartoes">
-        <div class="cartao">
-          <h3>Meu perfil</h3>
-          <form id="formPerfil" class="form-vertical">
-            <label>Nome<input id="perfilNome" placeholder="Seu nome" /></label>
-            <label>E-mail<input id="perfilEmail" disabled /></label>
-            <label>Função<input id="perfilPapel" disabled /></label>
-            <button type="submit" class="btn btn-primary sm">Salvar</button>
-          </form>
-        </div>
-
-        <div class="cartao" id="cartaoWhatsapp">
-          <h3>WhatsApp (Cloud API)</h3>
-          <p class="cartao-sub">Sem isso, as mensagens entram manualmente. Com isso, o envio
-            e o recebimento acontecem de verdade pelo número da oficina.</p>
-          <form id="formWhatsapp" class="form-vertical">
-            <label>Número exibido<input name="numero_exibicao" placeholder="+55 12 99683-0272" /></label>
-            <label>Phone Number ID<input name="phone_number_id" placeholder="ID do número na Meta" /></label>
-            <label>WABA ID<input name="business_account_id" placeholder="ID da conta comercial" /></label>
-            <label>Access Token
-              <input name="access_token" type="password" placeholder="token permanente" data-secreto="1" />
-              <small class="mascara" id="maskToken"></small>
-            </label>
-            <label class="switch"><input type="checkbox" name="ativo" /><span>Enviar pela Cloud API</span></label>
-            <button type="submit" class="btn btn-primary sm">Salvar</button>
-          </form>
-          <p class="aviso" id="avisoAdmin" hidden>Só quem é admin pode alterar esta seção.</p>
-        </div>
-
         <div class="cartao" id="cartaoCodeWords">
           <div class="int-cab">
             <h3>CodeWords <span class="selo" id="seloCW">—</span></h3>
@@ -334,6 +402,11 @@
             </div>
           </form>
 
+          <div class="ficha-bloco" style="margin-top:18px">
+            <div class="ficha-titulo">Fluxos cadastrados</div>
+            <div id="listaFluxos" class="fluxos"></div>
+          </div>
+
           <div class="webhook-box">
             <div class="ficha-titulo">Cole isto no CodeWords</div>
             <p class="cartao-sub" style="margin-bottom:8px">Endereço que ele deve chamar quando o cliente mandar mensagem:</p>
@@ -349,6 +422,65 @@
           <div id="cwStatus" class="cw-status"></div>
         </div>
 
+        <div class="cartao" id="cartaoClaude">
+          <div class="int-cab">
+            <h3>Claude · Inteligência Artificial <span class="selo" id="seloIAInt">—</span></h3>
+          </div>
+          <p class="cartao-sub">É a Claude quem escreve as sugestões do botão
+            <b>✨ Sugerir</b> e as respostas de teste da aba de IA.</p>
+
+          <div class="ficha-linha"><span>Chave da API</span><b id="iaChaveEstado">—</b></div>
+          <div class="ficha-linha"><span>Modelo em uso</span><b id="iaModelo">—</b></div>
+          <div class="ficha-linha"><span>Onde a chave fica</span><b>Só no servidor</b></div>
+
+          <p class="aviso">A chave da Claude nunca passa pelo navegador. Ela é lida do arquivo
+            <code>.env</code> do servidor, no campo <code>ANTHROPIC_API_KEY</code> — e o modelo,
+            em <code>MODELO_IA</code>. Para trocar qualquer um dos dois, edite o arquivo e
+            reinicie o servidor. Por segurança, esta tela não pede nem aceita a chave.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: CONFIGURAÇÕES ---------- -->
+  <section class="aba" id="aba-config">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Configurações</h1>
+          <p>Seu perfil, a conexão do WhatsApp e a equipe de atendimento.</p>
+        </div>
+      </header>
+
+      <div class="cartoes">
+        <div class="cartao">
+          <h3>Meu perfil</h3>
+          <form id="formPerfil" class="form-vertical">
+            <label>Nome<input id="perfilNome" placeholder="Seu nome" /></label>
+            <label>E-mail<input id="perfilEmail" disabled /></label>
+            <label>Função<input id="perfilPapel" disabled /></label>
+            <button type="submit" class="btn btn-primary sm">Salvar</button>
+          </form>
+        </div>
+
+        <div class="cartao" id="cartaoWhatsapp">
+          <h3>WhatsApp (Cloud API)</h3>
+          <p class="cartao-sub">Sem isso, as mensagens entram manualmente. Com isso, o envio
+            e o recebimento acontecem de verdade pelo número da oficina.</p>
+          <form id="formWhatsapp" class="form-vertical">
+            <label>Número exibido<input name="numero_exibicao" placeholder="+55 12 99683-0272" /></label>
+            <label>Phone Number ID<input name="phone_number_id" placeholder="ID do número na Meta" /></label>
+            <label>WABA ID<input name="business_account_id" placeholder="ID da conta comercial" /></label>
+            <label>Access Token
+              <input name="access_token" type="password" placeholder="token permanente" data-secreto="1" />
+              <small class="mascara" id="maskToken"></small>
+            </label>
+            <label class="switch"><input type="checkbox" name="ativo" /><span>Enviar pela Cloud API</span></label>
+            <button type="submit" class="btn btn-primary sm">Salvar</button>
+          </form>
+          <p class="aviso" id="avisoAdmin" hidden>Só quem é admin pode alterar esta seção.</p>
+        </div>
+
         <div class="cartao">
           <h3>Equipe</h3>
           <p class="cartao-sub">Quem tem acesso ao atendimento.</p>
@@ -360,6 +492,81 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Menu flutuante para trocar a etapa (plaquinhas e cartões do funil) -->
+<div class="menu-etapas" id="menuEtapas" hidden>
+  <div class="menu-etapas-topo">Mover para a etapa</div>
+  <div id="menuEtapasLista"></div>
+</div>
+
+<!-- Criar / editar etapa -->
+<div class="modal-bg" id="modalEtapaBg">
+  <div class="modal">
+    <button class="modal-x" data-fechar="modalEtapaBg">×</button>
+    <h3 id="tituloModalEtapa">Nova etapa</h3>
+
+    <form id="formEtapa" class="form-vertical">
+      <div class="linha-2">
+        <label>Nome <small>é o que aparece na plaquinha</small>
+          <input name="nome" placeholder="Ex.: Aguardando orçamento" required maxlength="60" />
+        </label>
+        <label>Emoji <small>opcional</small>
+          <input name="emoji" placeholder="📋" maxlength="4" />
+        </label>
+      </div>
+
+      <div class="linha-2">
+        <label>Cor da plaquinha
+          <input type="color" name="cor" value="#6366f1" class="campo-cor" />
+        </label>
+        <label>Ordem <small>menor aparece primeiro</small>
+          <input type="number" name="ordem" min="0" step="1" value="0" />
+        </label>
+      </div>
+
+      <label>Situação equivalente no CRM
+        <select name="status_lead">
+          <option value="">Não mexer no CRM</option>
+          <option value="novo">Novo</option>
+          <option value="contato">Contato</option>
+          <option value="orcamento">Orçamento</option>
+          <option value="agendado">Agendado</option>
+          <option value="em_servico">Em serviço</option>
+          <option value="concluido">Concluído</option>
+          <option value="perdido">Perdido</option>
+        </select>
+      </label>
+
+      <label>Descrição <small>a IA lê isto para reconhecer a etapa</small>
+        <textarea name="descricao" rows="2"
+          placeholder="Ex.: Cliente pediu preço e está esperando a resposta da oficina."></textarea>
+      </label>
+
+      <label>Gatilhos <small>palavras separadas por vírgula — a IA usa como pista</small>
+        <textarea name="gatilhos" rows="2"
+          placeholder="quanto custa, qual o valor, preço, orçamento"></textarea>
+      </label>
+
+      <p class="aviso">A <b>descrição</b> e os <b>gatilhos</b> são o texto que vai para a
+        IA quando ela decide a etapa de uma conversa. Quanto mais claro aqui, melhor lá.</p>
+
+      <div class="linha-2">
+        <label class="switch"><input type="checkbox" name="ganho" />
+          <span>Conta como venda ganha</span></label>
+        <label class="switch"><input type="checkbox" name="perda" />
+          <span>Conta como venda perdida</span></label>
+      </div>
+      <label class="switch"><input type="checkbox" name="ativa" checked />
+        <span>Etapa ativa (aparece no funil e nos menus)</span></label>
+
+      <div class="int-acoes">
+        <button type="button" class="btn btn-ghost sm" id="btnExcluirEtapa" hidden>Excluir</button>
+        <div style="flex:1"></div>
+        <button type="submit" class="btn btn-primary sm">Salvar etapa</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <!-- Nova conversa -->
 <div class="modal-bg" id="modalNovaBg">
