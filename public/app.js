@@ -711,21 +711,72 @@ $('#formPerfil').addEventListener('submit', async e => {
 });
 
 async function carregarEquipe() {
+  const ehAdmin = perfil?.papel === 'admin';
+  $('#blocoCadastro').hidden  = !ehAdmin;   // só o dono cadastra
+  $('#avisoCadastro').hidden  = ehAdmin;
   try {
     const { data } = await sb.from('perfis').select('*').order('created_at');
     const el = $('#listaEquipe');
     const lista = data || [];
     el.innerHTML = lista.length ? lista.map(p => `
-      <div class="equipe-item">
+      <div class="equipe-item${p.ativo ? '' : ' inativo'}">
         <span class="avatar">${esc(iniciais(p.nome))}</span>
-        <div><strong>${esc(p.nome)}</strong><br><small>${esc(p.email)} ·
-          ${p.papel === 'admin' ? 'Administrador' : 'Atendente'}</small></div>
+        <div class="equipe-txt">
+          <strong>${esc(p.nome)}</strong><br><small>${esc(p.email)} ·
+          ${p.papel === 'admin' ? 'Administrador' : 'Atendente'}${p.ativo ? '' : ' · sem acesso'}</small>
+        </div>
+        ${ehAdmin && p.id !== perfil.id ? `<button class="btn btn-ghost sm" data-membro="${esc(p.id)}"
+            data-ativar="${p.ativo ? '0' : '1'}">${p.ativo ? 'Tirar acesso' : 'Devolver acesso'}</button>` : ''}
       </div>`).join('')
       : '<div class="vazio">Só você por enquanto.</div>';
+
+    // ligar/desligar o acesso de alguém
+    $$('#listaEquipe [data-membro]').forEach(b => b.addEventListener('click', async () => {
+      const ativar = b.dataset.ativar === '1';
+      if (!ativar && !confirm('Tirar o acesso desta pessoa? Ela não conseguirá mais entrar.')) return;
+      b.disabled = true;
+      try {
+        const r = await (await fetch('/api/equipe/ativo', {
+          method: 'POST', headers: await authCabecalhos(),
+          body: JSON.stringify({ id: b.dataset.membro, ativo: ativar }),
+        })).json();
+        if (!r.ok) throw new Error(r.erro || 'não consegui alterar');
+        toast(ativar ? '✅ Acesso devolvido' : '🔒 Acesso removido');
+        await carregarEquipe();
+      } catch (err) { toast('⚠️ ' + err.message); b.disabled = false; }
+    }));
   } catch {
     $('#listaEquipe').innerHTML = '<div class="vazio">Você vê apenas o seu próprio perfil.</div>';
   }
 }
+
+/* Cadastro feito pelo servidor: no plano free o Supabase limita o e-mail de
+   confirmação, então signUp pela tela trava. E cadastro aberto num sistema com
+   dado de cliente seria porta destrancada — quem entra é quem o dono cadastrou. */
+$('#formNovoMembro').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, btn = $('#btnNovoMembro');
+  btn.disabled = true; btn.textContent = 'Cadastrando…';
+  try {
+    const r = await (await fetch('/api/equipe', {
+      method: 'POST', headers: await authCabecalhos(),
+      body: JSON.stringify({
+        nome:  f.nome.value.trim(),
+        email: f.email.value.trim(),
+        senha: f.senha.value,
+        papel: f.papel.value,
+      }),
+    })).json();
+    if (!r.ok) throw new Error(r.erro || 'não consegui cadastrar');
+    toast(`✅ ${r.nome} cadastrado — entregue o e-mail e a senha para a pessoa`);
+    f.reset();
+    await carregarEquipe();
+  } catch (err) {
+    toast('⚠️ ' + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Cadastrar';
+  }
+});
 
 const MASCARA = '•';
 async function carregarWhatsappConfig() {

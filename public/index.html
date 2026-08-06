@@ -483,8 +483,41 @@
 
         <div class="cartao">
           <h3>Equipe</h3>
-          <p class="cartao-sub">Quem tem acesso ao atendimento.</p>
+          <p class="cartao-sub">Quem tem acesso ao atendimento, ao CRM e à agenda —
+            é o mesmo login nos três.</p>
           <div id="listaEquipe" class="equipe"></div>
+
+          <div id="blocoCadastro" hidden>
+            <h4 class="sub-titulo">Cadastrar funcionário</h4>
+            <p class="aviso">Você cria a conta e entrega o e-mail e a senha para a pessoa.
+              Ela já entra funcionando, sem e-mail de confirmação. Peça para trocar a senha depois.</p>
+            <form id="formNovoMembro" class="form-vertical">
+              <label>Nome
+                <input name="nome" required maxlength="80" placeholder="Ex.: Leonardo Alves" autocomplete="off" />
+              </label>
+              <label>E-mail
+                <input name="email" type="email" required maxlength="160"
+                       placeholder="leonardo@indycartaubate.com" autocomplete="off" />
+              </label>
+              <label>Senha provisória
+                <input name="senha" type="password" required minlength="8" maxlength="200"
+                       placeholder="pelo menos 8 caracteres" autocomplete="new-password" />
+                <small class="mascara">Entregue essa senha para a pessoa e peça para trocar.</small>
+              </label>
+              <label>Função
+                <select name="papel">
+                  <option value="atendente">Atendente — vê conversas, funil e agenda</option>
+                  <option value="admin">Administrador — também mexe nas configurações e relatórios</option>
+                </select>
+              </label>
+              <div class="int-acoes">
+                <div style="flex:1"></div>
+                <button type="submit" class="btn btn-primary sm" id="btnNovoMembro">Cadastrar</button>
+              </div>
+            </form>
+          </div>
+
+          <p class="aviso" id="avisoCadastro" hidden>Só o administrador cadastra novos funcionários.</p>
         </div>
       </div>
     </div>

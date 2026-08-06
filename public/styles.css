@@ -638,3 +638,11 @@ select option:checked,select option:hover{
   .etapa-acoes .btn{flex:1;min-width:78px}
   .chat-acoes{flex-wrap:wrap;justify-content:flex-end}
 }
+
+/* Equipe — cadastro e estado do acesso */
+.sub-titulo{font-family:var(--fonte-cond);font-weight:700;font-size:1.05rem;
+  margin:22px 0 6px;padding-top:18px;border-top:1px solid var(--linha)}
+.equipe-item{display:flex;align-items:center;gap:11px}
+.equipe-item .equipe-txt{flex:1;min-width:0}
+.equipe-item.inativo{opacity:.55}
+.equipe-item.inativo strong{text-decoration:line-through}

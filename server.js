@@ -1110,6 +1110,82 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ---- IA: qual etapa do funil descreve esta conversa agora? ----
+    /* ---- Equipe: o admin cadastra o funcionário ----
+       Feito pelo servidor com a chave de serviço, e não por signUp na tela,
+       por dois motivos: (1) o plano free do Supabase limita o envio de e-mail
+       de confirmação — cadastro pela tela trava em "over_email_send_rate_limit";
+       (2) cadastro aberto num sistema com dado de cliente é porta destrancada.
+       Quem entra é quem o dono cadastrou. */
+    if (pathname === '/api/equipe' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login para cadastrar alguém.' });
+      if (quem.papel !== 'admin') {
+        return json(res, 403, { erro: 'Só o administrador cadastra a equipe.' });
+      }
+      if (!dentroDoLimite(`equipe:${quem.id}`, 10, 60_000)) {
+        return json(res, 429, { erro: 'Muitos cadastros seguidos. Espere um minuto.' });
+      }
+
+      const bruto = await readBody(req);
+      const nome  = texto1(bruto.nome, 80).trim();
+      const email = texto1(bruto.email, 160).trim().toLowerCase();
+      const senha = texto1(bruto.senha, 200);
+      const papel = bruto.papel === 'admin' ? 'admin' : 'atendente';
+
+      if (!nome)  return json(res, 400, { erro: 'Informe o nome da pessoa.' });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+        return json(res, 400, { erro: 'Esse e-mail não parece válido.' });
+      }
+      if (senha.length < 8) {
+        return json(res, 400, { erro: 'A senha precisa ter pelo menos 8 caracteres.' });
+      }
+
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      // email_confirm: já entra valendo, sem depender de e-mail de confirmação
+      const { data, error } = await sb.auth.admin.createUser({
+        email, password: senha, email_confirm: true,
+        user_metadata: { nome },
+      });
+
+      if (error) {
+        const jaExiste = /already been registered|already exists/i.test(error.message);
+        return json(res, jaExiste ? 409 : 400, {
+          erro: jaExiste ? 'Já existe alguém cadastrado com esse e-mail.' : error.message });
+      }
+
+      // o gatilho cria o perfil; aqui só acertamos nome e papel
+      const { error: erroPerfil } = await sb.from('perfis')
+        .update({ nome, papel, ativo: true }).eq('id', data.user.id);
+      if (erroPerfil) {
+        return json(res, 200, { ok: true, id: data.user.id, nome, email, papel,
+          aviso: 'Usuário criado, mas não consegui ajustar o perfil: ' + erroPerfil.message });
+      }
+      return json(res, 201, { ok: true, id: data.user.id, nome, email, papel });
+    }
+
+    /* ---- Equipe: ligar/desligar o acesso de alguém ---- */
+    if (pathname === '/api/equipe/ativo' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') return json(res, 403, { erro: 'Só o administrador faz isso.' });
+
+      const bruto = await readBody(req);
+      const id = texto1(bruto.id, 60);
+      if (!ehUuid(id)) return json(res, 400, { erro: 'Informe quem você quer alterar.' });
+      if (id === quem.id) {
+        return json(res, 400, { erro: 'Você não pode desligar o próprio acesso.' });
+      }
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      const { error } = await sb.from('perfis')
+        .update({ ativo: bruto.ativo === true }).eq('id', id);
+      if (error) return json(res, 500, { erro: error.message });
+      return json(res, 200, { ok: true, ativo: bruto.ativo === true });
+    }
+
     if (pathname === '/api/ia/classificar' && req.method === 'POST') {
       const quem = await usuarioLogado(req);
       if (!quem) return json(res, 401, { erro: 'Faça login para usar a IA.' });
