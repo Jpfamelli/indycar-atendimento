@@ -362,32 +362,56 @@ async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
   const { data: cfg } = await sb.from('codewords_config').select('*').maybeSingle();
   if (!cfg?.ativo) return { ok:false, erro:'Integração com o CodeWords está desligada.', desligado:true };
 
-  // Se não houver URL explícita, monta a padrão do CodeWords a partir do Service ID
-  const destino = cfg.url_envio || (cfg.service_id
-    ? `https://runtime.codewords.ai/run/${cfg.service_id}` : null);
+  /* DOIS CAMINHOS DE ENVIO.
+     "dispositivo" (o que funciona): fala com o aparelho pareado, pelo proxy do
+     whatsapp_device_manager. Corpo em form-urlencoded — com JSON o GOWA
+     devolve erro.
+     "fluxo": posta no service_id. O fluxo do Carlos RECEBE mensagens do
+     WhatsApp; para envio ele responde {"status":"skip","message":"Own message
+     or empty"} com HTTP 200 — ou seja, o painel dizia "enviado" e a mensagem
+     nunca chegava ao cliente. Fica só como alternativa manual. */
+  const base = (cfg.base_url || 'https://runtime.codewords.ai').replace(/\/+$/, '');
+  const porDispositivo = cfg.modo_envio !== 'fluxo';
+
+  if (porDispositivo && !cfg.device_id) {
+    return { ok:false, desligado:true,
+      erro:'Falta o aparelho do WhatsApp. Conecte pelo QR na Agenda ou informe o Device ID.' };
+  }
+
+  const destino = porDispositivo
+    ? `${base}/run/${cfg.servico_conexao || 'whatsapp_device_manager'}`
+      + `/proxy/send/message?device_id=${encodeURIComponent(cfg.device_id)}`
+    : (cfg.url_envio || (cfg.service_id ? `${base}/run/${cfg.service_id}` : null));
+
   if (!destino) {
     return { ok:false, desligado:true,
       erro:'Informe o Service ID do seu fluxo no CodeWords (ou a URL completa de envio).' };
   }
 
-  const cabecalhos = { 'Content-Type': 'application/json',
-                       ...(cfg.cabecalho_extra || {}) };
+  const cabecalhos = { ...(cfg.cabecalho_extra || {}) };
   if (cfg.api_key) {
-    cabecalhos['Authorization'] = `Bearer ${cfg.api_key}`;
+    // o proxy do device manager espera a chave crua; o /run também aceita
+    cabecalhos['Authorization'] = porDispositivo ? cfg.api_key : `Bearer ${cfg.api_key}`;
     cabecalhos['X-API-Key'] = cfg.api_key;   // cobre as duas convenções
   }
 
-  try {
-    const resposta = await fetch(destino, {
-      method: 'POST', headers: cabecalhos,
-      body: JSON.stringify({
+  const numero = soDigitos(telefone);
+  const carga = porDispositivo
+    ? new URLSearchParams({ phone: numero, message: corpo }).toString()
+    : JSON.stringify({
         service_id: cfg.service_id || undefined,
         telefone, phone: telefone,        // nomes alternativos, por compatibilidade
         mensagem: corpo, message: corpo,
         nome, conversa_id: conversaId,
         origem: 'indycar-atendimento',
-      }),
-      signal: AbortSignal.timeout(20000),
+      });
+  cabecalhos['Content-Type'] = porDispositivo
+    ? 'application/x-www-form-urlencoded' : 'application/json';
+
+  try {
+    const resposta = await fetch(destino, {
+      method: 'POST', headers: cabecalhos, body: carga,
+      signal: AbortSignal.timeout(30000),
     });
 
     const txt = await resposta.text();
@@ -409,12 +433,37 @@ async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
       return { ok:false, erro };
     }
 
+    /* HTTP 200 NÃO basta. O fluxo do Carlos devolve 200 com
+       {"status":"skip","message":"Own message or empty"} e a mensagem some.
+       Antes disso passar por sucesso, o painel dizia "enviado" e o cliente
+       nunca recebia — o pior tipo de defeito, porque ninguém percebe. */
+    let entregue = true, detalhe = '';
+    try {
+      const j = JSON.parse(txt);
+      const estado = String(j.status ?? j.code ?? '').toLowerCase();
+      if (estado === 'skip' || estado === 'error' || estado === 'failed' || j.error) {
+        entregue = false;
+        detalhe = String(j.message || j.error || txt).slice(0, 160);
+      }
+    } catch { /* resposta sem JSON: aceita, não dá para afirmar que falhou */ }
+
+    if (!entregue) {
+      const erro = /own message or empty/i.test(detalhe)
+        ? 'O fluxo do CodeWords ignorou a mensagem (ele só recebe, não envia). '
+        + 'Em Integrações, deixe o envio no modo "aparelho do WhatsApp".'
+        : `O CodeWords não entregou: ${detalhe}`;
+      await sb.from('codewords_config').update({ ultimo_erro: erro }).eq('id', true);
+      await registrarEvento(sb, { direcao:'saida', sucesso:false, telefone,
+        resumo: corpo.slice(0,120), erro });
+      return { ok:false, erro };
+    }
+
     await sb.from('codewords_config').update({
       ultimo_evento_em: new Date().toISOString(), ultimo_erro: null }).eq('id', true);
     await registrarEvento(sb, { direcao:'saida', sucesso:true, telefone, resumo: corpo.slice(0,120) });
     return { ok:true, resposta: txt.slice(0, 500) };
   } catch (err) {
-    const msg = err.name === 'TimeoutError' ? 'CodeWords não respondeu a tempo (20s)' : err.message;
+    const msg = err.name === 'TimeoutError' ? 'CodeWords não respondeu a tempo (30s)' : err.message;
     await sb.from('codewords_config').update({ ultimo_erro: msg }).eq('id', true);
     await registrarEvento(sb, { direcao:'saida', sucesso:false, telefone,
       resumo: corpo.slice(0,120), erro: msg });
