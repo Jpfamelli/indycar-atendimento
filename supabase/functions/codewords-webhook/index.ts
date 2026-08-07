@@ -111,9 +111,24 @@ Deno.serve(async (req: Request) => {
     return json(400, { erro: "informe telefone e mensagem", recebido: Object.keys(body).slice(0, 20) });
   }
 
+  /* DIREÇÃO — o Carlos repassa TAMBÉM o que ele mesmo responde, e sem isto
+     tudo entrava como se fosse fala do cliente: o atendente via a saudação
+     da IA como se o cliente tivesse escrito, e a classificação lia errado.
+     Procuramos qualquer pista no payload; na dúvida, tratamos como entrada. */
+  const pista = String(
+    body.direcao ?? body.direction ?? body.tipo ?? body.type ??
+    body.sender_type ?? body.origem_mensagem ?? "",
+  ).toLowerCase();
+  const deMim = body.from_me === true || body.fromMe === true ||
+                body.is_from_me === true || body.self === true ||
+                body.echo === true || body.outgoing === true ||
+                /sa[ií]da|out|outgoing|bot|agent|assistant|system/.test(pista);
+  const direcao = deMim ? "saida" : "entrada";
+
   const { error } = await sb.from("whatsapp_mensagens").insert({
     telefone, nome, corpo: texto,
-    direcao: "entrada", status: "recebido",
+    direcao, status: deMim ? "enviado" : "recebido",
+    gerada_por_ia: deMim,
     wamid: texto1(body.wamid || body.message_id, 120) || null,
   });
 
@@ -126,8 +141,10 @@ Deno.serve(async (req: Request) => {
   await sb.from("codewords_config")
     .update({ ultimo_evento_em: new Date().toISOString(), ultimo_erro: null })
     .eq("id", true);
+  // Guarda o payload também quando dá certo: é a única forma de descobrir
+  // quais campos o CodeWords manda (ex.: se existe marca de direção).
   await registrarEvento({ direcao: "entrada", sucesso: true,
-    telefone, resumo: texto.slice(0, 120) });
+    telefone, resumo: texto.slice(0, 120), payload: recortarPayload(body) });
 
   return json(200, { ok: true });
 });
