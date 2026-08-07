@@ -343,6 +343,7 @@ async function abrirConversa(id) {
   $('#chatAvatar').textContent = iniciais(conv.nome || conv.telefone);
   $('#chatStatus').value = conv.status;
   renderEtapaDoChat();
+  renderBotaoAssumir();
 
   // No celular, abrir a conversa troca a lista pelo chat
   $('.conversas-layout').classList.add('vendo-chat');
@@ -1049,6 +1050,78 @@ $('#btnVoltarLista').addEventListener('click', () => {
 /* ============================================================
    AGENDAR  —  cria cliente + lead (CRM) + horário (Agenda)
    ============================================================ */
+/* ============================================================
+   ASSUMIR O ATENDIMENTO
+   Ao assumir, o Carlos para de responder ESTE cliente (/stop-ai no
+   fluxo dele) e a conversa vai para "Em atendimento" no funil.
+   Ao devolver, ele volta a atender (/start-ai).
+   ============================================================ */
+function renderBotaoAssumir() {
+  const b = $('#btnAssumir');
+  if (!b || !conversaAtual) return;
+  const minha  = conversaAtual.atribuida_a === perfil?.id;
+  const deOutro = conversaAtual.atribuida_a && !minha;
+
+  if (minha) {
+    b.textContent = '↩️ Devolver para a IA';
+    b.title = 'Devolver este cliente para o Carlos atender';
+    b.classList.add('assumido');
+  } else if (deOutro) {
+    b.textContent = '🙋 Assumir';
+    b.title = 'Esta conversa já está com outro atendente';
+    b.classList.remove('assumido');
+  } else {
+    b.textContent = '🙋 Assumir';
+    b.title = 'Assumir este atendimento — o Carlos para de responder este cliente';
+    b.classList.remove('assumido');
+  }
+}
+
+async function assumirAtendimento(assumir, forcar = false) {
+  const b = $('#btnAssumir');
+  const original = b.textContent;
+  b.disabled = true;
+  b.innerHTML = '<span class="girando"></span>' + (assumir ? 'Assumindo…' : 'Devolvendo…');
+  try {
+    const r = await (await fetch('/api/conversas/assumir', {
+      method: 'POST', headers: await authCabecalhos(),
+      body: JSON.stringify({ conversaId: conversaAtual.id, assumir, forcar }),
+    })).json();
+
+    // já é de outra pessoa: pergunta antes de tomar
+    if (r.precisaConfirmar) {
+      if (confirm(`${r.erro}\n\nAssumir mesmo assim?`)) {
+        b.disabled = false; b.textContent = original;
+        return assumirAtendimento(assumir, true);
+      }
+      return;
+    }
+    if (!r.ok) throw new Error(r.erro || 'não consegui alterar');
+
+    conversaAtual.atribuida_a = assumir ? perfil.id : null;
+    conversaAtual.ia_ativa    = !assumir;
+    await carregarConversas();
+    if (abaVisivel('funil')) await carregarFunil();
+    const atual = CONVERSAS.find(c => c.id === conversaAtual.id);
+    if (atual) { conversaAtual = atual; renderEtapaDoChat(); }
+
+    if (r.aviso) toast('⚠️ ' + r.aviso);
+    else toast(assumir
+      ? '🙋 Atendimento assumido — o Carlos parou de responder este cliente'
+      : '↩️ Devolvido — o Carlos voltou a atender este cliente');
+  } catch (err) {
+    toast('⚠️ ' + err.message);
+  } finally {
+    b.disabled = false;
+    renderBotaoAssumir();
+  }
+}
+
+$('#btnAssumir').addEventListener('click', () => {
+  if (!conversaAtual) return toast('Abra uma conversa primeiro.');
+  assumirAtendimento(conversaAtual.atribuida_a !== perfil?.id);
+});
+
 $('#btnAgendar').addEventListener('click', () => {
   if (!conversaAtual) return;
   $('#agendarQuem').textContent =

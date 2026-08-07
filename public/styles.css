@@ -646,3 +646,9 @@ select option:checked,select option:hover{
 .equipe-item .equipe-txt{flex:1;min-width:0}
 .equipe-item.inativo{opacity:.55}
 .equipe-item.inativo strong{text-decoration:line-through}
+
+/* Botão de assumir o atendimento */
+.btn-assumir{background:rgba(14,165,233,.14);border:1px solid rgba(14,165,233,.5);color:#7dd3fc}
+.btn-assumir:hover:not(:disabled){background:rgba(14,165,233,.24);color:#bae6fd}
+.btn-assumir.assumido{background:rgba(34,197,94,.14);border-color:rgba(34,197,94,.5);color:#86efac}
+.btn-assumir.assumido:hover:not(:disabled){background:rgba(34,197,94,.24);color:#bbf7d0}

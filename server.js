@@ -275,6 +275,38 @@ async function usuarioLogado(req) {
   } catch { return null; }
 }
 
+/* Liga e desliga a IA do WhatsApp (o Carlos) para UM cliente.
+   O fluxo dele expõe /stop-ai e /start-ai, cada um recebendo { phone }.
+   Sem isso, o atendente humano e o Carlos responderiam ao mesmo tempo. */
+async function pausarCarlos(sb, telefone, pausar) {
+  try {
+    const { data: cfg } = await sb.from('codewords_config')
+      .select('api_key, service_id, base_url').maybeSingle();
+    if (!cfg?.api_key || !cfg?.service_id) {
+      return { ok: false, erro: 'CodeWords não configurado' };
+    }
+    const base = (cfg.base_url || 'https://runtime.codewords.ai').replace(/\/+$/, '');
+    const rota = pausar ? 'stop-ai' : 'start-ai';
+
+    const r = await fetch(`${base}/run/${cfg.service_id}/${rota}`, {
+      method: 'POST',
+      headers: { Authorization: cfg.api_key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: soDigitos(telefone) }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const txt = await r.text();
+    if (!r.ok) return { ok: false, erro: `o CodeWords respondeu ${r.status}` };
+
+    await registrarEvento(sb, { direcao: 'saida', sucesso: true, telefone,
+      resumo: pausar ? 'IA do WhatsApp pausada (atendente assumiu)'
+                     : 'IA do WhatsApp reativada (atendente devolveu)' });
+    return { ok: true, resposta: txt.slice(0, 200) };
+  } catch (err) {
+    const msg = err.name === 'TimeoutError' ? 'o CodeWords não respondeu a tempo' : err.message;
+    return { ok: false, erro: msg };
+  }
+}
+
 /* Freio simples por usuário: evita que um token válido (ou um script
    distraído) queime a cota da IA e do CodeWords em segundos. */
 const USO = new Map();   // chave -> { qtd, zeraEm }
@@ -1165,6 +1197,69 @@ const server = http.createServer(async (req, res) => {
        de confirmação — cadastro pela tela trava em "over_email_send_rate_limit";
        (2) cadastro aberto num sistema com dado de cliente é porta destrancada.
        Quem entra é quem o dono cadastrou. */
+    /* ---- Assumir / devolver o atendimento ----
+       Ao assumir, o Carlos PARA de responder aquele cliente (/stop-ai no fluxo
+       dele) e a conversa fica no nome do atendente. Ao devolver, ele volta
+       (/start-ai). Sem isso, os dois responderiam juntos e o cliente receberia
+       mensagem em dobro. */
+    if (pathname === '/api/conversas/assumir' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login para assumir um atendimento.' });
+      if (!dentroDoLimite(`assumir:${quem.id}`, 60, 60_000)) {
+        return json(res, 429, { erro: 'Muitas trocas seguidas. Espere um minuto.' });
+      }
+
+      const bruto = await readBody(req);
+      const conversaId = texto1(bruto.conversaId, 60);
+      const assumir = bruto.assumir !== false;      // padrão: assumir
+      if (!ehUuid(conversaId)) return json(res, 400, { erro: 'Informe a conversa.' });
+
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      const { data: conversa, error: erroLer } = await sb.from('conversas')
+        .select('id, telefone, nome, atribuida_a, etapa_id').eq('id', conversaId).maybeSingle();
+      if (erroLer || !conversa) return json(res, 404, { erro: 'Conversa não encontrada.' });
+
+      // Já é de outra pessoa? Avisa em vez de roubar em silêncio.
+      if (assumir && conversa.atribuida_a && conversa.atribuida_a !== quem.id) {
+        const { data: dono } = await sb.from('perfis').select('nome')
+          .eq('id', conversa.atribuida_a).maybeSingle();
+        if (!bruto.forcar) {
+          return json(res, 409, {
+            erro: `Esta conversa já está com ${dono?.nome || 'outro atendente'}.`,
+            precisaConfirmar: true, donoAtual: dono?.nome || null });
+        }
+      }
+
+      // Pausa (ou solta) o Carlos para este telefone
+      const carlos = await pausarCarlos(sb, conversa.telefone, assumir);
+
+      const campos = assumir
+        ? { atribuida_a: quem.id, ia_ativa: false,
+            assumida_em: new Date().toISOString(), ia_pausada_em: new Date().toISOString() }
+        : { atribuida_a: null, ia_ativa: true, assumida_em: null, ia_pausada_em: null };
+
+      // Assumir move o cliente para "Em atendimento", como o dono pediu
+      if (assumir) {
+        const { data: etapa } = await sb.from('etapas_funil')
+          .select('id').eq('nome', 'Em atendimento').eq('ativa', true).maybeSingle();
+        if (etapa) { campos.etapa_id = etapa.id; campos.etapa_por_ia = false; }
+      }
+
+      const { error: erroGravar } = await sb.from('conversas')
+        .update(campos).eq('id', conversaId);
+      if (erroGravar) return json(res, 500, { erro: erroGravar.message });
+
+      return json(res, 200, {
+        ok: true, assumido: assumir, atendente: quem.papel ? quem.id : null,
+        carlosPausado: assumir ? carlos.ok : false,
+        aviso: carlos.ok ? null
+             : `Assumi a conversa, mas não consegui pausar o Carlos: ${carlos.erro}. `
+             + 'Ele pode responder junto — confira antes de escrever.',
+      });
+    }
+
     if (pathname === '/api/equipe' && req.method === 'POST') {
       const quem = await usuarioLogado(req);
       if (!quem) return json(res, 401, { erro: 'Faça login para cadastrar alguém.' });
