@@ -111,6 +111,44 @@ Deno.serve(async (req: Request) => {
     return json(400, { erro: "informe telefone e mensagem", recebido: Object.keys(body).slice(0, 20) });
   }
 
+  /* ---------- GRUPO DO WHATSAPP ----------
+     Grupo não é cliente: não vira conversa, não vira lead e a IA não lê.
+     O id de grupo termina em @g.us, tem hífen no formato antigo, ou é um
+     número longo demais para ser telefone. Alguns provedores também mandam
+     "participant"/"isGroup" quando a mensagem veio de um grupo. */
+  const cru = String(body.telefone ?? body.phone ?? body.from ?? body.chat_id ??
+                     body.chatId ?? body.remote_jid ?? body.remoteJid ?? telefone);
+  const soNumeros = cru.replace(/\D/g, "");
+  const ehGrupo =
+    /@g\.us/i.test(cru) ||
+    /@broadcast|status@/i.test(cru) ||
+    (cru.includes("-") && soNumeros.length > 13) ||
+    soNumeros.length > 15 ||
+    body.isGroup === true || body.is_group === true || body.group === true ||
+    body.participant != null || body.group_id != null ||
+    String(body.chat_type ?? body.chatType ?? "").toLowerCase() === "group";
+
+  if (ehGrupo) {
+    await registrarEvento({ direcao: "entrada", sucesso: false, telefone,
+      resumo: texto.slice(0, 120),
+      erro: "mensagem de grupo — ignorada de propósito (grupo não é cliente)" });
+    return json(200, { ok: true, ignorado: "grupo" });
+  }
+
+  /* ---------- NÚMERO BLOQUEADO ----------
+     Listas de transmissão de propaganda entupiam o painel e criariam lead
+     no CRM. O dono gerencia a lista na aba Integrações. */
+  const { data: bloqueio } = await sb.from("numeros_bloqueados")
+    .select("nome,motivo").eq("telefone", telefone.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, ""))
+    .maybeSingle();
+
+  if (bloqueio) {
+    await registrarEvento({ direcao: "entrada", sucesso: false, telefone,
+      resumo: texto.slice(0, 120),
+      erro: `número bloqueado (${bloqueio.nome || "sem nome"}) — ${bloqueio.motivo || "não é cliente"}` });
+    return json(200, { ok: true, ignorado: "bloqueado" });
+  }
+
   /* DIREÇÃO — o Carlos repassa TAMBÉM o que ele mesmo responde, e sem isto
      tudo entrava como se fosse fala do cliente: o atendente via a saudação
      da IA como se o cliente tivesse escrito, e a classificação lia errado.
