@@ -1,140 +1,132 @@
-# Mensagem para o CodeWords
+# Mensagem para o CodeWords — correções
 
-> Copie tudo abaixo da linha e mande para o suporte do CodeWords.
-> Está pronta — não falta preencher nada.
->
-> ⚠️ Ela contém o **token do webhook**, que é a senha que impede estranhos de
-> escrever no seu banco. Mande só para o CodeWords. Se vazar, me avise que eu
-> troco em 1 minuto (é um campo na aba *Integrações*).
+> Copie tudo abaixo da linha e mande para o suporte.
+> Está pronta, com os erros que eu reproduzi e o que preciso de cada um.
 
 ---
 
-Olá! Preciso de um ajuste no meu fluxo **Carlos** para ligá-lo a um painel de
-atendimento que montei. Abaixo o contexto, o pedido e as dúvidas.
+Olá! O repasse das mensagens para o meu painel **já está funcionando** — obrigado.
+Recebo as conversas, o cliente entra no meu CRM e o `/stop-ai` e `/start-ai` do
+fluxo do Carlos respondem certinho. 👏
 
-## O que eu tenho hoje aqui no CodeWords
-
-| Fluxo | Service ID |
-|---|---|
-| Carlos — Indycar Centro Automotivo | `indycar_carlos_whatsapp_e3cd01d3` |
-| Indycar — Banco de Agendamentos | `indycar_agendamentos_db_6657a75c` |
-| Indycar — NoShow Notifier | `indycar_noshow_notifier_09b5cd69` |
-| WhatsApp Device Manager | `whatsapp_device_manager` |
-
-Aparelho do WhatsApp pareado: `2bbd5d3a-103a-4fb1-9f51-bc0f963a2546`
-(número `5512982211090`), com `service_path = indycar_carlos_whatsapp_e3cd01d3/`.
-
-## O que eu montei do meu lado
-
-Um painel de atendimento com banco próprio, que junta o **CRM**, a **agenda da
-oficina** e as **conversas do WhatsApp**, tudo amarrado pelo telefone do cliente.
-Quando uma mensagem chega, o atendente já vê quanto aquele cliente gastou,
-quantos serviços fez, qual o carro e se tem horário marcado.
-
-**O Carlos continua sendo quem conversa com o cliente.** Eu só quero **enxergar**
-essas conversas no painel e poder responder por lá quando precisar de gente.
-
-O envio já funciona: mando pelo proxy do `whatsapp_device_manager`
-(`/proxy/send/message?device_id=…`, form-urlencoded) e a mensagem chega. **O que
-falta é o contrário: eu receber.**
+Só que ao ligar tudo apareceram quatro problemas. Vou do mais urgente para o
+menos, com o que eu observei em cada um.
 
 ---
 
-# 🔴 Pedido principal
+# 🔴 1. A cota nova é de 100 execuções/mês — e acabou no primeiro dia
 
-**Que o fluxo do Carlos, além de responder o cliente, mande uma cópia da mensagem
-para o meu endereço.** Um `POST`, sem esperar resposta — se falhar, ignore e siga
-atendendo normalmente.
+Renovei o plano ontem. Hoje o retorno é:
 
-### Endereço
-
-```
-https://nppfqhavqahapmugnyng.supabase.co/functions/v1/codewords-webhook
+```json
+{"detail":"Monthly workflow run limit reached — you've used 100 of 100
+workflow runs allowed this month on your current plan."}
 ```
 
-### Método
+**100 execuções por mês não dá para uma oficina.** Antes eu tinha 2.500 e mesmo
+assim estourava. Com 100, o Carlos não consegue nem responder os clientes do dia.
 
-```
-POST
-```
+**O que eu preciso saber:**
 
-### Cabeçalhos (os três são obrigatórios)
+1. **Qual plano suporta o meu volume?** Hoje são **20 a 40 conversas por dia**.
+   Se cada mensagem do cliente gasta pelo menos 1 execução, preciso de algo na
+   casa de **3.000 a 5.000 por mês**, com folga. Me digam o plano e o preço.
+2. **Uma execução conta o fluxo inteiro ou cada passo dentro dele?** Isso muda
+   completamente a minha conta — e ninguém consegue planejar sem saber.
+3. **Existe alerta em 80% da cota?** Nas duas vezes eu só descobri que tinha
+   acabado quando o cliente parou de receber resposta. Isso é péssimo: o cliente
+   fica no vácuo e eu não fico sabendo.
+4. **`/stop-ai`, `/start-ai` e `/listar` consomem cota?** Se sim, preciso saber,
+   porque são chamadas de controle, não de conversa.
 
-```
-Content-Type: application/json
-apikey: sb_publishable_6m4EQdymEn7UVtHwu8vWyw_4RObR9td
-x-codewords-token: a522097ace9ec90b16b97073e9b68536
-```
+---
 
-> O `apikey` é exigido pelo portão do Supabase antes de chegar no meu código —
-> essa chave é publicável, não dá acesso a nada sozinha. Quem autentica de fato
-> é o `x-codewords-token`.
+# 🔴 2. O Carlos está errando a data dos agendamentos
 
-### Corpo
+Uma cliente escreveu, às 00:47 do dia **07/08/2026**:
+
+> "Amanha as 9 f amanhã. Meu carro é um corsa 2011"
+
+O Carlos agendou. Quando busquei em
+`GET /run/indycar_agendamentos_db_6657a75c/listar`, veio isto:
 
 ```json
 {
-  "telefone": "5512999998888",
-  "mensagem": "texto que o cliente escreveu",
-  "nome": "nome do contato no WhatsApp"
+  "id": "ag_20260807035424_2300",
+  "nome": "Raquel",
+  "tel": "5512974032300",
+  "veiculo": "Corsa", "ano": "2011",
+  "servico": "Alinhamento e balanceamento",
+  "data": "2023-10-24",
+  "hora": "09:00",
+  "criadoEm": "2026-08-07T03:54:24.686768+00:00"
 }
 ```
 
-Não precisam mudar o formato de vocês: eu aceito nomes alternativos —
-`telefone` / `phone` / `from` / `numero` / `sender` / `wa_id`, e
-`mensagem` / `message` / `text` / `corpo` / `body`.
-Se mandarem o id da mensagem em `wamid` ou `message_id`, eu guardo também.
+O `criadoEm` está certo (2026-08-07), mas o campo **`data` veio 2023-10-24** —
+quase três anos no passado. "Amanhã" deveria ser **2026-08-08**.
 
-### O que eu respondo (testado agora, um por um)
+Isso é grave: um horário no passado **some da agenda** e a oficina perde o
+cliente sem perceber. Do meu lado eu já coloquei um aviso quando a data
+importada já passou, mas a correção precisa ser aí.
 
-| Situação | Resposta |
-|---|---|
-| Deu certo | `200` · `{"ok":true}` |
-| Token errado ou ausente | `401` · `{"erro":"token inválido"}` |
-| Faltou o cabeçalho `apikey` | `401` · `{"code":"UNAUTHORIZED_NO_AUTH_HEADER"}` |
-| Faltou telefone ou mensagem | `400` · com a lista dos campos que chegaram |
-| Acima de 64 KB | `413` |
-
-Para validar antes, um `GET` no mesmo endereço (só com o `apikey`) responde
-`200 {"ok":true}`.
-
-### ⚠️ Uma coisa que NÃO deve ser feita
-
-Não troquem o `service_path` do aparelho no `whatsapp_device_manager` para
-apontar para o meu endereço. Testei e o `subscribe` aceita URL externa — mas isso
-**desvia** as mensagens e o Carlos para de receber. O aparelho tem que continuar
-apontando para `indycar_carlos_whatsapp_e3cd01d3/`. Por isso o repasse precisa
-sair de dentro do fluxo do Carlos, e não da inscrição do aparelho.
+**Peço:** que o Carlos calcule datas relativas ("amanhã", "sexta", "semana que
+vem") a partir da data atual, no fuso **America/Sao_Paulo**, e devolva sempre em
+`YYYY-MM-DD`. Se ele não tiver certeza do dia, é melhor **perguntar ao cliente**
+do que chutar.
 
 ---
 
-# 🟡 Três dúvidas que podem virar problema
+# 🟠 3. Não consigo saber quem falou: cliente ou Carlos
 
-**1. Risco de eco.** Quando eu respondo pelo painel, a mensagem sai pelo aparelho.
-Se o Carlos também repassar as mensagens que *saem*, ela aparece duplicada na
-minha tela. O ideal é repassar **só o que o cliente manda**. Se o payload puder
-indicar a direção (entrada/saída) ou marcar que foi o próprio sistema que enviou,
-eu filtro do meu lado.
+O repasse manda **as duas direções** — o que o cliente escreve e o que o Carlos
+responde. Mas o payload não traz nenhuma marca dizendo qual é qual.
 
-**2. Pausar o Carlos numa conversa.** Quando um atendente humano assume, o certo é
-o Carlos parar de responder **aquele contato** até eu liberar — senão os dois
-respondem juntos e o cliente recebe mensagem em dobro. Existe como pausar por
-contato? Se houver um endpoint ou um campo, me digam qual.
+Resultado: a saudação do Carlos ("Olá, seja muito bem-vindo à Indy Car! 🏁…")
+aparece no meu painel **como se o cliente tivesse escrito**. Isso confunde o
+atendente e atrapalha a leitura automática da conversa.
 
-**3. O fluxo "Banco de Agendamentos".** Hoje ele guarda agendamentos do lado de
-vocês, e eu consulto a cada 15 minutos. Como minha agenda agora vive no meu
-banco, ficam duas versões do mesmo horário. Ele pode só **consultar** o meu banco
-em vez de manter o dele? Se sim, eu exponho um endereço de leitura.
+**Peço uma destas duas soluções** (qualquer uma resolve):
 
-## Sobre a cota
+- **(a)** Repassar **só as mensagens que o cliente manda** — é o que eu prefiro; ou
+- **(b)** Incluir um campo dizendo a direção. Eu já aceito qualquer um destes
+  nomes, é só mandar: `from_me`, `fromMe`, `outgoing` (booleanos), ou
+  `direcao` / `direction` / `tipo` / `type` com o valor `entrada`/`saida`
+  (ou `in`/`out`).
 
-Acabei de renovar o plano. Duas coisas que ajudariam a não ser pego de surpresa
-de novo:
+---
 
-- **Existe alerta quando eu chegar a 80% da cota?** Da última vez eu só descobri
-  que tinha acabado quando o cliente parou de receber resposta.
-- **Uma execução conta o fluxo inteiro ou cada passo dentro dele?** Isso muda
-  bastante o meu cálculo de consumo.
+# 🟡 4. Perguntas sobre o que já funciona
+
+**a) `/stop-ai` e `/start-ai`** — funcionam, obrigado. Uso quando um atendente
+humano assume a conversa. Duas dúvidas:
+- A pausa **dura até eu chamar `/start-ai`**, ou expira sozinha depois de um tempo?
+- Se o cliente mandar mensagem com a IA pausada, vocês ainda repassam para o meu
+  webhook? (Preciso que sim — é justamente quando o humano está atendendo.)
+
+**b) Fluxo "Banco de Agendamentos"** — hoje eu consulto o `/listar` de tempos em
+tempos, e é isso que mais consome cota. Duas alternativas que resolveriam:
+- O fluxo **avisar meu webhook** quando criar um agendamento (aí eu paro de
+  consultar); ou
+- Ele **gravar direto no meu banco**, e eu exponho um endereço para isso.
+
+Qualquer uma economiza muita execução. Qual é mais fácil para vocês?
+
+**c) No-show** — descobri o campo `respeitar_horario_comercial` no fluxo
+`indycar_noshow_notifier_09b5cd69` e passei a mandar `false`, porque quem furou
+o horário às 22h precisa ser chamado de volta igual. Só confirmando: **está
+correto usar assim?**
+
+---
+
+## Resumo do que preciso
+
+| # | O quê | Urgência |
+|---|---|---|
+| 1 | Plano com cota real (3.000–5.000/mês) + alerta em 80% | 🔴 trava tudo |
+| 2 | Corrigir o cálculo de datas ("amanhã" virou 2023) | 🔴 perde cliente |
+| 3 | Marcar a direção da mensagem, ou repassar só a do cliente | 🟠 |
+| 4 | Respostas às dúvidas acima | 🟡 |
 
 Obrigado!
 
@@ -142,6 +134,7 @@ Obrigado!
 
 ## 📌 Depois que eles responderem
 
-Me mande a resposta aqui que eu ajusto o sistema. Os pontos **1** e **2** (eco e
-pausar o Carlos) podem exigir mudança no meu código — os outros são configuração
-do lado deles.
+Me mande a resposta aqui. Os itens **1 e 2** são resolvidos do lado deles.
+O **3** eu já deixei preparado — assim que disserem qual campo mandam, funciona
+na hora. O **4b** pode economizar muita cota e eu implemento o que for mais
+fácil para eles.

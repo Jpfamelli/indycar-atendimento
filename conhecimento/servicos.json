@@ -1,0 +1,968 @@
+[
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Troca de óleo do motor",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Troca do filtro de óleo",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Substituição do filtro de ar do motor",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Troca do filtro de combustível",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Troca de óleo de câmbio automático por máquina de diálise",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Troca de óleo de câmbio manual",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Sangria e troca de fluido de freio",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Verificação do nível de aditivo do radiador",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Troca de fluido de arrefecimento do radiador",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Óleo e Fluidos",
+    "servico": "Troca de fluido de direção hidráulica",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Venda de pneu com montagem e troca obrigatoriamente inclusas",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Venda de pneu avulso sem o serviço de montagem ou troca",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Rodízio de pneus",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Alinhamento de direção",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Balanceamento de rodas",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Verificação de desgaste de pneu",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Cambagem",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Caster",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Conserto de pneu furado",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Vulcanização de pneus",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Reforma de rodas de liga leve",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Pintura de rodas",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Pneus e Rodas",
+    "servico": "Diamantação de rodas",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Troca de pastilhas de freio",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Troca de discos de freio",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Troca de sapatas de freio",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Troca de lonas de freio traseiro",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Substituição de cilindro mestre do freio",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Troca de servo freio (hidrovácuo)",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Verificação de vazamento em mangueiras flexíveis de freio",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Troca de tambor de freio",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Ajuste do freio de mão",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Sistema de Freios",
+    "servico": "Diagnóstico de trepidação ao frear",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Troca de amortecedores dianteiros",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Troca de amortecedores traseiros",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Substituição de kit batente de suspensão",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Substituição de coifa de suspensão",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Troca de buchas da balança ou bandeja",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Substituição de pivôs de suspensão",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Troca de terminais de direção",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Substituição de juntas homocinéticas",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Troca de coifas de eixo",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Manutenção de barras estabilizadoras",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Troca de molas helicoidais",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Troca de rolamentos de roda",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Verificação de folga no setor de direção",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Reparo em caixa de direção hidráulica",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Rebaixamento de suspensão",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Suspensão e Direção",
+    "servico": "Instalação de suspensão a ar",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Transmissão e Embreagem",
+    "servico": "Troca de kit de embreagem",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Transmissão e Embreagem",
+    "servico": "Substituição de cabo de embreagem",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Transmissão e Embreagem",
+    "servico": "Substituição de coxins do câmbio",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Transmissão e Embreagem",
+    "servico": "Diagnóstico de câmbio automatizado",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Transmissão e Embreagem",
+    "servico": "Reparo interno de câmbio automático",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Transmissão e Embreagem",
+    "servico": "Reparo em diferencial",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Substituição de coxins do motor",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Troca da correia dentada",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Troca do tensor da correia",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Troca de correia de acessórios do alternador",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Troca da junta do cabeçote",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Troca de bomba de água",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Substituição de válvula termostática",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Troca de mangueiras do sistema de arrefecimento",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Reparo de vazamento de óleo no motor",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Retífica completa de motor",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Motor e Mecânica Pesada",
+    "servico": "Reparo em turbinas",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Injeção Eletrônica e Ignição",
+    "servico": "Limpeza de bicos injetores",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Injeção Eletrônica e Ignição",
+    "servico": "Substituição de velas de ignição",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Injeção Eletrônica e Ignição",
+    "servico": "Manutenção de cabos de vela",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Injeção Eletrônica e Ignição",
+    "servico": "Troca de bobinas de ignição",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Injeção Eletrônica e Ignição",
+    "servico": "Substituição de bomba de combustível",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Injeção Eletrônica e Ignição",
+    "servico": "Troca de sensor de oxigênio ou sonda lambda",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Injeção Eletrônica e Ignição",
+    "servico": "Manutenção do sistema de injeção eletrônica",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Ar-Condicionado e Ventilação",
+    "servico": "Higienização do ar-condicionado",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Ar-Condicionado e Ventilação",
+    "servico": "Ozonização de cabine para eliminação de odores",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Ar-Condicionado e Ventilação",
+    "servico": "Troca do filtro de cabine ou filtro de pólen",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Ar-Condicionado e Ventilação",
+    "servico": "Carga de gás refrigerante do ar-condicionado",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Ar-Condicionado e Ventilação",
+    "servico": "Identificação de vazamento com contraste ultravioleta",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Ar-Condicionado e Ventilação",
+    "servico": "Troca do compressor de ar-condicionado",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Ar-Condicionado e Ventilação",
+    "servico": "Reparo em mangueiras de pressão de ar-condicionado",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Diagnóstico Automotivo",
+    "servico": "Revisão mecânica de quilometragem",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Diagnóstico Automotivo",
+    "servico": "Check-up de viagem preventivo",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Diagnóstico Automotivo",
+    "servico": "Consultoria e avaliação mecânica para compra de veículos usados",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Diagnóstico Automotivo",
+    "servico": "Passagem de aparelho scanner automotivo",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Diagnóstico Automotivo",
+    "servico": "Reset de aviso de inspeção no painel de instrumentos",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Baterias Automotivas",
+    "servico": "Troca de bateria automotiva exclusivamente das marcas Moura ou Zet",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Baterias Automotivas",
+    "servico": "Teste de saúde e carga da bateria automotiva",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Reparo de alternador",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Manutenção do motor de arranque",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Troca de lâmpadas de farol",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Regulagem de facho de farol",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Reparo em chicotes elétricos",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Reparo de painel de instrumentos",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Configuração de chaves codificadas",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Reparo de retrovisores elétricos",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Elétrica e Eletrônica",
+    "servico": "Atualização de software ou remapeamento de módulo",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Acessórios",
+    "servico": "Instalação de central multimídia",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Acessórios",
+    "servico": "Instalação de sensores de estacionamento",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Acessórios",
+    "servico": "Instalação de câmera de ré",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Acessórios",
+    "servico": "Instalação de alarmes automotivos",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Acessórios",
+    "servico": "Instalação de travas elétricas",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Acessórios",
+    "servico": "Instalação de engate para reboque",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Acessórios",
+    "servico": "Instalação de rack de teto",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Acessórios",
+    "servico": "Instalação de rastreador via satélite",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Vidros Automotivos",
+    "servico": "Manutenção em vidros automotivos",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Vidros Automotivos",
+    "servico": "Reparo de vidros elétricos",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Vidros Automotivos",
+    "servico": "Conserto de máquina de vidro elétrico",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Vidros Automotivos",
+    "servico": "Troca de para-brisa",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Vidros Automotivos",
+    "servico": "Troca de vidros laterais ou traseiros",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Vidros Automotivos",
+    "servico": "Aplicação de película solar de proteção",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Vidros Automotivos",
+    "servico": "Remoção de película solar antiga",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Estética Automotiva e Limpeza",
+    "servico": "Lavagem simples de veículo",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Estética Automotiva e Limpeza",
+    "servico": "Lavagem detalhada de chassi e motor",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Estética Automotiva e Limpeza",
+    "servico": "Polimento comercial",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Estética Automotiva e Limpeza",
+    "servico": "Vitrificação de pintura",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Estética Automotiva e Limpeza",
+    "servico": "Cristalização de vidros",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Estética Automotiva e Limpeza",
+    "servico": "Higienização interna completa de estofados",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Estética Automotiva e Limpeza",
+    "servico": "Limpeza e hidratação de bancos de couro",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Estética Automotiva e Limpeza",
+    "servico": "Revitalização de faróis",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Funilaria e Pintura",
+    "servico": "Martelinho de ouro para pequenos amassados",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Funilaria e Pintura",
+    "servico": "Funilaria de para-choque",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Funilaria e Pintura",
+    "servico": "Pintura automotiva em estufa",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Funilaria e Pintura",
+    "servico": "Reparo em cárter amassado",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Sistemas de Gás",
+    "servico": "Instalação de Gás Natural Veicular (GNV)",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Sistemas de Gás",
+    "servico": "Manutenção de Gás Natural Veicular (GNV)",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Serviços Auxiliares",
+    "servico": "Serviço de leva e traz do veículo",
+    "tipo_veiculo": "Carros de todos os tipos, SUV, Caminhonetes, Utilitários. Vans e Caminhões Pequenos será necessário avaliar altura.",
+    "escopo": "LEVES",
+    "situacao": "FAZEMOS"
+  },
+  {
+    "categoria": "Serviços Auxiliares",
+    "servico": "Socorro mecânico ou serviço de guincho",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Serviços Auxiliares",
+    "servico": "Auxílio de partida ou serviço de chupeta de bateria",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Serviços Auxiliares",
+    "servico": "Abertura de veículo ou serviço de chaveiro",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Serviços Burocráticos",
+    "servico": "Laudo cautelar para venda de veículos",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Serviços Burocráticos",
+    "servico": "Vistoria de transferência do departamento de trânsito",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Serviços Burocráticos",
+    "servico": "Gravação de número de chassi em vidros",
+    "tipo_veiculo": "Todos os veículos.",
+    "escopo": "TODOS",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Veículos Não Atendidos",
+    "servico": "Qualquer tipo de manutenção",
+    "tipo_veiculo": "Motocicletas",
+    "escopo": "ESPECIFICO",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Veículos Não Atendidos",
+    "servico": "Qualquer tipo de manutenção",
+    "tipo_veiculo": "Caminhões de grande porte",
+    "escopo": "ESPECIFICO",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Veículos Não Atendidos",
+    "servico": "Qualquer tipo de manutenção",
+    "tipo_veiculo": "Carros totalmente elétricos",
+    "escopo": "ESPECIFICO",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Veículos Não Atendidos",
+    "servico": "Teste de saúde da bateria de veículos híbridos ou elétricos",
+    "tipo_veiculo": "Todos os veículos elétricos",
+    "escopo": "ESPECIFICO",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Veículos Não Atendidos",
+    "servico": "Qualquer tipo de manutenção",
+    "tipo_veiculo": "Carros rebaixados",
+    "escopo": "ESPECIFICO",
+    "situacao": "NAO_FAZEMOS"
+  },
+  {
+    "categoria": "Veículos Não Atendidos",
+    "servico": "Qualquer tipo de manutenção",
+    "tipo_veiculo": "Carros modificados",
+    "escopo": "ESPECIFICO",
+    "situacao": "NAO_FAZEMOS"
+  }
+]
