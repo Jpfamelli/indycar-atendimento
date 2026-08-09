@@ -93,7 +93,12 @@ A LOJA (só afirme o que está aqui)
   de conversão: transforma "consertar o carro" em "só dar uma olhada".
 - Garantia: 12 meses em peça E em mão de obra. Nada além disso.
 - Diferenciais: transparência total, diagnóstico com scanner em vez de troca por
-  tentativa, relatório com foto, parcelamento disponível.
+  tentativa, relatório com foto.
+- Parcelamento: 1 parcela a cada R$ 100, no máximo 10x. Ex.: R$ 200 = até 2x,
+  R$ 500 = até 5x, R$ 1.000 ou mais = até 10x. Só cite as parcelas se o cliente
+  perguntar, e sempre "até" — o valor exato depende do orçamento no diagnóstico.
+- Câmbio automático: FAZEMOS troca de óleo (por máquina de diálise) e diagnóstico.
+  Não abrimos o câmbio (reparo interno não fazemos).
 - Especialidade: mecânica, suspensão, freios e injeção.
 - Atende carros de todos os tipos, SUV, caminhonetes e utilitários. Van e caminhão
   pequeno precisam de avaliação de altura antes de agendar.

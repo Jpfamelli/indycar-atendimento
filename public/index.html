@@ -6,6 +6,21 @@
   <meta name="theme-color" content="#0a0a0b" />
   <title>IndyCar · Atendimento</title>
 
+  <!-- Tema (claro/escuro) aplicado ANTES de pintar a tela, para não piscar.
+       Padrão: escuro. A escolha do atendente persiste em localStorage. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('indycar_tema');
+        if (t === 'claro') {
+          document.documentElement.setAttribute('data-tema', 'claro');
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute('content', '#eaecf0');
+        }
+      } catch (e) {}
+    })();
+  </script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;1,800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet" />
@@ -67,6 +82,7 @@
       <span class="marca-sub">Atendimento</span>
     </div>
 
+    <div class="nav-grupo">Atendimento</div>
     <button class="nav-item ativo" data-aba="conversas">
       <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z" fill="currentColor"/></svg>
       <span>Conversas</span>
@@ -76,14 +92,12 @@
       <svg viewBox="0 0 24 24"><path d="M3 4h18l-7 8v7l-4 2v-9L3 4z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>
       <span>Funil</span>
     </button>
-    <button class="nav-item" data-aba="etapas">
-      <svg viewBox="0 0 24 24"><path d="M4 6h11l3 3-3 3H4zM4 15h9l3 3-3 3H4z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M4 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      <span>Etapas</span>
-    </button>
     <button class="nav-item" data-aba="atalhos">
       <svg viewBox="0 0 24 24"><path d="M13 2L4.5 13.5H11l-1 8.5 9.5-12.5H13l0-7.5z" fill="currentColor"/></svg>
       <span>Atalhos <b class="atalho-dica">/</b></span>
     </button>
+
+    <div class="nav-grupo">Inteligência</div>
     <button class="nav-item" data-aba="ia">
       <svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.2L21 9.3l-4.8 4.3 1.3 6.4L12 16.8 6.5 20l1.3-6.4L3 9.3l6.6-1.1L12 2z" fill="currentColor"/></svg>
       <span>Inteligência Artificial</span>
@@ -92,6 +106,22 @@
       <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
       <span>Relatórios</span>
     </button>
+
+    <div class="nav-grupo">Sistema</div>
+    <button class="nav-item" data-aba="integracoes">
+      <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7L12.2 19" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      <span>Integrações</span>
+    </button>
+    <button class="nav-item" data-aba="etapas">
+      <svg viewBox="0 0 24 24"><path d="M4 6h11l3 3-3 3H4zM4 15h9l3 3-3 3H4z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M4 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Etapas</span>
+    </button>
+    <button class="nav-item" data-aba="config">
+      <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 003.6 15a1.65 1.65 0 00-1.51-1H2a2 2 0 110-4h.09A1.65 1.65 0 003.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 008 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+      <span>Configurações</span>
+    </button>
+
+    <div class="nav-grupo">Outros sistemas</div>
     <a class="nav-item nav-externo" id="linkCRM" href="http://localhost:3100" target="_blank" rel="noopener">
       <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
       <span>Abrir o CRM</span>
@@ -102,14 +132,6 @@
       <span>Abrir a Agenda</span>
       <svg class="ico-sai" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M19 14v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
     </a>
-    <button class="nav-item" data-aba="integracoes">
-      <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7L12.2 19" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
-      <span>Integrações</span>
-    </button>
-    <button class="nav-item" data-aba="config">
-      <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 003.6 15a1.65 1.65 0 00-1.51-1H2a2 2 0 110-4h.09A1.65 1.65 0 003.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 008 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
-      <span>Configurações</span>
-    </button>
 
     <div class="sidebar-fim">
       <div class="usuario" id="usuarioBox">
@@ -119,7 +141,14 @@
           <small id="usuarioPapel">—</small>
         </div>
       </div>
-      <button class="link sair" id="btnSair">Sair</button>
+      <div class="fim-acoes">
+        <button class="tema-toggle" id="btnTema" type="button"
+                title="Alternar tema claro e escuro" aria-label="Alternar tema claro e escuro">
+          <span class="tema-ico" id="temaIco">🌙</span>
+          <span class="tema-txt" id="temaTxt">Tema escuro</span>
+        </button>
+        <button class="link sair" id="btnSair">Sair</button>
+      </div>
     </div>
   </nav>
 
@@ -452,21 +481,54 @@
       <header class="pagina-topo">
         <div>
           <h1>Configurações</h1>
-          <p>Seu perfil, a conexão do WhatsApp e a equipe de atendimento.</p>
+          <p>Sua conta pessoal e, para administradores, a conexão do WhatsApp e a equipe.</p>
         </div>
       </header>
 
-      <div class="cartoes">
-        <div class="cartao">
-          <h3>Meu perfil</h3>
-          <form id="formPerfil" class="form-vertical">
-            <label>Nome<input id="perfilNome" placeholder="Seu nome" /></label>
-            <label>E-mail<input id="perfilEmail" disabled /></label>
-            <label>Função<input id="perfilPapel" disabled /></label>
-            <button type="submit" class="btn btn-primary sm">Salvar</button>
-          </form>
-        </div>
+      <div class="config-tabs" id="configTabs">
+        <button type="button" class="config-pilula ativo" data-secao="conta">Minha conta</button>
+        <button type="button" class="config-pilula" data-secao="sistema">Equipe e sistema</button>
+      </div>
 
+      <!-- ---------- Minha conta ---------- -->
+      <div class="config-secao ativa" id="config-conta">
+        <div class="cartoes">
+          <div class="cartao">
+            <h3>Meu perfil</h3>
+            <p class="cartao-sub">Seu nome aparece nas conversas e nos relatórios. O e-mail e a função só o administrador altera.</p>
+            <form id="formPerfil" class="form-vertical">
+              <label>Nome<input id="perfilNome" placeholder="Seu nome" /></label>
+              <label>E-mail<input id="perfilEmail" disabled /></label>
+              <label>Função<input id="perfilPapel" disabled /></label>
+              <button type="submit" class="btn btn-primary sm">Salvar</button>
+            </form>
+          </div>
+
+          <div class="cartao">
+            <h3>Trocar minha senha</h3>
+            <p class="cartao-sub">Escolha uma senha nova de pelo menos 8 caracteres. Vale só para o seu acesso — ninguém mais vê.</p>
+            <form id="formSenha" class="form-vertical">
+              <label>Nova senha
+                <input id="senhaNova" type="password" minlength="8" autocomplete="new-password"
+                       placeholder="pelo menos 8 caracteres" />
+              </label>
+              <label>Repetir a nova senha
+                <input id="senhaNova2" type="password" minlength="8" autocomplete="new-password"
+                       placeholder="digite a mesma senha" />
+              </label>
+              <div class="int-acoes">
+                <div style="flex:1"></div>
+                <button type="submit" class="btn btn-primary sm" id="btnTrocarSenha">Trocar senha</button>
+              </div>
+              <p class="form-msg" id="senhaMsg" hidden></p>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- Equipe e sistema ---------- -->
+      <div class="config-secao" id="config-sistema">
+        <div class="cartoes">
         <div class="cartao" id="cartaoWhatsapp">
           <h3>WhatsApp (Cloud API)</h3>
           <p class="cartao-sub">Sem isso, as mensagens entram manualmente. Com isso, o envio
@@ -522,6 +584,7 @@
           </div>
 
           <p class="aviso" id="avisoCadastro" hidden>Só o administrador cadastra novos funcionários.</p>
+        </div>
         </div>
       </div>
     </div>

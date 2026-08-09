@@ -179,6 +179,7 @@ async function entrarNoApp(user) {
   $('#perfilNome').value = perfil.nome;
   $('#perfilEmail').value = perfil.email;
   $('#perfilPapel').value = perfil.papel === 'admin' ? 'Administrador' : 'Atendente';
+  aplicarPapelConfig();
 
   // as etapas vêm ANTES das conversas: são elas que desenham as plaquinhas
   await carregarEtapas();
@@ -465,8 +466,16 @@ $('#chatStatus').addEventListener('change', async e => {
   } catch (err) { toast('⚠️ ' + err.message); }
 });
 
-$('#btnPainelCliente').addEventListener('click', () =>
-  $('#colFicha').classList.toggle('aberta'));
+/* Ficha: no desktop ela é uma coluna — o botão recolhe/expande a coluna,
+   dando ainda mais espaço ao chat. No celular/tablet ela é uma gaveta
+   sobreposta, aberta pela classe .aberta (comportamento antigo). */
+$('#btnPainelCliente').addEventListener('click', () => {
+  if (window.matchMedia('(max-width:1180px)').matches) {
+    $('#colFicha').classList.toggle('aberta');
+  } else {
+    $('.conversas-layout').classList.toggle('ficha-fechada');
+  }
+});
 
 /* ============================================================
    FICHA DO CLIENTE — aqui mora a integração com CRM e Agenda
@@ -710,6 +719,54 @@ $('#formPerfil').addEventListener('submit', async e => {
     toast('✅ Perfil salvo');
   } catch (err) { toast('⚠️ ' + err.message); }
 });
+
+/* Seletor interno das Configurações: "Minha conta" x "Equipe e sistema" */
+$$('#configTabs .config-pilula').forEach(b => b.addEventListener('click', () => {
+  const secao = b.dataset.secao;
+  $$('#configTabs .config-pilula').forEach(x => x.classList.toggle('ativo', x === b));
+  $$('.config-secao').forEach(s => s.classList.toggle('ativa', s.id === `config-${secao}`));
+}));
+
+/* Trocar a própria senha — direto no cliente, via Supabase Auth.
+   Regras: mínimo 8 caracteres e as duas iguais. */
+$('#formSenha').addEventListener('submit', async e => {
+  e.preventDefault();
+  const s1 = $('#senhaNova').value, s2 = $('#senhaNova2').value;
+  const msg = $('#senhaMsg'), btn = $('#btnTrocarSenha');
+  const mostrar = (texto, ok) => {
+    msg.textContent = texto;
+    msg.className = 'form-msg ' + (ok ? 'ok' : 'erro');
+    msg.hidden = false;
+  };
+  if (s1.length < 8) return mostrar('A senha precisa ter pelo menos 8 caracteres.', false);
+  if (s1 !== s2)     return mostrar('As duas senhas não são iguais. Confira e tente de novo.', false);
+
+  btn.disabled = true; btn.textContent = 'Trocando…';
+  try {
+    const { error } = await sb.auth.updateUser({ password: s1 });
+    if (error) throw error;
+    $('#formSenha').reset();
+    mostrar('✅ Senha trocada. Use a nova da próxima vez que entrar.', true);
+    toast('✅ Senha alterada com sucesso');
+  } catch (err) {
+    mostrar('⚠️ Não consegui trocar: ' + (err.message || 'erro desconhecido'), false);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Trocar senha';
+  }
+});
+
+/* A seção "Equipe e sistema" (WhatsApp Cloud API + equipe) é só para admin.
+   Para atendente, escondemos o seletor e deixamos apenas "Minha conta".
+   Só mexe na apresentação — a lógica de permissão de cada card continua igual. */
+function aplicarPapelConfig() {
+  const ehAdmin = perfil?.papel === 'admin';
+  const tabs = $('#configTabs');
+  if (tabs) tabs.style.display = ehAdmin ? '' : 'none';
+  if (!ehAdmin) {
+    $$('.config-secao').forEach(s => s.classList.toggle('ativa', s.id === 'config-conta'));
+    $$('#configTabs .config-pilula').forEach(p => p.classList.toggle('ativo', p.dataset.secao === 'conta'));
+  }
+}
 
 async function carregarEquipe() {
   const ehAdmin = perfil?.papel === 'admin';
@@ -2085,8 +2142,23 @@ $('#btnCopiarWebhook').addEventListener('click', async () => {
    ============================================================ */
 const COR = { verde:'#22c55e', vermelho:'#e50914', laranja:'#f59e0b',
               roxo:'#6366f1', azul:'#3b82f6' };
-const COR_EIXO  = '#8b8b93';
-const COR_GRADE = 'rgba(255,255,255,.08)';
+/* Cores de eixo / grade / base / texto dos gráficos: mudam com o tema.
+   São relidas do CSS a cada desenho (ver lerCoresRelatorio), por isso são let.
+   As cores de DADO (verde, vermelho, laranja…) ficam iguais nos dois temas. */
+let COR_EIXO   = '#8b8b93';
+let COR_GRADE  = 'rgba(255,255,255,.08)';
+let COR_BASE   = 'rgba(255,255,255,.2)';
+let COR_ROTULO = '#d5d5da';
+let COR_TOTAL  = '#f5f5f7';
+function lerCoresRelatorio() {
+  const s = getComputedStyle(document.documentElement);
+  const g = (nome, alt) => (s.getPropertyValue(nome).trim() || alt);
+  COR_EIXO   = g('--rel-eixo',   '#8b8b93');
+  COR_GRADE  = g('--rel-grade',  'rgba(255,255,255,.08)');
+  COR_BASE   = g('--rel-base',   'rgba(255,255,255,.2)');
+  COR_ROTULO = g('--rel-rotulo', '#d5d5da');
+  COR_TOTAL  = g('--rel-total',  '#f5f5f7');
+}
 const DIA_SEMANA       = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 const DIA_SEMANA_CURTO = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
@@ -2174,7 +2246,7 @@ function graficoBarras({ rotulos, series, linha = null, altura = 300, unidadeBar
     });
   }
 
-  p.push(`<line x1="${ME}" y1="${MT + alt}" x2="${ME + larg}" y2="${MT + alt}" stroke="rgba(255,255,255,.2)"/>`);
+  p.push(`<line x1="${ME}" y1="${MT + alt}" x2="${ME + larg}" y2="${MT + alt}" stroke="${COR_BASE}"/>`);
   const salto = Math.ceil(n / 14);
   rotulos.forEach((r, i) => {
     if (i % salto) return;
@@ -2219,7 +2291,7 @@ function graficoLinha({ rotulos, valores, amostras = [], cor, nome, altura = 250
       + `${quantas ? ` (${esc(num(quantas))} ${quantas === 1 ? 'conversa' : 'conversas'})` : ''}</title></circle>`);
   });
 
-  p.push(`<line x1="${ME}" y1="${MT + alt}" x2="${ME + larg}" y2="${MT + alt}" stroke="rgba(255,255,255,.2)"/>`);
+  p.push(`<line x1="${ME}" y1="${MT + alt}" x2="${ME + larg}" y2="${MT + alt}" stroke="${COR_BASE}"/>`);
   const salto = Math.ceil(n / 14);
   rotulos.forEach((r, i) => {
     if (i % salto) return;
@@ -2240,7 +2312,7 @@ function graficoBarrasH({ itens, cor = COR.roxo }) {
     const v = Number(it.valor) || 0;
     const y = MT + i * altLinha;
     const c = it.cor || cor;
-    return `<text x="${ME - 10}" y="${y + 20}" text-anchor="end" font-size="13" fill="#d5d5da">${esc(cortar(it.rotulo, 26))}</text>`
+    return `<text x="${ME - 10}" y="${y + 20}" text-anchor="end" font-size="13" fill="${COR_ROTULO}">${esc(cortar(it.rotulo, 26))}</text>`
       + `<rect x="${ME}" y="${y + 6}" width="${Math.max(2, (v / max) * larg).toFixed(1)}" height="19" rx="4" fill="${c}">`
       + `<title>${esc(it.rotulo)}: ${esc(num(v))}</title></rect>`
       + `<text x="${(ME + Math.max(2, (v / max) * larg) + 9).toFixed(1)}" y="${y + 20}" font-size="13" fill="${COR_EIXO}">${esc(num(v))}</text>`;
@@ -2265,7 +2337,7 @@ function graficoRosca({ fatias }) {
 
   return `<div class="rosca-linha">
     <div class="grafico"><svg viewBox="0 0 200 200" role="img" preserveAspectRatio="xMidYMid meet">${arcos}
-      <text x="100" y="98" text-anchor="middle" font-size="34" font-weight="700" fill="#f5f5f7">${esc(num(total))}</text>
+      <text x="100" y="98" text-anchor="middle" font-size="34" font-weight="700" fill="${COR_TOTAL}">${esc(num(total))}</text>
       <text x="100" y="120" text-anchor="middle" font-size="12" fill="${COR_EIXO}">no período</text>
     </svg></div>
     <div class="rosca-legenda">${fatias.map(f => `<div><i style="background:${f.cor}"></i>${esc(f.rotulo)}
@@ -2361,6 +2433,7 @@ async function carregarRelatorios() {
 }
 
 function desenharRelatorios(r) {
+  lerCoresRelatorio();               // pega eixo/grade/texto do tema atual
   const dias = r.periodo.dias.map(ddmm);
   const bloco = (titulo, sub, conteudo, extra = '') => `
     <section class="bloco-rel">
@@ -2569,5 +2642,39 @@ btnNova.style.cssText = 'position:absolute;top:14px;right:14px;z-index:5';
 btnNova.addEventListener('click', abrirModalNova);
 $('.lista-topo').style.position = 'relative';
 $('.lista-topo').appendChild(btnNova);
+
+/* ============================================================
+   TEMA CLARO / ESCURO
+   O <html data-tema> já foi definido pelo script inline do <head>
+   (para não piscar). Aqui só sincronizamos o botão, o meta e a
+   persistência, e redesenhamos os relatórios se estiverem na tela.
+   ============================================================ */
+const TEMA_KEY = 'indycar_tema';
+const temaAtual = () =>
+  document.documentElement.getAttribute('data-tema') === 'claro' ? 'claro' : 'escuro';
+
+function aplicarTema(tema) {
+  const claro = tema === 'claro';
+  document.documentElement.setAttribute('data-tema', claro ? 'claro' : 'escuro');
+
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', claro ? '#eaecf0' : '#0a0a0b');
+
+  const ico = $('#temaIco'), txt = $('#temaTxt');
+  if (ico) ico.textContent = claro ? '☀️' : '🌙';
+  if (txt) txt.textContent = claro ? 'Tema claro' : 'Tema escuro';
+
+  try { localStorage.setItem(TEMA_KEY, claro ? 'claro' : 'escuro'); } catch { /* ignora */ }
+
+  // Os SVG dos relatórios são pintados com cores lidas na hora do desenho:
+  // se já houver relatório montado, redesenha para o eixo/texto acompanhar.
+  if (RELATORIO) desenharRelatorios(RELATORIO);
+}
+
+$('#btnTema')?.addEventListener('click', () =>
+  aplicarTema(temaAtual() === 'claro' ? 'escuro' : 'claro'));
+
+// Deixa o botão e o meta coerentes com o que o script do <head> já aplicou.
+aplicarTema(temaAtual());
 
 iniciar();
