@@ -185,8 +185,16 @@ svg{display:block}
    ============================================================ */
 .app{display:flex;height:100vh;overflow:hidden}
 
+/* A barra lateral ROLA. Com as abas novas e os rótulos de grupo, o conteúdo
+   passou de 878px numa tela de 800 — e como não rolava, o rodapé (usuário,
+   botão de tema e Sair) ficava fora da tela, inalcançável. */
 .sidebar{width:238px;flex:none;background:var(--grafite);border-right:1px solid var(--linha);
-  display:flex;flex-direction:column;padding:20px 14px}
+  display:flex;flex-direction:column;padding:20px 14px;
+  overflow-y:auto;overscroll-behavior:contain}
+/* barra de rolagem discreta, só aparece ao passar o mouse */
+.sidebar::-webkit-scrollbar{width:6px}
+.sidebar::-webkit-scrollbar-thumb{background:transparent;border-radius:6px}
+.sidebar:hover::-webkit-scrollbar-thumb{background:var(--scroll)}
 .marca{padding:0 6px 18px}
 .nav-grupo{font-family:var(--fonte-cond);font-weight:700;font-size:.64rem;letter-spacing:.18em;
   text-transform:uppercase;color:var(--cinza-2);padding:14px 12px 6px;user-select:none}
@@ -202,7 +210,11 @@ svg{display:block}
 .badge{background:var(--vermelho);color:#fff;font-size:.7rem;font-weight:700;
   padding:2px 7px;border-radius:20px;min-width:20px;text-align:center}
 
-.sidebar-fim{margin-top:auto;padding-top:14px;border-top:1px solid var(--linha)}
+/* Rodapé GRUDADO no fim da barra: o usuário, o botão de tema e o Sair ficam
+   sempre à vista, mesmo com a lista de abas rolando por baixo. */
+.sidebar-fim{margin-top:auto;padding-top:14px;border-top:1px solid var(--linha);
+  position:sticky;bottom:-20px;background:var(--grafite);
+  padding-bottom:20px;margin-bottom:-20px;z-index:2}
 .usuario{display:flex;align-items:center;gap:10px;padding:8px 6px}
 .usuario-txt{min-width:0}
 .usuario-txt strong{display:block;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
