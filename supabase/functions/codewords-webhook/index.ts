@@ -55,6 +55,48 @@ function recortarPayload(body: unknown): unknown {
 
 const LIMITE_CORPO = 64 * 1024;   // 64 KB já é folgado para uma mensagem de WhatsApp
 
+/* ============================================================
+   DETECTOR DE PROPAGANDA
+   Bloquear número por número é briga perdida: todo dia aparece um
+   disparador novo. Aqui a gente olha o TEXTO. São sinais de quem
+   VENDE, não de quem compra — cliente perguntando "quanto custa"
+   não dispara nenhum deles.
+   ============================================================ */
+const SINAIS_PROPAGANDA: Array<[RegExp, string]> = [
+  // preço riscado / "de X por Y" — a marca registrada do disparo
+  [/de\s*~?\s*r\$\s*[\d.,]+\s*~?[\s\S]{0,40}por\s*\*?\s*r\$/i, "preço riscado"],
+  [/~\s*r\$\s*[\d.,]+\s*~/i, "preço riscado"],
+  // "Por *R$105*" — preço em negrito é formatação de quem anuncia.
+  // O cliente escreve "por R$ 300?" sem asterisco, então não cai aqui.
+  [/\bpor\s*\*\s*r\$\s*[\d.,]+/i, "preço em destaque"],
+  // cupom e desconto
+  [/\bcupom\b|\bcupons\b/i, "cupom"],
+  [/\b\d{1,2}\s*%\s*(de\s*)?off\b/i, "percentual OFF"],
+  // links de loja e de afiliado
+  [/(amzn\.to|amazon\.com|shopee\.|shope\.ee|s\.shopee|mercadolivre|mercadolibre|magazinevoce|magazineluiza|ml\.com\.br|shp\.ee)/i, "link de loja"],
+  // vocabulário de disparo
+  [/frete\s*gr[áa]tis/i, "frete grátis"],
+  [/[úu]ltimas?\s*unidades?/i, "últimas unidades"],
+  [/\boferta\s*(rel[âa]mpago|exclusiva|do\s*dia)\b/i, "oferta relâmpago"],
+  [/\bpre[çc]inho\b/i, "precinho"],
+  [/corre+\s*(que|pra)\b|vai\s*correndo/i, "chamada de urgência"],
+  [/promo[çc][ãa]o\s*(rel[âa]mpago|imperd[íi]vel)/i, "promoção imperdível"],
+];
+
+/** Dois sinais independentes = propaganda. Um só pode ser coincidência. */
+function cheiroDePropaganda(texto: string): string[] {
+  const achados = new Set<string>();
+  for (const [re, nome] of SINAIS_PROPAGANDA) {
+    if (re.test(texto)) achados.add(nome);
+  }
+  return [...achados];
+}
+
+/** Mesma normalização do banco: tira o DDI 55 quando ele é DDI mesmo. */
+function normalizarTelefone(v: string): string {
+  return v.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
+}
+
 Deno.serve(async (req: Request) => {
   const json = (code: number, corpo: unknown) =>
     new Response(JSON.stringify(corpo), {
@@ -147,6 +189,28 @@ Deno.serve(async (req: Request) => {
       resumo: texto.slice(0, 120),
       erro: `número bloqueado (${bloqueio.nome || "sem nome"}) — ${bloqueio.motivo || "não é cliente"}` });
     return json(200, { ok: true, ignorado: "bloqueado" });
+  }
+
+  /* ---------- PROPAGANDA ----------
+     Número novo todo dia não dá para bloquear na mão. Se o texto tem dois
+     sinais de disparo (preço riscado, cupom, link de loja...), ignoramos E
+     já deixamos o número na lista, para o próximo nem chegar aqui.
+     Um cliente que só está reclamando de preço não dispara nada disto. */
+  const sinais = cheiroDePropaganda(texto);
+  if (sinais.length >= 2) {
+    const tel = normalizarTelefone(telefone);
+    try {
+      await sb.from("numeros_bloqueados").upsert({
+        telefone: tel,
+        nome: nome || "Disparo de propaganda",
+        motivo: `Bloqueado sozinho — texto de propaganda (${sinais.join(", ")})`,
+      }, { onConflict: "telefone" });
+    } catch { /* se não gravar, ao menos esta mensagem já foi barrada */ }
+
+    await registrarEvento({ direcao: "entrada", sucesso: false, telefone,
+      resumo: texto.slice(0, 120),
+      erro: `propaganda detectada (${sinais.join(", ")}) — número bloqueado automaticamente` });
+    return json(200, { ok: true, ignorado: "propaganda", sinais });
   }
 
   /* DIREÇÃO — o Carlos repassa TAMBÉM o que ele mesmo responde, e sem isto
