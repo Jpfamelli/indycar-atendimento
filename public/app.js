@@ -608,6 +608,49 @@ $('#btnExcluirConversa').addEventListener('click', async () => {
 /* ============================================================
    FICHA DO CLIENTE — aqui mora a integração com CRM e Agenda
    ============================================================ */
+/* ============================================================
+   FICHA EDITÁVEL
+   Dá para mexer no cliente, no serviço e no valor sem sair do atendimento.
+   Antes era só leitura e mandava a pessoa abrir o CRM no meio da conversa —
+   ninguém faz isso com o cliente esperando resposta, e o dado ficava sem
+   registrar.
+   ============================================================ */
+const ROTULO_LEAD = {
+  novo: 'Novo', contato: 'Em contato', orcamento: 'Orçamento',
+  agendado: 'Agendado', em_servico: 'Em serviço',
+  concluido: 'Concluído', perdido: 'Perdido',
+};
+
+/* Dinheiro como a oficina digita: "1.234,56", "1234,56", "R$ 90" ou "90".
+   parseFloat sozinho lê "1.234,56" como 1.234 — trocaria mil e duzentos por
+   um e vinte e três. */
+function lerDinheiro(txt) {
+  const s = String(txt ?? '').trim();
+  if (!s) return null;
+  const limpo = s.replace(/[^\d,.-]/g, '');
+  if (!limpo) return null;
+  // se tem vírgula, ela é o decimal e o ponto é separador de milhar
+  const normal = limpo.includes(',')
+    ? limpo.replace(/\./g, '').replace(',', '.')
+    : limpo;
+  const n = Number(normal);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+// Catálogo da oficina, para o campo de serviço sugerir em vez de exigir digitar
+let CATALOGO = [];
+async function carregarCatalogo() {
+  if (CATALOGO.length) return;
+  /* As colunas são `servico` e `fazemos` — não `nome`/`ativo`. Escrevi errado
+     na primeira versão e o catch engoliu: o campo ficou sem sugestão nenhuma
+     e nada avisou. O erro agora vai para o console; a tela não trava por
+     isso, porque o campo aceita texto livre de qualquer jeito. */
+  const { data, error } = await sb.from('catalogo_servicos')
+    .select('servico').eq('fazemos', true).order('servico').limit(400);
+  if (error) { console.error('catálogo de serviços:', error.message); return; }
+  CATALOGO = (data || []).map(s => s.servico).filter(Boolean);
+}
+
 async function carregarFicha(conv) {
   const vazio = $('#fichaVazia'), alvo = $('#fichaConteudo');
 
@@ -624,7 +667,11 @@ async function carregarFicha(conv) {
   alvo.innerHTML = '<div class="vazio"><span class="girando"></span>Carregando ficha…</div>';
 
   try {
-    const [c360, leads, agend] = await Promise.all([
+    /* O catálogo entra no Promise.all: fora dele, o datalist era montado
+       antes das sugestões chegarem e o campo de serviço abria vazio na
+       primeira conversa. É cache, então só custa na primeira vez. */
+    const [, c360, leads, agend] = await Promise.all([
+      carregarCatalogo(),
       sb.from('v_cliente_360').select('*').eq('id', conv.cliente_id).maybeSingle(),
       sb.from('leads').select('*').eq('cliente_id', conv.cliente_id)
         .order('created_at', { ascending:false }).limit(5),
@@ -632,7 +679,7 @@ async function carregarFicha(conv) {
         .order('inicio_em', { ascending:false }).limit(5),
     ]);
 
-    const f = c360.data || {};
+    const f = c360?.data || {};
     fichaCache = f;              // alimenta as variáveis dos atalhos ({carro}, {horario}…)
     const listaLeads = leads.data || [];
     const listaAgend = agend.data || [];
@@ -662,23 +709,70 @@ async function carregarFicha(conv) {
         </div>` : ''}
 
       <div class="ficha-bloco">
-        <div class="ficha-titulo">Dados do veículo</div>
-        <div class="ficha-linha"><span>Carro</span><b>${esc(f.carro_modelo) || '—'}</b></div>
-        <div class="ficha-linha"><span>Placa</span><b>${esc(f.placa) || '—'}</b></div>
-        <div class="ficha-linha"><span>Origem</span><b>${esc(f.origem) || '—'}</b></div>
-        <div class="ficha-linha"><span>Cliente desde</span><b>${esc(
-          f.cliente_desde ? new Date(f.cliente_desde).toLocaleDateString('pt-BR') : '—')}</b></div>
+        <div class="ficha-titulo">
+          Cliente e veículo
+          <button type="button" class="ficha-editar" id="btnEditarCliente">editar</button>
+        </div>
+        <div id="clienteVer">
+          <div class="ficha-linha"><span>Nome</span><b>${esc(f.nome) || '—'}</b></div>
+          <div class="ficha-linha"><span>Carro</span><b>${esc(f.carro_modelo) || '—'}</b></div>
+          <div class="ficha-linha"><span>Placa</span><b>${esc(f.placa) || '—'}</b></div>
+          <div class="ficha-linha"><span>Origem</span><b>${esc(f.origem) || '—'}</b></div>
+          <div class="ficha-linha"><span>Cliente desde</span><b>${esc(
+            f.cliente_desde ? new Date(f.cliente_desde).toLocaleDateString('pt-BR') : '—')}</b></div>
+        </div>
+        <form id="clienteEditar" class="ficha-form" hidden>
+          <label>Nome<input id="fcNome" maxlength="120" value="${esc(f.nome || '')}" /></label>
+          <label>Carro<input id="fcCarro" maxlength="80" placeholder="Ex.: Onix 2019"
+                 value="${esc(f.carro_modelo || '')}" /></label>
+          <label>Placa<input id="fcPlaca" maxlength="10" placeholder="ABC-1D23"
+                 value="${esc(f.placa || '')}" /></label>
+          <label>E-mail<input id="fcEmail" type="email" maxlength="160" value="${esc(f.email || '')}" /></label>
+          <label>Observações<textarea id="fcObs" rows="2" maxlength="600"
+                 placeholder="O que é bom lembrar deste cliente">${esc(f.observacoes || '')}</textarea></label>
+          <div class="ficha-form-acoes">
+            <button type="button" class="btn btn-ghost sm" id="btnCancelarCliente">Cancelar</button>
+            <button type="submit" class="btn btn-primary sm">Salvar</button>
+          </div>
+        </form>
       </div>
 
       <div class="ficha-bloco">
-        <div class="ficha-titulo">Funil (CRM)</div>
+        <div class="ficha-titulo">
+          Serviços e valores
+          <button type="button" class="ficha-editar" id="btnNovoServico">+ novo</button>
+        </div>
+        <form id="servicoNovo" class="ficha-form" hidden>
+          <label>Serviço
+            <input id="fsServico" list="listaServicos" maxlength="120"
+                   placeholder="Ex.: Troca de óleo" />
+          </label>
+          <div class="ficha-form-lado">
+            <label>Orçado<input id="fsOrcado" type="text" inputmode="decimal" placeholder="0,00" /></label>
+            <label>Pago<input id="fsPago" type="text" inputmode="decimal" placeholder="0,00" /></label>
+          </div>
+          <label>Situação
+            <select id="fsStatus">
+              ${['novo','contato','orcamento','agendado','em_servico','concluido','perdido']
+                .map(s => `<option value="${s}"${s === 'orcamento' ? ' selected' : ''}>${esc(ROTULO_LEAD[s])}</option>`).join('')}
+            </select>
+          </label>
+          <div class="ficha-form-acoes">
+            <button type="button" class="btn btn-ghost sm" id="btnCancelarServico">Cancelar</button>
+            <button type="submit" class="btn btn-primary sm">Adicionar</button>
+          </div>
+        </form>
+
         ${listaLeads.length ? listaLeads.map(l => `
-          <div class="item-hist">
-            <div class="ih-topo"><b>${esc(l.servico || 'sem serviço')}</b>
-              <span class="tag ${l.status === 'concluido' ? 'aberta' : 'pendente'}">${esc(l.status)}</span></div>
+          <div class="item-hist item-lead" data-lead="${esc(l.id)}">
+            <div class="ih-topo">
+              <b>${esc(l.servico || 'sem serviço')}</b>
+              <span class="tag ${l.status === 'concluido' ? 'aberta' : 'pendente'}">${esc(ROTULO_LEAD[l.status] || l.status)}</span>
+            </div>
             <small>${esc(new Date(l.created_at).toLocaleDateString('pt-BR'))} ·
               ${l.status === 'concluido' ? brl(l.valor_pago) : brl(l.valor_orcado) + ' orçado'}</small>
-          </div>`).join('') : '<div class="vazio" style="padding:14px">Sem leads no CRM.</div>'}
+            <button type="button" class="ficha-editar item-editar" data-editar-lead="${esc(l.id)}">editar</button>
+          </div>`).join('') : '<div class="vazio" style="padding:14px">Nenhum serviço registrado.</div>'}
       </div>
 
       <div class="ficha-bloco">
@@ -692,11 +786,164 @@ async function carregarFicha(conv) {
               ${a.consultores?.nome ? '· ' + esc(a.consultores.nome) : ''}
               ${a.valor > 0 ? '· ' + brl(a.valor) : ''}</small>
           </div>`).join('') : '<div class="vazio" style="padding:14px">Sem horários marcados.</div>'}
-      </div>`;
+      </div>
+
+      <datalist id="listaServicos">
+        ${CATALOGO.map(n => `<option value="${esc(n)}"></option>`).join('')}
+      </datalist>`;
+
+    ligarEdicaoDaFicha(conv, f, listaLeads);
   } catch (err) {
     alvo.innerHTML = `<div class="vazio">Não consegui carregar a ficha: ${esc(err.message)}</div>`;
   }
 }
+
+/* Liga os botões da ficha. Fica separado do HTML para o template acima
+   continuar legível e para poder religar tudo depois de cada recarga. */
+function ligarEdicaoDaFicha(conv, f, leads) {
+  const ver = $('#clienteVer'), form = $('#clienteEditar');
+
+  $('#btnEditarCliente')?.addEventListener('click', () => {
+    const abrindo = form.hidden;
+    form.hidden = !abrindo; ver.hidden = abrindo;
+    $('#btnEditarCliente').textContent = abrindo ? 'cancelar' : 'editar';
+    if (abrindo) $('#fcNome').focus();
+  });
+  $('#btnCancelarCliente')?.addEventListener('click', () => {
+    form.hidden = true; ver.hidden = false;
+    $('#btnEditarCliente').textContent = 'editar';
+  });
+
+  form?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const nome = $('#fcNome').value.trim();
+    if (!nome) return toast('⚠️ O nome não pode ficar vazio.');
+    const botao = form.querySelector('[type="submit"]');
+    botao.disabled = true;
+    try {
+      const campos = {
+        nome,
+        carro_modelo: $('#fcCarro').value.trim() || null,
+        placa:        $('#fcPlaca').value.trim().toUpperCase() || null,
+        email:        $('#fcEmail').value.trim() || null,
+        observacoes:  $('#fcObs').value.trim() || null,
+      };
+      const { error } = await sb.from('clientes').update(campos).eq('id', conv.cliente_id);
+      if (error) throw error;
+
+      /* O nome da conversa é o que aparece na lista e no topo do chat.
+         Sem acertar aqui, a ficha diria "Maria Silva" e a lista continuaria
+         com o apelido do WhatsApp. */
+      if (nome !== conv.nome) {
+        await sb.from('conversas').update({ nome }).eq('id', conv.id);
+        conv.nome = nome;
+        $('#chatNome').textContent = nome;
+        await carregarConversas();
+      }
+      toast('✅ Ficha atualizada');
+      await carregarFicha(conv);
+    } catch (err) {
+      toast('⚠️ ' + err.message);
+    } finally { botao.disabled = false; }
+  });
+
+  // ---- novo serviço ----
+  const novo = $('#servicoNovo');
+  $('#btnNovoServico')?.addEventListener('click', () => {
+    const abrindo = novo.hidden;
+    novo.hidden = !abrindo;
+    $('#btnNovoServico').textContent = abrindo ? 'cancelar' : '+ novo';
+    if (abrindo) $('#fsServico').focus();
+  });
+  $('#btnCancelarServico')?.addEventListener('click', () => {
+    novo.hidden = true; $('#btnNovoServico').textContent = '+ novo';
+  });
+
+  novo?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const servico = $('#fsServico').value.trim();
+    if (!servico) return toast('⚠️ Diga qual é o serviço.');
+    const orcado = lerDinheiro($('#fsOrcado').value);
+    const pago   = lerDinheiro($('#fsPago').value);
+    const status = $('#fsStatus').value;
+    const botao = novo.querySelector('[type="submit"]');
+    botao.disabled = true;
+    try {
+      /* valor_orcado e valor_pago são NOT NULL no banco: campo em branco
+         vira 0, não nulo. "Ainda não tem valor" e "custou zero" dão no
+         mesmo para a conta da oficina, e o insert não quebra. */
+      const { error } = await sb.from('leads').insert({
+        cliente_id: conv.cliente_id, nome: f.nome || conv.nome, telefone: conv.telefone,
+        carro_modelo: f.carro_modelo || null, placa: f.placa || null,
+        servico, valor_orcado: orcado ?? 0, valor_pago: pago ?? 0,
+        status, origem: 'whatsapp',
+        observacoes: 'Registrado pelo painel de atendimento.',
+      });
+      if (error) throw error;
+      toast('✅ Serviço registrado');
+      await carregarFicha(conv);
+    } catch (err) {
+      toast('⚠️ ' + err.message);
+    } finally { botao.disabled = false; }
+  });
+
+  // ---- editar um serviço já registrado ----
+  $$('[data-editar-lead]').forEach(b => b.addEventListener('click', () => {
+    const lead = leads.find(l => l.id === b.dataset.editarLead);
+    if (lead) abrirEdicaoDeLead(conv, lead);
+  }));
+}
+
+/* Edição de um serviço já registrado. Guarda a conversa e o lead num
+   fechamento para o formulário saber o que salvar. */
+let leadEmEdicao = null;
+
+function abrirEdicaoDeLead(conv, lead) {
+  leadEmEdicao = { conv, lead };
+  $('#mlServico').value = lead.servico || '';
+  $('#mlOrcado').value  = lead.valor_orcado != null ? String(lead.valor_orcado).replace('.', ',') : '';
+  $('#mlPago').value    = lead.valor_pago   != null ? String(lead.valor_pago).replace('.', ',') : '';
+  $('#mlStatus').value  = lead.status || 'novo';
+  $('#mlObs').value     = lead.observacoes || '';
+  $('#modalLeadBg').classList.add('aberto');
+  setTimeout(() => $('#mlServico').focus(), 60);
+}
+
+$('#formLead')?.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  if (!leadEmEdicao) return;
+  const { conv, lead } = leadEmEdicao;
+  const botao = ev.currentTarget.querySelector('[type="submit"]');
+  botao.disabled = true;
+  try {
+    const { error } = await sb.from('leads').update({
+      servico: $('#mlServico').value.trim() || null,
+      valor_orcado: lerDinheiro($('#mlOrcado').value) ?? 0,   // colunas NOT NULL
+      valor_pago:   lerDinheiro($('#mlPago').value)   ?? 0,
+      status:       $('#mlStatus').value,
+      observacoes:  $('#mlObs').value.trim() || null,
+    }).eq('id', lead.id);
+    if (error) throw error;
+    $('#modalLeadBg').classList.remove('aberto');
+    toast('✅ Serviço atualizado');
+    await carregarFicha(conv);
+  } catch (err) {
+    toast('⚠️ ' + err.message);
+  } finally { botao.disabled = false; }
+});
+
+$('#btnApagarLead')?.addEventListener('click', async () => {
+  if (!leadEmEdicao) return;
+  const { conv, lead } = leadEmEdicao;
+  if (!confirm(`Apagar o registro "${lead.servico || 'sem serviço'}"?\n\nIsso sai do histórico do cliente e do CRM.`)) return;
+  try {
+    const { error } = await sb.from('leads').delete().eq('id', lead.id);
+    if (error) throw error;
+    $('#modalLeadBg').classList.remove('aberto');
+    toast('🗑 Registro apagado');
+    await carregarFicha(conv);
+  } catch (err) { toast('⚠️ ' + err.message); }
+});
 
 /* ============================================================
    TEMPO REAL — mensagem nova aparece sozinha
@@ -2932,7 +3179,7 @@ function desenharRelatorios(r) {
 /* ---------------- Fechar modais novos ---------------- */
 $$('[data-fechar]').forEach(b => b.addEventListener('click', () =>
   $('#' + b.dataset.fechar).classList.remove('aberto')));
-['modalAgendarBg','modalAtalhoBg','modalEtapaBg'].forEach(id => {
+['modalAgendarBg','modalAtalhoBg','modalEtapaBg','modalLeadBg'].forEach(id => {
   const el = $('#' + id);
   el.addEventListener('click', e => { if (e.target === el) el.classList.remove('aberto'); });
 });

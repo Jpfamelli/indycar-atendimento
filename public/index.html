@@ -674,6 +674,42 @@
 </div>
 
 <!-- Criar / editar etapa -->
+<!-- Editar um serviço/valor já registrado, sem sair do atendimento -->
+<div class="modal-bg" id="modalLeadBg">
+  <div class="modal">
+    <button class="modal-x" data-fechar="modalLeadBg">×</button>
+    <h3>Serviço do cliente</h3>
+    <form id="formLead" class="form-vertical">
+      <label>Serviço
+        <input id="mlServico" list="listaServicos" maxlength="120" placeholder="Ex.: Troca de óleo" />
+      </label>
+      <div class="ficha-form-lado">
+        <label>Valor orçado<input id="mlOrcado" type="text" inputmode="decimal" placeholder="0,00" /></label>
+        <label>Valor pago<input id="mlPago" type="text" inputmode="decimal" placeholder="0,00" /></label>
+      </div>
+      <label>Situação
+        <select id="mlStatus">
+          <option value="novo">Novo</option>
+          <option value="contato">Em contato</option>
+          <option value="orcamento">Orçamento</option>
+          <option value="agendado">Agendado</option>
+          <option value="em_servico">Em serviço</option>
+          <option value="concluido">Concluído</option>
+          <option value="perdido">Perdido</option>
+        </select>
+      </label>
+      <label>Observações
+        <textarea id="mlObs" rows="2" maxlength="600" placeholder="Detalhe do serviço, peça trocada…"></textarea>
+      </label>
+      <div class="int-acoes">
+        <button type="button" class="btn btn-ghost sm" id="btnApagarLead">Apagar</button>
+        <div style="flex:1"></div>
+        <button type="submit" class="btn btn-primary sm">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="modal-bg" id="modalEtapaBg">
   <div class="modal">
     <button class="modal-x" data-fechar="modalEtapaBg">×</button>
