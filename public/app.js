@@ -180,6 +180,7 @@ async function entrarNoApp(user) {
   $('#perfilEmail').value = perfil.email;
   $('#perfilPapel').value = perfil.papel === 'admin' ? 'Administrador' : 'Atendente';
   aplicarPapelConfig();
+  vigiarConexao();   // acende a tarja se o WhatsApp estiver fora do ar
 
   // as etapas vêm ANTES das conversas: são elas que desenham as plaquinhas
   await carregarEtapas();
@@ -2678,3 +2679,181 @@ $('#btnTema')?.addEventListener('click', () =>
 aplicarTema(temaAtual());
 
 iniciar();
+
+/* ============================================================
+   CONEXÃO DO WHATSAPP
+   O aparelho da oficina cai sozinho (sessão expira, celular
+   desliga, alguém desconecta na mão). Até hoje só se descobria
+   quando o envio falhava com "erro 500" — ou seja, depois que o
+   cliente já tinha ficado sem resposta. Aqui isso vira alarme.
+   ============================================================ */
+/* `var` de propósito: iniciar() roda antes deste trecho do arquivo e chama
+   vigiarConexao(). Com `let` isso fica na mão do acaso — basta alguém tirar
+   um await do caminho para virar "Cannot access before initialization". */
+var conexaoTimer = null;
+var pareamentoTimer = null;
+
+/* Empurra o app exatamente a altura da tarja — nem um pixel a mais. */
+function reservarEspacoDaTarja() {
+  const tarja = document.getElementById('tarjaConexao');
+  const app   = document.getElementById('telaApp');
+  if (!tarja || !app) return;
+  app.style.paddingTop = tarja.hidden ? '' : `${Math.ceil(tarja.getBoundingClientRect().height)}px`;
+}
+// Redimensionar a janela faz o texto quebrar e a tarja mudar de altura.
+if (typeof ResizeObserver === 'function') {
+  const alvo = () => document.getElementById('tarjaConexao');
+  const obs = new ResizeObserver(() => reservarEspacoDaTarja());
+  const t0 = alvo(); if (t0) obs.observe(t0);
+}
+
+async function verConexao({ silencioso = true } = {}) {
+  const bolinha = document.getElementById('conexaoBolinha');
+  const texto   = document.getElementById('conexaoTexto');
+  const tarja   = document.getElementById('tarjaConexao');
+  const app     = document.getElementById('telaApp');
+  if (!tarja) return;
+
+  let est;
+  try {
+    const r = await fetch('/api/whatsapp/status', { headers: await authCabecalhos() });
+    if (r.status === 401) return;                 // deslogado: o login já cuida
+    est = await r.json();
+  } catch (e) {
+    // Rede caiu no navegador. Isso não prova que o WhatsApp caiu — não
+    // vale acender o alarme e assustar quem está atendendo.
+    if (!silencioso && texto) {
+      texto.textContent = 'Não deu para verificar agora.';
+      if (bolinha) bolinha.className = 'conexao-bolinha';
+    }
+    return;
+  }
+
+  const caiu = est.conectado === false;
+  const meio = est.conectado === true && est.inscrito === false;
+
+  tarja.hidden = !(caiu || meio);
+  app?.classList.toggle('com-tarja', caiu || meio);
+  const tt = document.getElementById('tarjaTexto');
+  /* O espaço reservado tem que sair da altura real da tarja. Um valor fixo
+     no CSS erra assim que o texto quebra em duas linhas — e aí ela come o
+     topo da lateral.
+     Chamada direta, não em requestAnimationFrame: em aba de fundo o rAF não
+     roda, e a tarja acabava aparecendo sobreposta ao voltar para a aba. */
+  reservarEspacoDaTarja();
+  if (tt) {
+    tt.textContent = meio
+      ? 'O WhatsApp está conectado, mas as mensagens não estão chegando no painel.'
+      : 'O WhatsApp da oficina está desconectado — nenhuma mensagem entra nem sai.';
+  }
+
+  if (bolinha && texto) {
+    bolinha.className = 'conexao-bolinha ' + (caiu ? 'ruim' : meio ? 'meio' : est.conectado ? 'ok' : '');
+    texto.textContent = est.conectado === true && est.inscrito
+      ? `Conectado no ${est.numero || 'número da oficina'}`
+      : (est.motivo || 'Situação desconhecida.');
+  }
+}
+
+async function pedirPareamento() {
+  const bloco = document.getElementById('blocoPareamento');
+  const cod   = document.getElementById('pareamentoCodigo');
+  const prazo = document.getElementById('pareamentoPrazo');
+  const msg   = document.getElementById('pareamentoMsg');
+  const btn   = document.getElementById('btnParear');
+  if (!bloco) return;
+
+  btn && (btn.disabled = true, btn.textContent = 'Gerando…');
+  if (msg) msg.hidden = true;
+
+  try {
+    const r = await fetch('/api/whatsapp/parear', {
+      method: 'POST', headers: await authCabecalhos(), body: '{}',
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.erro || 'Não deu para gerar o código.');
+
+    bloco.hidden = false;
+    if (cod) cod.textContent = j.codigo || '(sem código)';
+
+    /* O código vale pouco tempo. Sem o relógio, a pessoa acha que
+       digitou errado quando na verdade só demorou. */
+    let resta = 60;
+    clearInterval(pareamentoTimer);
+    const tique = () => {
+      if (!prazo) return;
+      prazo.textContent = resta > 0
+        ? `Vale por mais ${resta}s — se expirar, é só pedir outro.`
+        : 'Este código expirou. Toque em “Reconectar WhatsApp” para gerar outro.';
+      if (resta <= 0) clearInterval(pareamentoTimer);
+      resta--;
+    };
+    tique(); pareamentoTimer = setInterval(tique, 1000);
+
+    /* Depois que a pessoa digita o código, o aparelho fica pareado mas
+       SEM inscrição — as mensagens chegariam no celular e não cairiam
+       aqui. Fica vigiando e religa a rota sozinho. */
+    let tentativas = 0;
+    clearInterval(conexaoTimer);
+    const vigiar = setInterval(async () => {
+      tentativas++;
+      let est = {};
+      try {
+        est = await (await fetch('/api/whatsapp/status', { headers: await authCabecalhos() })).json();
+      } catch { /* tenta de novo no próximo tique */ }
+
+      if (est.conectado === true) {
+        clearInterval(vigiar); clearInterval(pareamentoTimer);
+        if (!est.inscrito) {
+          if (msg) { msg.hidden = false; msg.className = 'form-msg'; msg.textContent = 'Pareado! Religando o atendimento…'; }
+          try {
+            const rr = await fetch('/api/whatsapp/reinscrever', {
+              method: 'POST', headers: await authCabecalhos(), body: '{}',
+            });
+            const jj = await rr.json();
+            if (msg) {
+              msg.className = 'form-msg ' + (jj.ok ? 'ok' : 'erro');
+              msg.textContent = jj.ok
+                ? '✅ Conectado e recebendo mensagens. Pode atender.'
+                : `Pareou, mas falhou ao religar: ${jj.erro}`;
+            }
+          } catch (e) {
+            if (msg) { msg.className = 'form-msg erro'; msg.textContent = `Pareou, mas falhou ao religar: ${e.message}`; }
+          }
+        } else if (msg) {
+          msg.hidden = false; msg.className = 'form-msg ok';
+          msg.textContent = '✅ Conectado e recebendo mensagens. Pode atender.';
+        }
+        verConexao({ silencioso: false });
+        setTimeout(() => { bloco.hidden = true; }, 6000);
+      }
+      if (tentativas > 40) clearInterval(vigiar);   // ~2 min e desiste
+    }, 3000);
+
+  } catch (e) {
+    if (msg) { msg.hidden = false; msg.className = 'form-msg erro'; msg.textContent = e.message; }
+  } finally {
+    btn && (btn.disabled = false, btn.textContent = 'Reconectar WhatsApp');
+  }
+}
+
+document.getElementById('btnParear')?.addEventListener('click', pedirPareamento);
+document.getElementById('btnVerConexao')?.addEventListener('click', () => verConexao({ silencioso: false }));
+document.getElementById('tarjaBtn')?.addEventListener('click', () => {
+  document.querySelector('[data-aba="config"]')?.click();
+  document.querySelector('[data-secao="sistema"]')?.click();
+  document.getElementById('cartaoConexao')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+/* De 2 em 2 minutos. Só com a aba visível: se o painel ficou aberto a
+   noite toda numa TV, não faz sentido bater no CodeWords o tempo todo. */
+function vigiarConexao() {
+  verConexao();
+  clearInterval(conexaoTimer);
+  conexaoTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') verConexao();
+  }, 120000);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') verConexao();
+});

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "atendimento",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "process.env.PORT='3210';require('./server.js')"],
+      "port": 3210
+    }
+  ]
+}

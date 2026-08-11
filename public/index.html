@@ -73,6 +73,14 @@
 <!-- ============ APLICAÇÃO ============ -->
 <div id="telaApp" class="app" hidden>
 
+  <!-- Tarja de WhatsApp fora do ar. Fica por cima de tudo de propósito:
+       enquanto isso estiver aceso, o atendimento não funciona. -->
+  <div class="tarja-caida" id="tarjaConexao" hidden>
+    <span class="tarja-ponto"></span>
+    <span id="tarjaTexto">O WhatsApp da oficina está desconectado — nenhuma mensagem entra nem sai.</span>
+    <button type="button" class="tarja-btn" id="tarjaBtn">Reconectar</button>
+  </div>
+
   <!-- Barra lateral -->
   <nav class="sidebar">
     <div class="marca">
@@ -529,6 +537,37 @@
       <!-- ---------- Equipe e sistema ---------- -->
       <div class="config-secao" id="config-sistema">
         <div class="cartoes">
+        <div class="cartao" id="cartaoConexao">
+          <h3>Conexão do WhatsApp</h3>
+          <p class="cartao-sub">O celular da oficina precisa estar pareado. Se cair, nenhuma
+            mensagem entra nem sai — e o cliente fica falando sozinho.</p>
+
+          <div class="conexao-estado" id="conexaoEstado">
+            <span class="conexao-bolinha" id="conexaoBolinha"></span>
+            <span id="conexaoTexto">Verificando…</span>
+          </div>
+
+          <div class="int-acoes">
+            <button type="button" class="btn sm" id="btnVerConexao">Verificar agora</button>
+            <div style="flex:1"></div>
+            <button type="button" class="btn btn-primary sm" id="btnParear">Reconectar WhatsApp</button>
+          </div>
+
+          <div class="pareamento" id="blocoPareamento" hidden>
+            <p class="pareamento-titulo">Digite este código no celular da oficina:</p>
+            <div class="pareamento-codigo" id="pareamentoCodigo">----‑----</div>
+            <p class="pareamento-prazo" id="pareamentoPrazo"></p>
+            <ol class="pareamento-passos">
+              <li>Abra o WhatsApp no celular da oficina</li>
+              <li>Toque em <b>⋮</b> › <b>Aparelhos conectados</b></li>
+              <li><b>Conectar aparelho</b></li>
+              <li>Toque em <b>“Conectar com número de telefone”</b></li>
+              <li>Digite o código acima</li>
+            </ol>
+            <p class="form-msg" id="pareamentoMsg" hidden></p>
+          </div>
+        </div>
+
         <div class="cartao" id="cartaoWhatsapp">
           <h3>WhatsApp (Cloud API)</h3>
           <p class="cartao-sub">Sem isso, as mensagens entram manualmente. Com isso, o envio

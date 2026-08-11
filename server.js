@@ -291,6 +291,11 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 // Destino fixo do "Testar conexão": o WhatsApp da própria oficina
 const TELEFONE_DA_OFICINA = process.env.TELEFONE_OFICINA || '5512996830272';
 
+/* Linha que ATENDE os clientes — a que fica pareada no CodeWords.
+   Não confundir com a de cima: aquela é só o destino do teste. Checar a
+   conexão pelo número errado faz o painel jurar que está tudo desconectado. */
+const NUMERO_DO_ATENDIMENTO = process.env.WHATSAPP_NUMERO || '5512982211090';
+
 /* Cliente com poderes de servidor (ignora RLS). Só é preciso para o
    webhook, que chega sem usuário logado. */
 function adminSupabase() {
@@ -509,6 +514,119 @@ async function receberDoCodeWords(req, body) {
 }
 
 /** Atendente respondeu → pede ao CodeWords para entregar no WhatsApp. */
+/* Endereço e chave do device manager, usados pelas rotas de conexão.
+   Devolve null quando a integração ainda não foi configurada. */
+async function baseDoGerenciador() {
+  const sb = adminSupabase();
+  if (!sb) return null;
+  const { data: cfg } = await sb.from('codewords_config').select('*').maybeSingle();
+  if (!cfg?.api_key) return null;
+  const base = (cfg.base_url || 'https://runtime.codewords.ai').replace(/\/+$/, '');
+  return {
+    url: `${base}/run/${cfg.servico_conexao || 'whatsapp_device_manager'}`,
+    chave: cfg.api_key,
+    telefone: cfg.numero_whatsapp || NUMERO_DO_ATENDIMENTO,
+    fluxo: cfg.service_id || null,
+    sb,
+  };
+}
+
+/* Situação real do aparelho, direto no CodeWords.
+   `conectado` é o que a tarja do painel olha. */
+async function estadoDoWhatsApp() {
+  const g = await baseDoGerenciador();
+  if (!g) return { conectado: null, motivo: 'A integração com o CodeWords não está configurada.' };
+
+  const numero = '+' + soDigitos(g.telefone);
+  try {
+    const r = await fetch(`${g.url}/connections`, {
+      headers: { Authorization: g.chave }, signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) return { conectado: null, motivo: `O CodeWords respondeu ${r.status}.` };
+
+    const lista = await r.json();
+    const nossas = (Array.isArray(lista) ? lista : []).filter(c => c.phone_number === numero);
+    if (!nossas.length) return { conectado: false, numero, motivo: 'Este número nunca foi pareado.' };
+
+    const viva = nossas.find(c => /logged_in|connected/i.test(String(c.status || '')));
+    if (!viva) {
+      return { conectado: false, numero, estado: nossas[0].status,
+        motivo: 'O WhatsApp da oficina está desconectado. Nenhuma mensagem entra nem sai.' };
+    }
+    /* Pareado mas sem inscrição = as mensagens chegam no celular e não caem no
+       painel. Silencioso e pior que estar desconectado, porque parece que está
+       tudo bem. */
+    if (!viva.service_path) {
+      return { conectado: true, numero, inscrito: false,
+        motivo: 'Conectado, mas sem receber: falta reinscrever no fluxo do atendimento.' };
+    }
+    return { conectado: true, numero, inscrito: true, rota: viva.service_path };
+  } catch (e) {
+    return { conectado: null, motivo: `Não deu para falar com o CodeWords: ${e.message}` };
+  }
+}
+
+/* Pede um código de pareamento e já deixa a reinscrição encaminhada. */
+async function gerarCodigoDePareamento() {
+  const g = await baseDoGerenciador();
+  if (!g) return { ok: false, erro: 'A integração com o CodeWords não está configurada.' };
+
+  const numero = '+' + soDigitos(g.telefone);
+  const rota = g.fluxo ? `${g.fluxo}/webhook` : null;
+  try {
+    const r = await fetch(`${g.url}/connections`, {
+      method: 'POST',
+      headers: { Authorization: g.chave, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone_number: numero, service_path: g.fluxo ? `${g.fluxo}/` : undefined }),
+      signal: AbortSignal.timeout(90000),
+    });
+    const txt = await r.text();
+    if (!r.ok) return { ok: false, erro: `O CodeWords respondeu ${r.status}: ${txt.slice(0, 180)}` };
+
+    const j = JSON.parse(txt);
+    if (j.phone_id) {
+      await g.sb.from('codewords_config').update({ device_id: j.phone_id }).eq('id', true);
+    }
+    return { ok: true, codigo: j.pair_code || null, phoneId: j.phone_id || null, rota,
+      instrucoes: 'No celular da oficina: WhatsApp › Aparelhos conectados › Conectar aparelho › '
+                + '"Conectar com número de telefone" › digite o código.' };
+  } catch (e) {
+    return { ok: false, erro: `Não deu para falar com o CodeWords: ${e.message}` };
+  }
+}
+
+/* Religa o aparelho ao fluxo do Carlos depois do pareamento.
+   ATENÇÃO: o alvo tem que ser SEMPRE o fluxo do Carlos. Apontar para outro
+   endereço desvia as mensagens dos clientes e tira o atendimento do ar — já
+   aconteceu uma vez aqui. */
+async function reinscreverNoFluxo() {
+  const g = await baseDoGerenciador();
+  if (!g) return { ok: false, erro: 'A integração com o CodeWords não está configurada.' };
+  if (!g.fluxo) return { ok: false, erro: 'Falta o Service ID do fluxo em Configurações.' };
+
+  const est = await estadoDoWhatsApp();
+  if (!est.conectado) return { ok: false, erro: est.motivo || 'O aparelho ainda não está conectado.' };
+
+  const sb = g.sb;
+  const { data: cfg } = await sb.from('codewords_config').select('device_id').maybeSingle();
+  const phoneId = cfg?.device_id;
+  if (!phoneId) return { ok: false, erro: 'Falta o identificador do aparelho.' };
+
+  try {
+    const r = await fetch(`${g.url}/connections/${encodeURIComponent(phoneId)}/subscribe`, {
+      method: 'PUT',
+      headers: { Authorization: g.chave, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service_path: `${g.fluxo}/webhook` }),
+      signal: AbortSignal.timeout(60000),
+    });
+    const txt = await r.text();
+    if (!r.ok) return { ok: false, erro: `O CodeWords respondeu ${r.status}: ${txt.slice(0, 180)}` };
+    return { ok: true, rota: `${g.fluxo}/webhook` };
+  } catch (e) {
+    return { ok: false, erro: `Não deu para falar com o CodeWords: ${e.message}` };
+  }
+}
+
 async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
   const sb = adminSupabase();
   // "desligado" = ainda não configurado; a mensagem fica registrada aqui e o
@@ -579,7 +697,14 @@ async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
 
       // Erros comuns traduzidos para o atendente entender na hora
       let erro = `CodeWords respondeu ${resposta.status}`;
-      if (resposta.status === 429 && /limit/i.test(txt)) {
+      /* O celular da oficina cai do WhatsApp de tempos em tempos (sessão expira,
+         aparelho sem bateria, "Aparelhos conectados" desconectado na mão). O
+         CodeWords devolve 500 INVALID_WA_CLI, que não diz nada para o atendente
+         e faz parecer defeito do sistema. Aqui vira instrução do que fazer. */
+      if (/INVALID_WA_CLI|whatsapp cli is invalid|not_connected|logged_out/i.test(txt)) {
+        erro = 'O WhatsApp da oficina está desconectado — nenhuma mensagem sai enquanto isso. '
+             + 'Reconecte em Configurações › Conexão do WhatsApp (leva 30 segundos no celular).';
+      } else if (resposta.status === 429 && /limit/i.test(txt)) {
         erro = 'A cota mensal do CodeWords acabou — a mensagem ficou registrada aqui, '
              + 'mas não saiu no WhatsApp. Renove o plano ou aguarde virar o mês.';
       } else if (resposta.status === 401 || resposta.status === 403) {
@@ -1508,6 +1633,48 @@ const server = http.createServer(async (req, res) => {
       const r = await enviarPeloCodeWords(dados);
       // "desligado" não é erro: a mensagem fica registrada aqui mesmo assim
       return json(res, r.ok || r.desligado ? 200 : 502, r);
+    }
+
+    /* ---- Saúde da conexão do WhatsApp ----
+       O celular da oficina cai sozinho de vez em quando e, até alguém tentar
+       responder um cliente, ninguém percebe. O painel consulta isto de tempos
+       em tempos e mostra a tarja vermelha no topo. */
+    if (pathname === '/api/whatsapp/status' && req.method === 'GET') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      const r = await estadoDoWhatsApp();
+      return json(res, 200, r);
+    }
+
+    /* ---- Reconectar o WhatsApp (código de pareamento) ----
+       O CodeWords aposentou o QR: agora devolve um código de 8 letras que se
+       digita no celular. Parear ZERA a inscrição do aparelho, então logo depois
+       é obrigatório reinscrever no fluxo do Carlos — senão as mensagens dos
+       clientes chegam no WhatsApp e não caem em lugar nenhum. */
+    if (pathname === '/api/whatsapp/parear' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') {
+        return json(res, 403, { erro: 'Só o administrador pode reconectar o WhatsApp.' });
+      }
+      await readBody(req);
+      if (!dentroDoLimite(`parear:${quem.id}`, 6, 300_000)) {
+        return json(res, 429, { erro: 'Espere alguns minutos antes de pedir outro código.' });
+      }
+      const r = await gerarCodigoDePareamento();
+      return json(res, r.ok ? 200 : 502, r);
+    }
+
+    // ---- Religar o aparelho ao fluxo do Carlos (depois de parear) ----
+    if (pathname === '/api/whatsapp/reinscrever' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') {
+        return json(res, 403, { erro: 'Só o administrador pode religar a conexão.' });
+      }
+      await readBody(req);
+      const r = await reinscreverNoFluxo();
+      return json(res, r.ok ? 200 : 502, r);
     }
 
     // ---- Teste da conexão com o CodeWords ----
