@@ -711,7 +711,7 @@ async function carregarFicha(conv) {
       <div class="ficha-bloco">
         <div class="ficha-titulo">
           Cliente e veículo
-          <button type="button" class="ficha-editar" id="btnEditarCliente">editar</button>
+          <button type="button" class="ficha-editar" id="btnEditarCliente">✎ Editar</button>
         </div>
         <div id="clienteVer">
           <div class="ficha-linha"><span>Nome</span><b>${esc(f.nome) || '—'}</b></div>
@@ -740,7 +740,7 @@ async function carregarFicha(conv) {
       <div class="ficha-bloco">
         <div class="ficha-titulo">
           Serviços e valores
-          <button type="button" class="ficha-editar" id="btnNovoServico">+ novo</button>
+          <button type="button" class="ficha-editar destaque" id="btnNovoServico">+ Serviço</button>
         </div>
         <form id="servicoNovo" class="ficha-form" hidden>
           <label>Serviço
@@ -769,9 +769,13 @@ async function carregarFicha(conv) {
               <b>${esc(l.servico || 'sem serviço')}</b>
               <span class="tag ${l.status === 'concluido' ? 'aberta' : 'pendente'}">${esc(ROTULO_LEAD[l.status] || l.status)}</span>
             </div>
-            <small>${esc(new Date(l.created_at).toLocaleDateString('pt-BR'))} ·
-              ${l.status === 'concluido' ? brl(l.valor_pago) : brl(l.valor_orcado) + ' orçado'}</small>
-            <button type="button" class="ficha-editar item-editar" data-editar-lead="${esc(l.id)}">editar</button>
+            <div class="item-rodape">
+              <small>${esc(new Date(l.created_at).toLocaleDateString('pt-BR'))} ·
+                ${l.status === 'concluido' ? brl(l.valor_pago) : brl(l.valor_orcado) + ' orçado'}</small>
+              <button type="button" class="btn-editar-item" data-editar-lead="${esc(l.id)}">
+                ✎ Editar
+              </button>
+            </div>
           </div>`).join('') : '<div class="vazio" style="padding:14px">Nenhum serviço registrado.</div>'}
       </div>
 
@@ -806,12 +810,12 @@ function ligarEdicaoDaFicha(conv, f, leads) {
   $('#btnEditarCliente')?.addEventListener('click', () => {
     const abrindo = form.hidden;
     form.hidden = !abrindo; ver.hidden = abrindo;
-    $('#btnEditarCliente').textContent = abrindo ? 'cancelar' : 'editar';
+    $('#btnEditarCliente').textContent = abrindo ? '✕ Cancelar' : '✎ Editar';
     if (abrindo) $('#fcNome').focus();
   });
   $('#btnCancelarCliente')?.addEventListener('click', () => {
     form.hidden = true; ver.hidden = false;
-    $('#btnEditarCliente').textContent = 'editar';
+    $('#btnEditarCliente').textContent = '✎ Editar';
   });
 
   form?.addEventListener('submit', async (ev) => {
@@ -852,11 +856,11 @@ function ligarEdicaoDaFicha(conv, f, leads) {
   $('#btnNovoServico')?.addEventListener('click', () => {
     const abrindo = novo.hidden;
     novo.hidden = !abrindo;
-    $('#btnNovoServico').textContent = abrindo ? 'cancelar' : '+ novo';
+    $('#btnNovoServico').textContent = abrindo ? '✕ Cancelar' : '+ Serviço';
     if (abrindo) $('#fsServico').focus();
   });
   $('#btnCancelarServico')?.addEventListener('click', () => {
-    novo.hidden = true; $('#btnNovoServico').textContent = '+ novo';
+    novo.hidden = true; $('#btnNovoServico').textContent = '+ Serviço';
   });
 
   novo?.addEventListener('submit', async (ev) => {

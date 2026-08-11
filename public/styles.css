@@ -928,34 +928,80 @@ select option:checked,select option:hover{
    Editar preço e serviço sem sair da conversa. O "editar" fica discreto:
    a ficha é para LER durante o atendimento; mexer é a exceção.
    ============================================================ */
-.ficha-titulo{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.ficha-editar{
-  flex:none;border:1px solid var(--linha);border-radius:7px;
-  background:transparent;color:var(--cinza);
-  padding:2px 9px;font-size:.72rem;font-weight:600;cursor:pointer;
-  text-transform:none;letter-spacing:0;transition:color .15s,border-color .15s;
-}
-.ficha-editar:hover{color:var(--vermelho);border-color:var(--vermelho)}
 
-.ficha-form{display:flex;flex-direction:column;gap:9px;margin-top:10px}
-.ficha-form label{display:flex;flex-direction:column;gap:4px;
-  font-size:.76rem;color:var(--texto-fraco)}
+
+/* ============================================================
+   FICHA EDITÁVEL — botões
+   A primeira versão tinha dois problemas que o dono apontou: os botões
+   eram texto miúdo de 19px, e o "editar" de cada serviço era
+   position:absolute no canto — caía EXATAMENTE em cima da plaquinha de
+   situação (medido: botão em x=1362, etiqueta em x=1370). Agora são botões
+   de verdade, sempre visíveis, e cada um com o seu lugar no fluxo.
+   ============================================================ */
+.ficha-titulo{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;flex-wrap:wrap;
+}
+
+.ficha-editar{
+  flex:none;
+  display:inline-flex;align-items:center;gap:5px;
+  border:1px solid var(--linha);border-radius:9px;
+  background:var(--superficie);color:var(--texto);
+  padding:7px 13px;                 /* 19px de altura era pequeno demais para o dedo */
+  font-family:var(--fonte-cond);font-weight:700;
+  font-size:.82rem;letter-spacing:.04em;text-transform:uppercase;
+  cursor:pointer;white-space:nowrap;
+  transition:background-color .15s,border-color .15s,color .15s,transform .15s;
+}
+.ficha-editar:hover{
+  background:var(--superficie-2);border-color:var(--vermelho);
+  color:var(--vermelho-txt);transform:translateY(-1px);
+}
+.ficha-editar:active{transform:none}
+
+/* "+ Serviço" é a ação que a oficina mais usa: ganha a cor da marca */
+.ficha-editar.destaque{
+  background:linear-gradient(135deg,var(--vermelho),var(--vermelho-esc));
+  border-color:transparent;color:#fff;
+}
+.ficha-editar.destaque:hover{
+  filter:brightness(1.1);color:#fff;border-color:transparent;
+  box-shadow:0 4px 14px var(--vermelho-luz);
+}
+
+.ficha-form{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.ficha-form label{display:flex;flex-direction:column;gap:5px;
+  font-family:var(--fonte-cond);font-weight:600;
+  font-size:.8rem;letter-spacing:.02em;color:var(--rotulo)}
 .ficha-form input,.ficha-form textarea,.ficha-form select{
-  padding:8px 10px;border-radius:9px;
+  padding:9px 11px;border-radius:9px;
   background:var(--campo-fundo);border:1px solid var(--linha);
-  color:var(--texto);font-size:.86rem;width:100%;
+  color:var(--texto);font-size:.88rem;width:100%;
 }
 .ficha-form input:focus,.ficha-form textarea:focus,.ficha-form select:focus{
-  outline:none;border-color:var(--vermelho);box-shadow:0 0 0 3px rgba(229,9,20,.14)}
-.ficha-form textarea{resize:vertical;min-height:44px}
-/* dois campos de dinheiro lado a lado; quebram sozinhos em tela estreita */
-.ficha-form-lado{display:flex;gap:8px;flex-wrap:wrap}
-.ficha-form-lado label{flex:1 1 110px}
-.ficha-form-acoes{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}
+  outline:none;border-color:var(--vermelho);box-shadow:0 0 0 3px rgba(229,9,20,.16)}
+.ficha-form textarea{resize:vertical;min-height:46px}
+.ficha-form-lado{display:flex;gap:9px;flex-wrap:wrap}
+.ficha-form-lado label{flex:1 1 105px}
+.ficha-form-acoes{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
 
-/* o "editar" de cada serviço só aparece com o mouse no item, para a lista
-   continuar limpa de ler */
-.item-lead{position:relative}
-.item-editar{position:absolute;top:8px;right:8px;opacity:0;transition:opacity .15s}
-.item-lead:hover .item-editar,.item-editar:focus{opacity:1}
-@media (hover:none){.item-editar{opacity:1}}   /* no celular não existe hover */
+/* Rodapé de cada serviço: data/valor à esquerda, Editar à direita.
+   No fluxo, não sobreposto — era exatamente esse o defeito. */
+.item-rodape{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;flex-wrap:wrap;margin-top:6px;
+}
+.item-rodape small{flex:1 1 auto;min-width:0}
+.btn-editar-item{
+  flex:none;
+  display:inline-flex;align-items:center;gap:5px;
+  border:1px solid var(--linha);border-radius:8px;
+  background:var(--superficie);color:var(--texto-fraco);
+  padding:5px 11px;font-size:.76rem;font-weight:600;
+  cursor:pointer;white-space:nowrap;
+  transition:background-color .15s,border-color .15s,color .15s;
+}
+.btn-editar-item:hover{
+  background:var(--superficie-2);border-color:var(--vermelho);color:var(--vermelho-txt);
+}
