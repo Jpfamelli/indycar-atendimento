@@ -1781,11 +1781,19 @@ const server = http.createServer(async (req, res) => {
          cadastra ninguém, ninguém reconecta o WhatsApp, e a rota de primeiro
          acesso não reabre porque ainda existem perfis. */
       if (papel !== 'admin') {
-        const { count } = await sb.from('perfis')
-          .select('id', { count: 'exact', head: true }).eq('papel', 'admin').eq('ativo', true);
-        if ((count ?? 0) <= 1) {
-          return json(res, 409, {
-            erro: 'Este é o único administrador. Promova outra pessoa antes de rebaixar esta.' });
+        /* Confere a função do ALVO antes de contar. Sem isso, rebaixar
+           alguém que já era atendente, num sistema com um só admin, era
+           recusado com "este é o único administrador" — recado errado para
+           a situação, e a pessoa fica sem entender o que fazer. */
+        const { data: alvo } = await sb.from('perfis')
+          .select('papel, ativo').eq('id', id).maybeSingle();
+        if (alvo?.papel === 'admin' && alvo.ativo) {
+          const { count } = await sb.from('perfis')
+            .select('id', { count: 'exact', head: true }).eq('papel', 'admin').eq('ativo', true);
+          if ((count ?? 0) <= 1) {
+            return json(res, 409, {
+              erro: 'Este é o único administrador. Promova outra pessoa antes de rebaixar esta.' });
+          }
         }
       }
 
