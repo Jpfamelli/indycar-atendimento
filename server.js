@@ -288,13 +288,18 @@ Escreva APENAS a próxima mensagem do atendente, pronta para enviar. Sem aspas, 
    ============================================================ */
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-// Destino fixo do "Testar conexão": o WhatsApp da própria oficina
-const TELEFONE_DA_OFICINA = process.env.TELEFONE_OFICINA || '5512996830272';
+/* Linha que ATENDE os clientes: o WhatsApp DA EMPRESA, (12) 99683-0272 —
+   o mesmo que está no site, no cartão e na tabela `empresa`. É por ela que
+   tudo entra e tudo sai.
+   Durante um tempo quem atendia era a linha pessoal do dono (98221-1090),
+   porque foi ela que acabou pareada no CodeWords. Cliente respondia para o
+   número do site e caía no vazio. */
+const NUMERO_DO_ATENDIMENTO = process.env.WHATSAPP_NUMERO || '5512996830272';
 
-/* Linha que ATENDE os clientes — a que fica pareada no CodeWords.
-   Não confundir com a de cima: aquela é só o destino do teste. Checar a
-   conexão pelo número errado faz o painel jurar que está tudo desconectado. */
-const NUMERO_DO_ATENDIMENTO = process.env.WHATSAPP_NUMERO || '5512982211090';
+/* Destino do "Testar conexão". Tem que ser DIFERENTE da linha que atende:
+   um teste que sai da empresa e chega na própria empresa não prova que o
+   cliente recebe. Vai para o celular do dono, que é quem confere. */
+const TELEFONE_DO_TESTE = process.env.TELEFONE_TESTE || '5512982211090';
 
 /* Cliente com poderes de servidor (ignora RLS). Só é preciso para o
    webhook, que chega sem usuário logado. */
@@ -531,6 +536,46 @@ async function baseDoGerenciador() {
   };
 }
 
+/* A qual número pertence o aparelho pareado, segundo o CodeWords.
+   Existe porque o `device_id` pode apontar para uma linha que não é a da
+   empresa — foi o que aconteceu: ele ficou preso no celular pessoal do dono
+   e o painel dizia "enviado" enquanto nada saía. Conferir só a configuração
+   não bastaria: ela pode dizer "empresa" com o aparelho sendo outro.
+
+   Devolve null quando não deu para consultar. Quem chama trata null como
+   "não sei" e deixa passar — derrubar o atendimento inteiro porque o
+   CodeWords piscou é pior que o risco que se está evitando. */
+const CACHE_NUMERO_MS = 10 * 60_000;
+
+async function numeroDoAparelho(g, deviceId) {
+  if (!g || !deviceId) return null;
+
+  const { data: cfg } = await g.sb.from('codewords_config')
+    .select('device_numero, device_numero_conferido_em, device_id').maybeSingle();
+
+  const fresco = cfg?.device_numero
+    && cfg.device_id === deviceId
+    && cfg.device_numero_conferido_em
+    && (Date.now() - new Date(cfg.device_numero_conferido_em).getTime()) < CACHE_NUMERO_MS;
+  if (fresco) return soDigitos(cfg.device_numero);
+
+  try {
+    const r = await fetch(`${g.url}/connections`, {
+      headers: { Authorization: g.chave }, signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) return null;
+    const lista = await r.json();
+    const achado = (Array.isArray(lista) ? lista : []).find(c => c.phone_id === deviceId);
+    if (!achado?.phone_number) return null;
+
+    const numero = soDigitos(achado.phone_number);
+    await g.sb.from('codewords_config')
+      .update({ device_numero: numero, device_numero_conferido_em: new Date().toISOString() })
+      .eq('id', true);
+    return numero;
+  } catch { return null; }
+}
+
 /* Situação real do aparelho, direto no CodeWords.
    `conectado` é o que a tarja do painel olha. */
 async function estadoDoWhatsApp() {
@@ -608,9 +653,22 @@ async function reinscreverNoFluxo() {
   if (!est.conectado) return { ok: false, erro: est.motivo || 'O aparelho ainda não está conectado.' };
 
   const sb = g.sb;
-  const { data: cfg } = await sb.from('codewords_config').select('device_id').maybeSingle();
+  const { data: cfg } = await sb.from('codewords_config').select('device_id, numero_whatsapp').maybeSingle();
   const phoneId = cfg?.device_id;
   if (!phoneId) return { ok: false, erro: 'Falta o identificador do aparelho.' };
+
+  /* Quem chega aqui passou por estadoDoWhatsApp(), que confere pelo NÚMERO
+     da empresa. Mas o subscribe usa o device_id, que pode ser de outro
+     aparelho — daria para inscrever a linha errada no fluxo e ficar
+     recebendo conversa de cliente pelo celular pessoal, com o painel
+     dizendo que deu certo. */
+  const real = await numeroDoAparelho(g, phoneId);
+  const esperado = soDigitos(cfg?.numero_whatsapp || NUMERO_DO_ATENDIMENTO);
+  if (real && esperado && real !== esperado) {
+    return { ok: false,
+      erro: `O aparelho gravado é o ${real}, não o WhatsApp da empresa (${esperado}). `
+          + 'Refaça o pareamento antes de religar.' };
+  }
 
   try {
     const r = await fetch(`${g.url}/connections/${encodeURIComponent(phoneId)}/subscribe`, {
@@ -650,12 +708,32 @@ async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
 
   if (porDispositivo && !cfg.device_id) {
     return { ok:false, desligado:true,
-      erro:'Falta o aparelho do WhatsApp. Conecte pelo QR na Agenda ou informe o Device ID.' };
+      erro:'Falta parear o WhatsApp da empresa. Vá em Configurações › Conexão do WhatsApp.' };
   }
 
+  /* O aparelho pareado é mesmo o da empresa?
+     Só bloqueia quando dá para AFIRMAR que é outro número. Consulta em
+     cache de 10 min, então isso não pesa no envio do dia a dia. */
+  if (porDispositivo) {
+    const g = await baseDoGerenciador();
+    const real = await numeroDoAparelho(g, cfg.device_id);
+    const esperado = soDigitos(cfg.numero_whatsapp || NUMERO_DO_ATENDIMENTO);
+    if (real && esperado && real !== esperado) {
+      const erro = `O aparelho pareado é o ${real}, não o WhatsApp da empresa (${esperado}). `
+                 + 'Nada sai até refazer o pareamento em Configurações › Conexão do WhatsApp.';
+      await sb.from('codewords_config').update({ ultimo_erro: erro }).eq('id', true);
+      return { ok: false, erro };
+    }
+  }
+
+  /* `phone_id`, não `device_id`. O CodeWords migrou de /devices para
+     /connections e renomeou o parâmetro; com o nome antigo a resposta é
+     404 "No connection found" mesmo com o aparelho conectado e certo.
+     O valor continua guardado na coluna device_id — o que mudou foi só
+     como o CodeWords quer recebê-lo. */
   const destino = porDispositivo
     ? `${base}/run/${cfg.servico_conexao || 'whatsapp_device_manager'}`
-      + `/proxy/send/message?device_id=${encodeURIComponent(cfg.device_id)}`
+      + `/proxy/send/message?phone_id=${encodeURIComponent(cfg.device_id)}`
     : (cfg.url_envio || (cfg.service_id ? `${base}/run/${cfg.service_id}` : null));
 
   if (!destino) {
@@ -1679,8 +1757,8 @@ const server = http.createServer(async (req, res) => {
 
     // ---- Teste da conexão com o CodeWords ----
     if (pathname === '/api/codewords/testar' && req.method === 'POST') {
-      // Manda WhatsApp de verdade e gasta cota: só admin, e só para o
-      // número da própria oficina (senão viraria uma máquina de spam).
+      // Manda WhatsApp de verdade e gasta cota: só admin, e só para um
+      // número fixo (senão viraria uma máquina de spam).
       const quem = await usuarioLogado(req);
       if (!quem) return json(res, 401, { erro: 'Faça login para testar a conexão.' });
       if (quem.papel !== 'admin') {
@@ -1688,7 +1766,7 @@ const server = http.createServer(async (req, res) => {
       }
       await readBody(req);   // consome o corpo; o número de destino é fixo de propósito
       const r = await enviarPeloCodeWords({
-        telefone: TELEFONE_DA_OFICINA,
+        telefone: TELEFONE_DO_TESTE,
         corpo: '🏁 Teste de conexão do painel de atendimento da IndyCar.',
         nome: 'Teste',
       });

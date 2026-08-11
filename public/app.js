@@ -2693,6 +2693,29 @@ iniciar();
 var conexaoTimer = null;
 var pareamentoTimer = null;
 
+/* A sessão acabou por baixo dos panos: sai limpo e avisa.
+   Sem isto o atendente fica num painel que parece funcionar e não salva nada
+   — o pior jeito de descobrir é o cliente esperando resposta. */
+let jaAvisouSessao = false;
+async function sessaoMorreu() {
+  if (jaAvisouSessao) return;
+  jaAvisouSessao = true;
+  clearInterval(conexaoTimer);
+  try { await sb.auth.signOut(); } catch { /* já estava fora */ }
+  const t = document.getElementById('tarjaConexao');
+  if (t) t.hidden = true;
+  document.getElementById('telaApp').hidden = true;
+  const login = document.getElementById('telaLogin');
+  if (login) {
+    login.hidden = false;
+    const aviso = document.getElementById('loginErro');
+    if (aviso) {
+      aviso.hidden = false;
+      aviso.textContent = 'Sua sessão expirou. Entre de novo para continuar.';
+    }
+  }
+}
+
 /* Empurra o app exatamente a altura da tarja — nem um pixel a mais. */
 function reservarEspacoDaTarja() {
   const tarja = document.getElementById('tarjaConexao');
@@ -2717,7 +2740,11 @@ async function verConexao({ silencioso = true } = {}) {
   let est;
   try {
     const r = await fetch('/api/whatsapp/status', { headers: await authCabecalhos() });
-    if (r.status === 401) return;                 // deslogado: o login já cuida
+    /* 401 aqui quase sempre é sessão órfã: o token ainda não venceu, mas o
+       Supabase já apagou a sessão. O painel abria inteiro, bonito, e nenhuma
+       ação funcionava — sem dizer o porquê. Como esta função roda no login e
+       a cada 2 min, ela serve de vigia: derruba e manda logar de novo. */
+    if (r.status === 401) { await sessaoMorreu(); return; }
     est = await r.json();
   } catch (e) {
     // Rede caiu no navegador. Isso não prova que o WhatsApp caiu — não
