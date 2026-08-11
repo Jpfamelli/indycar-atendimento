@@ -414,6 +414,26 @@ async function abrirConversa(id) {
     renderConversas();
     atualizarBadge();
   }
+
+  /* As respostas do Carlos não passam pelo webhook — elas ficam no aparelho.
+     Puxa o que falta ao abrir o chat, senão o atendente vê as perguntas do
+     cliente e nenhuma resposta, e acha que a IA está muda.
+     Sem await de propósito: a conversa já abriu, isto completa depois. */
+    sincronizarConversaAberta(conv.id);
+}
+
+async function sincronizarConversaAberta(id) {
+  try {
+    const r = await (await fetch('/api/conversas/sincronizar', {
+      method: 'POST', headers: await authCabecalhos(),
+      body: JSON.stringify({ conversaId: id }),
+    })).json();
+    // só redesenha se veio coisa nova E o atendente ainda está nesta conversa
+    if (r.novas > 0 && conversaAtual?.id === id) {
+      await carregarMensagens();
+      await carregarConversas();
+    }
+  } catch { /* sem rede: a sincronização periódica pega depois */ }
 }
 
 async function carregarMensagens() {

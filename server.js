@@ -685,6 +685,122 @@ async function reinscreverNoFluxo() {
   }
 }
 
+/* ============================================================
+   SINCRONIZAÇÃO COM O APARELHO
+
+   O fluxo do Carlos no CodeWords só encaminha para o nosso webhook o que o
+   CLIENTE escreve. O que ele RESPONDE nunca chegava — o painel mostrava as
+   perguntas e nenhuma resposta, como se a IA estivesse muda. Ela não estava:
+   as respostas estavam no aparelho o tempo todo.
+
+   Aqui elas são puxadas de lá. Só para conversas QUE JÁ EXISTEM no painel:
+   assim nada novo entra por este caminho, e grupo, spam e conversa pessoal
+   continuam barrados onde sempre foram, no webhook.
+   ============================================================ */
+
+// Assinatura com que o Carlos abre as mensagens dele
+const MARCA_DO_CARLOS = /^\s*\*?\s*carlos\s*\|/i;
+
+async function mensagensDoAparelho(g, telefone, limite = 30) {
+  const jid = `${soDigitos(telefone)}@s.whatsapp.net`;
+  const { data: cfg } = await g.sb.from('codewords_config').select('device_id').maybeSingle();
+  if (!cfg?.device_id) return null;
+
+  const url = `${g.url}/proxy/chat/${encodeURIComponent(jid)}/messages`
+            + `?phone_id=${encodeURIComponent(cfg.device_id)}&limit=${limite}`;
+  try {
+    const r = await fetch(url, { headers: { Authorization: g.chave }, signal: AbortSignal.timeout(20000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.results?.data || [];
+  } catch { return null; }
+}
+
+/* Traz para o banco o que faltar de UMA conversa.
+   Devolve quantas mensagens entraram. */
+async function sincronizarConversa(g, conversa) {
+  const doAparelho = await mensagensDoAparelho(g, conversa.telefone);
+  if (!doAparelho?.length) return 0;
+
+  const { data: jaTemos } = await g.sb.from('whatsapp_mensagens')
+    .select('id, wamid, corpo, direcao, created_at')
+    .eq('conversa_id', conversa.id)
+    .order('created_at', { ascending: false }).limit(120);
+
+  const porWamid = new Set((jaTemos || []).map(m => m.wamid).filter(Boolean));
+  const semWamid = (jaTemos || []).filter(m => !m.wamid);
+  let entraram = 0;
+
+  for (const m of doAparelho) {
+    const texto = String(m.content || '').trim();
+    if (!m.id || !texto) continue;              // mídia sem legenda não vira mensagem de texto
+    if (porWamid.has(m.id)) continue;
+
+    const direcao = m.is_from_me ? 'saida' : 'entrada';
+    const quando  = m.timestamp || m.created_at || new Date().toISOString();
+
+    /* A mensagem que o próprio painel enviou já está gravada, mas sem wamid
+       (na hora do envio ainda não se sabe o id). Sem esta adoção, ela
+       apareceria duas vezes no chat: a nossa e a do aparelho. */
+    const gemea = semWamid.find(x =>
+      x.direcao === direcao &&
+      String(x.corpo || '').trim() === texto &&
+      Math.abs(new Date(x.created_at).getTime() - new Date(quando).getTime()) < 5 * 60_000);
+
+    if (gemea) {
+      await g.sb.from('whatsapp_mensagens').update({ wamid: m.id }).eq('id', gemea.id);
+      porWamid.add(m.id);
+      const i = semWamid.indexOf(gemea); if (i >= 0) semWamid.splice(i, 1);
+      continue;
+    }
+
+    const { error } = await g.sb.from('whatsapp_mensagens').insert({
+      conversa_id: conversa.id, cliente_id: conversa.cliente_id || null,
+      telefone: conversa.telefone, nome: conversa.nome || null,
+      corpo: texto, direcao, status: m.is_from_me ? 'enviado' : 'recebido',
+      wamid: m.id, created_at: quando,
+      gerada_por_ia: !!m.is_from_me && MARCA_DO_CARLOS.test(texto),
+    });
+    // 23505 = a outra sincronização gravou primeiro. Não é erro, é corrida.
+    if (!error) { entraram++; porWamid.add(m.id); }
+    else if (error.code !== '23505') {
+      console.error('sincronizar:', error.message);
+    }
+  }
+  return entraram;
+}
+
+/* Sincroniza as conversas mexidas mais recentemente. */
+async function sincronizarRespostas({ conversaId = null, quantas = 12 } = {}) {
+  const g = await baseDoGerenciador();
+  if (!g) return { ok: false, erro: 'A integração com o CodeWords não está configurada.' };
+
+  let consulta = g.sb.from('conversas').select('id,telefone,nome,cliente_id');
+  consulta = conversaId
+    ? consulta.eq('id', conversaId)
+    : consulta.order('ultima_mensagem_em', { ascending: false, nullsFirst: false }).limit(quantas);
+
+  const { data: convs, error } = await consulta;
+  if (error) return { ok: false, erro: error.message };
+
+  let total = 0;
+  for (const c of (convs || [])) {
+    if (!c.telefone) continue;
+    total += await sincronizarConversa(g, c);
+  }
+  return { ok: true, novas: total, conversas: (convs || []).length };
+}
+
+/* De 2 em 2 minutos, em segundo plano. É o que faz a resposta do Carlos
+   aparecer sozinha para quem está com o painel aberto. */
+let relogioSincronia = null;
+function ligarSincronizacaoPeriodica() {
+  if (relogioSincronia) return;
+  const rodar = () => sincronizarRespostas().catch(e => console.error('sincronia:', e.message));
+  relogioSincronia = setInterval(rodar, 120_000);
+  setTimeout(rodar, 8_000);   // uma logo depois de subir, sem atrasar o boot
+}
+
 async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
   const sb = adminSupabase();
   // "desligado" = ainda não configurado; a mensagem fica registrada aqui e o
@@ -1820,6 +1936,25 @@ const server = http.createServer(async (req, res) => {
       return json(res, r.ok || r.desligado ? 200 : 502, r);
     }
 
+    /* ---- Puxar do aparelho o que falta nesta conversa ----
+       Chamada quando o atendente abre o chat. As respostas do Carlos não
+       passam pelo webhook, então sem isto ele veria só as perguntas. */
+    if (pathname === '/api/conversas/sincronizar' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      const bruto = await readBody(req);
+      const id = texto1(bruto.conversaId, 60);
+      if (!ehUuid(id)) return json(res, 400, { erro: 'Informe a conversa.' });
+      /* 30 por minuto por atendente. Abrir conversa é frequente e cada
+         sincronização é uma ida ao CodeWords; passando do teto, responde
+         "adiado" em vez de erro — a periódica pega em até 2 minutos. */
+      if (!dentroDoLimite(`sinc:${quem.id}`, 30, 60_000)) {
+        return json(res, 200, { ok: true, novas: 0, adiado: true });
+      }
+      const r = await sincronizarRespostas({ conversaId: id });
+      return json(res, r.ok ? 200 : 502, r);
+    }
+
     /* ---- Saúde da conexão do WhatsApp ----
        O celular da oficina cai sozinho de vez em quando e, até alguém tentar
        responder um cliente, ninguém percebe. O painel consulta isto de tempos
@@ -1933,4 +2068,6 @@ server.listen(PORT, HOST, () => {
     ? '   ✨ IA pronta'
     : '   ⚠️  Sem ANTHROPIC_API_KEY — a aba de IA fica desativada');
   console.log(HOST === '127.0.0.1' ? '   (acessível só neste computador)\n' : `   exposto em ${HOST}\n`);
+  // Puxa do aparelho o que o Carlos respondeu — o webhook não recebe isso
+  if (adminSupabase()) ligarSincronizacaoPeriodica();
 });
