@@ -145,9 +145,20 @@ svg{display:block}
 /* ============================================================
    LOGIN
    ============================================================ */
-.login-wrap{display:grid;grid-template-columns:1fr 1fr;height:100vh}
-.login-card{display:flex;flex-direction:column;justify-content:center;padding:48px 8%;
-  max-width:560px;width:100%;margin:0 auto}
+/* A tela de entrada ROLA. O <body> tem overflow:hidden (o app é uma casca
+   fixa), então quem precisa rolar aqui é o próprio .login-wrap.
+   Sem isto, o formulário de primeiro acesso — que tem 4 campos e some dos
+   807px numa janela de 550px — ficava com o botão "Criar minha conta" 162px
+   abaixo da dobra, inalcançável, e não havia como terminar o cadastro. */
+.login-wrap{display:grid;grid-template-columns:1fr 1fr;height:100vh;
+  overflow-y:auto;overscroll-behavior:contain}
+/* `safe center`: centraliza quando cabe e volta a alinhar pelo topo quando
+   não cabe. Com `center` puro, num contêiner que rola, o excedente sai por
+   CIMA e nem rolando se alcança o começo do formulário. O `center` da linha
+   anterior é a reserva para navegador que não conheça a palavra `safe`. */
+.login-card{display:flex;flex-direction:column;
+  justify-content:center;justify-content:safe center;
+  padding:48px 8%;max-width:560px;width:100%;margin:0 auto}
 .login-logo{margin-bottom:34px}
 .login-card h1{font-family:var(--fonte-cond);font-weight:700;font-size:2.6rem;line-height:1.1;margin-bottom:6px}
 .login-sub{color:var(--cinza);margin-bottom:26px}
