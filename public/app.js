@@ -930,13 +930,15 @@ async function carregarEquipe() {
     $$('#listaEquipe [data-rodizio]').forEach(cx => cx.addEventListener('change', async () => {
       cx.disabled = true;
       try {
-        const { error } = await sb.from('perfis')
-          .update({ recebe_leads: cx.checked }).eq('id', cx.dataset.rodizio);
-        if (error) throw error;
+        const r = await (await fetch('/api/equipe/rodizio', {
+          method: 'POST', headers: await authCabecalhos(),
+          body: JSON.stringify({ id: cx.dataset.rodizio, recebe: cx.checked }),
+        })).json();
+        if (!r.ok) throw new Error(r.erro || 'não consegui alterar');
         toast(cx.checked ? '✅ Volta a receber clientes novos' : '⏸ Fora do rodízio');
         await carregarNomesDaEquipe();
       } catch (err) {
-        cx.checked = !cx.checked;
+        cx.checked = !cx.checked;   // desfaz o visual: o banco não mudou
         toast('⚠️ ' + err.message);
       } finally { cx.disabled = false; }
     }));
@@ -1554,11 +1556,19 @@ document.getElementById('btnSoMinhas')?.addEventListener('click', (ev) => {
 let EQUIPE = new Map();          // id -> {nome, papel}
 let soMinhas = localStorage.getItem('indycar_so_minhas') === '1';
 
+/* Vem do servidor, não do Supabase direto: o RLS de `perfis` só deixa admin
+   ler todo mundo, então um atendente lendo do navegador enxergaria só a si
+   mesmo — e a plaquinha do colega ficaria sem nome. */
 async function carregarNomesDaEquipe() {
   try {
-    const { data } = await sb.from('perfis').select('id,nome,papel,ativo');
-    EQUIPE = new Map((data || []).map(p => [p.id, p]));
-  } catch { /* sem a lista, a plaquinha mostra "sem dono" e nada quebra */ }
+    const r = await (await fetch('/api/equipe/nomes', { headers: await authCabecalhos() })).json();
+    if (!r.ok || !Array.isArray(r.equipe)) throw new Error(r.erro || 'resposta inesperada');
+    EQUIPE = new Map(r.equipe.map(p => [p.id, p]));
+  } catch (err) {
+    /* Falha passageira não apaga a lista que já estava boa. Só avisa quando
+       a tela ficaria realmente cega. */
+    if (!EQUIPE.size) toast('⚠️ Não consegui ler a equipe: ' + err.message);
+  }
 }
 
 /* Cor estável por pessoa: a mesma pessoa fica sempre da mesma cor, sem
@@ -1578,13 +1588,18 @@ function donoHtml(conv) {
       title="Ninguém responsável — clique para assumir">👤 sem dono</button>`;
   }
   const p = EQUIPE.get(id);
-  const nome = p?.nome || 'outro atendente';
+  const nome = p?.nome || '';
   const eu = id === perfil?.id;
   const cor = corDoDono(id);
+  /* Sem nome na lista, mostra "?" em vez de cortar um rótulo genérico na
+     primeira palavra — "outro atendente" virava só "outro" e parecia nome. */
+  const rotulo = eu ? '★ meu' : (nome ? primeiroNome(nome) : '?');
+  const dica = eu ? 'Este cliente é seu'
+             : nome ? `Responsável: ${nome}` : 'Responsável fora da sua lista';
   return `<button type="button" class="dono${eu ? ' eu' : ''}" data-dono="${esc(conv.id)}"
     style="--dn-cor:${cor};--dn-fundo:${corComAlfa(cor, .16)}"
-    title="${eu ? 'Este cliente é seu' : 'Responsável: ' + esc(nome)} — clique para passar para outra pessoa">
-    ${eu ? '★ meu' : esc(primeiroNome(nome))}</button>`;
+    title="${esc(dica)} — clique para passar para outra pessoa">
+    ${esc(rotulo)}</button>`;
 }
 
 const primeiroNome = (n = '') => String(n).trim().split(/\s+/)[0] || n;

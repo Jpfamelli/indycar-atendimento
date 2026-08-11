@@ -1836,6 +1836,65 @@ const server = http.createServer(async (req, res) => {
       return json(res, 201, { ok: true, email });
     }
 
+    /* ---- Nomes da equipe, para a plaquinha de dono ----
+       Pelo servidor de propósito. O RLS de `perfis` só deixa admin ler todo
+       mundo; um atendente lendo direto do navegador enxergaria só a si mesmo,
+       e aí a plaquinha do colega apareceria sem nome e o menu "passar para"
+       listaria uma pessoa só — justamente o que a plaquinha veio resolver.
+       Devolve o mínimo: nome, papel e ativo. E-mail não sai daqui. */
+    if (pathname === '/api/equipe/nomes' && req.method === 'GET') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+      const { data, error } = await sb.from('perfis')
+        .select('id,nome,papel,ativo,recebe_leads').order('nome');
+      if (error) return json(res, 500, { erro: 'Não consegui ler a equipe: ' + error.message });
+      return json(res, 200, { ok: true, equipe: data || [] });
+    }
+
+    /* ---- Entrar ou sair do rodízio de clientes novos ----
+       Pelo servidor porque o RLS de `perfis` só permite editar a PRÓPRIA
+       linha: nem admin altera a de outra pessoa pelo navegador. O update
+       pegaria 0 linhas, o PostgREST responderia 204 e o painel diria
+       "pronto" sem ter mudado nada — sucesso falso, que é pior que erro. */
+    if (pathname === '/api/equipe/rodizio' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') {
+        return json(res, 403, { erro: 'Só o administrador define quem recebe clientes novos.' });
+      }
+      const bruto = await readBody(req);
+      const id = texto1(bruto.id, 60);
+      const recebe = bruto.recebe === true;
+      if (!ehUuid(id)) return json(res, 400, { erro: 'Informe quem você quer alterar.' });
+
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      /* Tirar a última pessoa do rodízio faz o cliente novo nascer sem dono e
+         voltar a ficar na fila de ninguém — o problema que o rodízio veio
+         resolver. */
+      if (!recebe) {
+        const { count } = await sb.from('perfis')
+          .select('id', { count: 'exact', head: true })
+          .eq('ativo', true).eq('recebe_leads', true);
+        const { data: alvo } = await sb.from('perfis')
+          .select('recebe_leads, ativo').eq('id', id).maybeSingle();
+        if (alvo?.recebe_leads && alvo.ativo && (count ?? 0) <= 1) {
+          return json(res, 409, {
+            erro: 'É a única pessoa recebendo clientes. Coloque outra antes de tirar esta, '
+                + 'senão o cliente novo chega sem responsável.' });
+        }
+      }
+
+      const { data, error } = await sb.from('perfis')
+        .update({ recebe_leads: recebe }).eq('id', id).select('id').single();
+      if (error) return json(res, 500, { erro: error.message });
+      if (!data) return json(res, 404, { erro: 'Não achei essa pessoa.' });
+      return json(res, 200, { ok: true, recebe });
+    }
+
     /* ---- Trocar a função de alguém ---- */
     if (pathname === '/api/equipe/papel' && req.method === 'POST') {
       const quem = await usuarioLogado(req);
@@ -2040,26 +2099,47 @@ const server = http.createServer(async (req, res) => {
       const sb = adminSupabase();
       if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
 
-      const { data: conv } = await sb.from('conversas')
+      /* Erro de leitura NÃO é "não existe". O supabase-js não lança em falha
+         de banco: devolve {data:null, error}. Sem conferir, uma queda de rede
+         viraria a afirmação "essa conversa já não existe" — sobre dado de
+         cliente que o servidor não conseguiu nem ler. */
+      const { data: conv, error: erroConv } = await sb.from('conversas')
         .select('id, nome, telefone').eq('id', id).maybeSingle();
+      if (erroConv) return json(res, 500, { erro: 'Não consegui ler a conversa: ' + erroConv.message });
       if (!conv) return json(res, 404, { erro: 'Essa conversa já não existe.' });
 
-      const { data: msgs } = await sb.from('whatsapp_mensagens')
+      const { data: msgs, error: erroMsgs } = await sb.from('whatsapp_mensagens')
         .select('corpo, direcao, created_at').eq('conversa_id', id)
-        .order('created_at').limit(500);
+        .order('created_at').limit(2000);
+      if (erroMsgs) {
+        return json(res, 500, { erro: 'Não consegui ler as mensagens para a cópia; nada foi apagado.' });
+      }
 
-      await registrarEvento(sb, {
+      /* A cópia de segurança é gravada ANTES e o erro é lido.
+         Aqui não dá para usar registrarEvento: ele é `try { insert } catch {}`
+         de propósito nos outros pontos (telemetria não pode derrubar o
+         atendimento), mas o catch não pega erro de banco — o supabase-js não
+         lança. Ou seja, a cópia podia falhar em silêncio e a conversa ser
+         apagada assim mesmo, que é justamente o contrário da garantia que
+         este trecho promete.
+         O .select('id').single() confirma que a linha existe no banco, e não
+         só que a requisição não deu erro. */
+      const { error: erroCopia } = await sb.from('codewords_eventos').insert({
         direcao: 'saida', sucesso: true, telefone: conv.telefone,
         resumo: `conversa excluída por ${quem.email} (${(msgs || []).length} mensagens)`,
         payload: { excluida_por: quem.email, em: new Date().toISOString(),
                    conversa: conv, mensagens: msgs || [] },
-      });
+      }).select('id').single();
+      if (erroCopia) {
+        return json(res, 500, {
+          erro: 'Não consegui gravar a cópia de segurança. NADA foi apagado — tente de novo em instantes.' });
+      }
 
-      // filhos antes do pai: sem isto a chave estrangeira barra a exclusão
-      await sb.from('etapa_historico').delete().eq('conversa_id', id);
-      await sb.from('conversa_eventos').delete().eq('conversa_id', id);
-      await sb.from('whatsapp_mensagens').delete().eq('conversa_id', id);
-      await sb.from('conversa_etiquetas').delete().eq('conversa_id', id);
+      /* Apaga SÓ a conversa. As quatro tabelas filhas têm a chave estrangeira
+         com ON DELETE CASCADE, então o Postgres leva tudo junto, numa
+         transação só. Antes eram cinco requisições soltas: se a última
+         falhasse, as mensagens já tinham ido embora e o painel dizia que a
+         exclusão não aconteceu. */
       const { error } = await sb.from('conversas').delete().eq('id', id);
       if (error) return json(res, 500, { erro: error.message });
 
