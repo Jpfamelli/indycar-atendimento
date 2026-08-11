@@ -1747,10 +1747,16 @@ const server = http.createServer(async (req, res) => {
       // Pausa (ou solta) o Carlos para este telefone
       const carlos = await pausarCarlos(sb, conversa.telefone, assumir);
 
+      /* Devolver ao Carlos NÃO tira o dono do cliente.
+         Antes zerava `atribuida_a`, e com o rodízio isso vira defeito: o
+         cliente já tem responsável desde a primeira mensagem, e soltar a IA
+         de volta é dizer "a IA continua conversando", não "esse cliente não
+         é de ninguém". Quem quiser passar para outra pessoa usa a plaquinha
+         de dono, que é explícito. */
       const campos = assumir
         ? { atribuida_a: quem.id, ia_ativa: false,
             assumida_em: new Date().toISOString(), ia_pausada_em: new Date().toISOString() }
-        : { atribuida_a: null, ia_ativa: true, assumida_em: null, ia_pausada_em: null };
+        : { ia_ativa: true, assumida_em: null, ia_pausada_em: null };
 
       // Assumir move o cliente para "Em atendimento", como o dono pediu
       if (assumir) {
@@ -2010,6 +2016,54 @@ const server = http.createServer(async (req, res) => {
       const r = await enviarPeloCodeWords(dados);
       // "desligado" não é erro: a mensagem fica registrada aqui mesmo assim
       return json(res, r.ok || r.desligado ? 200 : 502, r);
+    }
+
+    /* ---- Excluir uma conversa da aba de conversas ----
+       Apaga histórico de cliente e não tem desfazer, então: só admin, e a
+       cópia do que foi apagado fica gravada em codewords_eventos com o nome
+       de quem mandou apagar. Se sumir algo que não devia, dá para saber o
+       que era e quem apagou.
+
+       O CADASTRO do cliente e o lead do CRM NÃO são tocados: apagar uma
+       conversa é limpar a caixa de entrada, não sumir com o cliente da
+       oficina. Quem quiser tirar o cadastro faz isso no CRM, de propósito. */
+    if (pathname === '/api/conversas/excluir' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') {
+        return json(res, 403, { erro: 'Só o administrador pode excluir conversas.' });
+      }
+      const bruto = await readBody(req);
+      const id = texto1(bruto.conversaId, 60);
+      if (!ehUuid(id)) return json(res, 400, { erro: 'Informe a conversa.' });
+
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      const { data: conv } = await sb.from('conversas')
+        .select('id, nome, telefone').eq('id', id).maybeSingle();
+      if (!conv) return json(res, 404, { erro: 'Essa conversa já não existe.' });
+
+      const { data: msgs } = await sb.from('whatsapp_mensagens')
+        .select('corpo, direcao, created_at').eq('conversa_id', id)
+        .order('created_at').limit(500);
+
+      await registrarEvento(sb, {
+        direcao: 'saida', sucesso: true, telefone: conv.telefone,
+        resumo: `conversa excluída por ${quem.email} (${(msgs || []).length} mensagens)`,
+        payload: { excluida_por: quem.email, em: new Date().toISOString(),
+                   conversa: conv, mensagens: msgs || [] },
+      });
+
+      // filhos antes do pai: sem isto a chave estrangeira barra a exclusão
+      await sb.from('etapa_historico').delete().eq('conversa_id', id);
+      await sb.from('conversa_eventos').delete().eq('conversa_id', id);
+      await sb.from('whatsapp_mensagens').delete().eq('conversa_id', id);
+      await sb.from('conversa_etiquetas').delete().eq('conversa_id', id);
+      const { error } = await sb.from('conversas').delete().eq('id', id);
+      if (error) return json(res, 500, { erro: error.message });
+
+      return json(res, 200, { ok: true, apagadas: (msgs || []).length });
     }
 
     /* ---- Puxar do aparelho o que falta nesta conversa ----

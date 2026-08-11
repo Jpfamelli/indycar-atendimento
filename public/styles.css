@@ -874,3 +874,51 @@ select option:checked,select option:hover{
 .equipe-papel:disabled{opacity:.5;cursor:wait}
 .equipe-papel-txt{flex:none;font-size:.8rem;color:var(--texto-fraco)}
 .equipe-txt .voce{font-style:normal;font-size:.78rem;color:var(--texto-fraco);font-weight:600}
+
+/* ============================================================
+   DONO DO CLIENTE
+   Cor derivada do id da pessoa: a mesma pessoa fica sempre da mesma cor,
+   sem precisar guardar cor nenhuma nem cadastrar nada.
+   ============================================================ */
+.dono{
+  display:inline-flex;align-items:center;gap:4px;flex:none;
+  padding:2px 9px;border-radius:999px;
+  border:1px solid var(--dn-cor,var(--linha));
+  background:var(--dn-fundo,var(--superficie));
+  color:var(--dn-cor,var(--cinza));
+  font-family:var(--fonte-cond);font-weight:700;
+  font-size:.74rem;letter-spacing:.03em;text-transform:uppercase;
+  cursor:pointer;transition:filter .15s,transform .15s;
+  max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.dono:hover{filter:brightness(1.15);transform:translateY(-1px)}
+.dono.eu{font-weight:800}
+.dono.sem-dono{
+  border-style:dashed;border-color:var(--linha);
+  background:transparent;color:var(--cinza-2);text-transform:none;
+  font-weight:600;letter-spacing:0;
+}
+
+/* Filtro "meus" — separado dos chips de situação, porque filtra outra coisa */
+.chip-minhas.ativo{
+  background:linear-gradient(135deg,var(--vermelho),var(--vermelho-esc));
+  color:#fff;border-color:transparent;
+}
+
+/* Excluir conversa: discreto até o mouse chegar perto. Ação sem desfazer
+   não deve competir por atenção com os botões do dia a dia. */
+.btn-excluir{
+  border:1px solid var(--linha);color:var(--cinza-2);
+  padding:9px 12px;
+}
+.btn-excluir:hover{
+  border-color:#ef4444;color:#ef4444;background:rgba(239,68,68,.1);
+}
+
+/* Entrar/sair do rodízio, na lista da equipe */
+.equipe-rodizio{
+  display:inline-flex;align-items:center;gap:5px;flex:none;
+  font-size:.76rem;color:var(--texto-fraco);cursor:pointer;user-select:none;
+}
+.equipe-rodizio input{accent-color:var(--vermelho);cursor:pointer}
+.equipe-rodizio input:disabled{cursor:wait}

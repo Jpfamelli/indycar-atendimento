@@ -198,6 +198,10 @@
             <button class="chip" data-status="aberta">Abertas</button>
             <button class="chip" data-status="pendente">Pendentes</button>
             <button class="chip" data-status="resolvida">Resolvidas</button>
+            <!-- separado dos de status de propósito: filtra por DONO, não por
+                 situação, e os dois se combinam -->
+            <button class="chip chip-minhas" id="btnSoMinhas"
+                    title="Ver só os clientes que são seus">★ Meus</button>
           </div>
         </div>
         <div class="lista-conversas" id="listaConversas"></div>
@@ -239,6 +243,9 @@
                 <option value="resolvida">Resolvida</option>
               </select>
               <button class="btn btn-ghost sm" id="btnPainelCliente" title="Mostrar/ocultar ficha">Ficha</button>
+              <!-- Só admin enxerga: apaga histórico de cliente, sem desfazer -->
+              <button class="btn btn-excluir sm" id="btnExcluirConversa" hidden
+                      title="Excluir esta conversa do painel">🗑</button>
             </div>
           </header>
 
@@ -658,6 +665,12 @@
 <div class="menu-etapas" id="menuEtapas" hidden>
   <div class="menu-etapas-topo">Mover para a etapa</div>
   <div id="menuEtapasLista"></div>
+</div>
+
+<!-- Passar o cliente para outra pessoa da equipe -->
+<div class="menu-etapas" id="menuDono" hidden>
+  <div class="menu-etapas-topo">Responsável por este cliente</div>
+  <div id="menuDonoLista"></div>
 </div>
 
 <!-- Criar / editar etapa -->

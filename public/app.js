@@ -234,6 +234,9 @@ async function entrarNoApp(user) {
   $('#perfilEmail').value = perfil.email;
   $('#perfilPapel').value = perfil.papel === 'admin' ? 'Administrador' : 'Atendente';
   aplicarPapelConfig();
+  await carregarNomesDaEquipe();      // a plaquinha de dono precisa dos nomes
+  $('#btnExcluirConversa').hidden = perfil.papel !== 'admin';
+  $('#btnSoMinhas')?.classList.toggle('ativo', soMinhas);
   vigiarConexao();   // acende a tarja se o WhatsApp estiver fora do ar
 
   // as etapas vêm ANTES das conversas: são elas que desenham as plaquinhas
@@ -308,10 +311,14 @@ async function carregarConversas() {
 }
 
 function conversasFiltradas() {
+  let base = CONVERSAS;
+  // "só as minhas": o atendente trabalha a fila dele sem o ruído da do outro
+  if (soMinhas && perfil?.id) base = base.filter(c => c.atribuida_a === perfil.id);
+
   const t = termoBusca.trim().toLowerCase();
-  if (!t) return CONVERSAS;
+  if (!t) return base;
   const soDigitos = t.replace(/\D/g, '');
-  return CONVERSAS.filter(c =>
+  return base.filter(c =>
     (c.nome || '').toLowerCase().includes(t) ||
     (c.telefone || '').toLowerCase().includes(t) ||
     (soDigitos && (c.telefone_e164 || '').includes(soDigitos)));
@@ -339,6 +346,7 @@ function renderConversas() {
         </div>
         <div class="conversa-previa">${esc(c.ultima_previa || 'sem mensagens')}</div>
         <div class="conversa-tags">
+          ${donoHtml(c)}
           ${plaquinhaHtml(c)}
           <span class="tag ${c.status}">${c.status}</span>
           ${c.ia_ativa ? '<span class="tag ia">✨ IA</span>' : ''}
@@ -349,6 +357,13 @@ function renderConversas() {
 
   $$('.conversa', el).forEach(d =>
     d.addEventListener('click', () => abrirConversa(d.dataset.id)));
+
+  /* A plaquinha de dono abre o menu de quem responde — sem abrir a conversa */
+  $$('[data-dono]', el).forEach(b => b.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const conv = CONVERSAS.find(c => c.id === b.dataset.dono);
+    if (conv) abrirMenuDono(b, conv);
+  }));
 
   /* A plaquinha abre o menu de etapas — e NÃO abre a conversa junto */
   $$('.plaquinha', el).forEach(p => p.addEventListener('click', ev => {
@@ -549,6 +564,44 @@ $('#btnPainelCliente').addEventListener('click', () => {
     $('#colFicha').classList.toggle('aberta');
   } else {
     $('.conversas-layout').classList.toggle('ficha-fechada');
+  }
+});
+
+/* Excluir a conversa. Apaga histórico e não tem desfazer, então a confirmação
+   pede o NOME do cliente digitado — clicar em "ok" por reflexo é fácil demais
+   para uma ação irreversível. O cadastro do cliente e o lead do CRM ficam. */
+$('#btnExcluirConversa').addEventListener('click', async () => {
+  if (!conversaAtual) return;
+  const nome = conversaAtual.nome || conversaAtual.telefone;
+  const digitado = prompt(
+    `Excluir a conversa de ${nome}?\n\n`
+  + `Isso apaga TODAS as mensagens deste chat, sem desfazer.\n`
+  + `O cadastro do cliente e o lead do CRM continuam.\n\n`
+  + `Para confirmar, digite o nome: ${nome}`);
+  if (digitado === null) return;
+  if (digitado.trim().toLowerCase() !== String(nome).trim().toLowerCase()) {
+    return toast('Nome não confere — nada foi apagado.');
+  }
+
+  const btn = $('#btnExcluirConversa');
+  btn.disabled = true;
+  try {
+    const r = await (await fetch('/api/conversas/excluir', {
+      method: 'POST', headers: await authCabecalhos(),
+      body: JSON.stringify({ conversaId: conversaAtual.id }),
+    })).json();
+    if (!r.ok) throw new Error(r.erro || 'não consegui excluir');
+
+    toast(`🗑 Conversa de ${nome} excluída (${r.apagadas} mensagens)`);
+    conversaAtual = null;
+    $('#chat').hidden = true;
+    $('#chatVazio').hidden = false;
+    $('.conversas-layout').classList.remove('vendo-chat');
+    await carregarConversas();
+  } catch (err) {
+    toast('⚠️ ' + err.message);
+  } finally {
+    btn.disabled = false;
   }
 });
 
@@ -859,6 +912,10 @@ async function carregarEquipe() {
           <br><small>${esc(p.email)}${p.ativo ? '' : ' · sem acesso'}</small>
         </div>
         ${ehAdmin ? `
+          <label class="equipe-rodizio" title="Recebe clientes novos pelo rodízio">
+            <input type="checkbox" data-rodizio="${esc(p.id)}" ${p.recebe_leads ? 'checked' : ''} />
+            <span>recebe</span>
+          </label>
           <select class="equipe-papel" data-papel="${esc(p.id)}" title="O que esta pessoa pode fazer">
             <option value="atendente"${p.papel === 'admin' ? '' : ' selected'}>Atendente</option>
             <option value="admin"${p.papel === 'admin' ? ' selected' : ''}>Administrador</option>
@@ -867,6 +924,22 @@ async function carregarEquipe() {
             data-ativar="${p.ativo ? '0' : '1'}">${p.ativo ? 'Tirar acesso' : 'Devolver acesso'}</button>` : ''}
       </div>`).join('')
       : '<div class="vazio">Só você por enquanto.</div>';
+
+    /* Entrar ou sair do rodízio de clientes novos. Serve para férias e para
+       quem só administra, sem precisar tirar o acesso da pessoa. */
+    $$('#listaEquipe [data-rodizio]').forEach(cx => cx.addEventListener('change', async () => {
+      cx.disabled = true;
+      try {
+        const { error } = await sb.from('perfis')
+          .update({ recebe_leads: cx.checked }).eq('id', cx.dataset.rodizio);
+        if (error) throw error;
+        toast(cx.checked ? '✅ Volta a receber clientes novos' : '⏸ Fora do rodízio');
+        await carregarNomesDaEquipe();
+      } catch (err) {
+        cx.checked = !cx.checked;
+        toast('⚠️ ' + err.message);
+      } finally { cx.disabled = false; }
+    }));
 
     /* Troca de função. O servidor recusa rebaixar o último administrador —
        sem isso dá para se trancar para fora do próprio sistema. */
@@ -1257,7 +1330,8 @@ async function assumirAtendimento(assumir, forcar = false) {
     }
     if (!r.ok) throw new Error(r.erro || 'não consegui alterar');
 
-    conversaAtual.atribuida_a = assumir ? perfil.id : null;
+    // devolver ao Carlos não tira o dono — só assumir muda de responsável
+    if (assumir) conversaAtual.atribuida_a = perfil.id;
     conversaAtual.ia_ativa    = !assumir;
     await carregarConversas();
     if (abaVisivel('funil')) await carregarFunil();
@@ -1464,6 +1538,57 @@ async function carregarContagemEtapas() {
 }
 
 /* ---------------- A plaquinha ---------------- */
+document.getElementById('btnSoMinhas')?.addEventListener('click', (ev) => {
+  soMinhas = !soMinhas;
+  localStorage.setItem('indycar_so_minhas', soMinhas ? '1' : '0');
+  ev.currentTarget.classList.toggle('ativo', soMinhas);
+  renderConversas();
+});
+
+/* ============================================================
+   DE QUEM É O CLIENTE
+   Cada conversa nova cai com dono, escolhido pelo rodízio no banco. A
+   plaquinha existe porque, sem ela, os dois olhavam a mesma fila achando
+   que o outro ia responder — e o cliente ficava esperando.
+   ============================================================ */
+let EQUIPE = new Map();          // id -> {nome, papel}
+let soMinhas = localStorage.getItem('indycar_so_minhas') === '1';
+
+async function carregarNomesDaEquipe() {
+  try {
+    const { data } = await sb.from('perfis').select('id,nome,papel,ativo');
+    EQUIPE = new Map((data || []).map(p => [p.id, p]));
+  } catch { /* sem a lista, a plaquinha mostra "sem dono" e nada quebra */ }
+}
+
+/* Cor estável por pessoa: a mesma pessoa fica sempre da mesma cor, sem
+   precisar guardar cor nenhuma. Tons escolhidos para não colidir com o
+   vermelho da marca nem com o verde/âmbar das etapas. */
+const CORES_DONO = ['#3b82f6', '#a855f7', '#0ea5e9', '#14b8a6', '#f97316', '#ec4899'];
+function corDoDono(id = '') {
+  let n = 0;
+  for (let i = 0; i < id.length; i++) n = (n * 31 + id.charCodeAt(i)) >>> 0;
+  return CORES_DONO[n % CORES_DONO.length];
+}
+
+function donoHtml(conv) {
+  const id = conv?.atribuida_a;
+  if (!id) {
+    return `<button type="button" class="dono sem-dono" data-dono="${esc(conv.id)}"
+      title="Ninguém responsável — clique para assumir">👤 sem dono</button>`;
+  }
+  const p = EQUIPE.get(id);
+  const nome = p?.nome || 'outro atendente';
+  const eu = id === perfil?.id;
+  const cor = corDoDono(id);
+  return `<button type="button" class="dono${eu ? ' eu' : ''}" data-dono="${esc(conv.id)}"
+    style="--dn-cor:${cor};--dn-fundo:${corComAlfa(cor, .16)}"
+    title="${eu ? 'Este cliente é seu' : 'Responsável: ' + esc(nome)} — clique para passar para outra pessoa">
+    ${eu ? '★ meu' : esc(primeiroNome(nome))}</button>`;
+}
+
+const primeiroNome = (n = '') => String(n).trim().split(/\s+/)[0] || n;
+
 function plaquinhaHtml(conv) {
   const e = etapaPorId(conv?.etapa_id);
   const cor = corSegura(e?.cor);
@@ -1532,6 +1657,74 @@ function abrirMenuEtapas(ancora, conv) {
   el.hidden = false;
   posicionarMenu(el, ancora);
   el.style.visibility = '';
+}
+
+/* Passar o cliente para outra pessoa. Mesmo desenho do menu de etapas:
+   ancorado na plaquinha, sem modal, um clique só. */
+let convDoMenuDono = null;
+
+function fecharMenuDono() {
+  const el = $('#menuDono');
+  if (el) el.hidden = true;
+  convDoMenuDono = null;
+}
+
+function abrirMenuDono(ancora, conv) {
+  if (!conv) return;
+  const el = $('#menuDono');
+  if (!el.hidden && convDoMenuDono?.id === conv.id) return fecharMenuDono();
+  fecharMenuEtapas();
+  convDoMenuDono = conv;
+
+  const gente = [...EQUIPE.values()].filter(p => p.ativo)
+    .sort((a, b) => (a.id === perfil?.id ? -1 : b.id === perfil?.id ? 1 : a.nome.localeCompare(b.nome)));
+
+  const opcoes = gente.map(p => {
+    const atual = p.id === conv.atribuida_a;
+    return `<button type="button" class="menu-etapa-op${atual ? ' atual' : ''}" data-novo="${esc(p.id)}">
+      <i style="background:${corDoDono(p.id)}"></i>
+      <span>${esc(p.nome)}${p.id === perfil?.id ? ' (você)' : ''}</span>
+      ${atual ? '<b>atual</b>' : ''}
+    </button>`;
+  }).join('');
+
+  $('#menuDonoLista').innerHTML = (gente.length ? opcoes
+      : '<div class="menu-etapas-vazio">Ninguém cadastrado ainda.</div>')
+    + (conv.atribuida_a
+        ? '<button type="button" class="menu-etapa-op limpar" data-novo="">Deixar sem dono</button>' : '');
+
+  $$('#menuDonoLista .menu-etapa-op').forEach(b => b.addEventListener('click', async ev => {
+    ev.stopPropagation();
+    const alvo = convDoMenuDono;
+    fecharMenuDono();
+    await trocarDono(alvo, b.dataset.novo || null);
+  }));
+
+  el.style.visibility = 'hidden';
+  el.hidden = false;
+  posicionarMenu(el, ancora);
+  el.style.visibility = '';
+}
+
+async function trocarDono(conv, novoId) {
+  if (!conv) return;
+  const antes = conv.atribuida_a;
+  conv.atribuida_a = novoId;           // pinta na hora; desfaz se o banco recusar
+  renderConversas();
+  try {
+    const { error } = await sb.from('conversas')
+      .update({ atribuida_a: novoId }).eq('id', conv.id);
+    if (error) throw error;
+    const nome = novoId ? (EQUIPE.get(novoId)?.nome || 'outra pessoa') : null;
+    toast(novoId
+      ? (novoId === perfil?.id ? '★ Cliente é seu agora' : `👤 Passou para ${nome}`)
+      : 'Cliente ficou sem dono');
+    await carregarConversas();
+  } catch (err) {
+    conv.atribuida_a = antes;
+    renderConversas();
+    toast('⚠️ ' + err.message);
+  }
 }
 
 function posicionarMenu(el, ancora) {
