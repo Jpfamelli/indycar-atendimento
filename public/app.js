@@ -92,6 +92,7 @@ async function iniciar() {
 
   const { data: { session } } = await sb.auth.getSession();
   if (session) await entrarNoApp(session.user);
+  else await verPrimeiroAcesso();   // sistema vazio? abre a criação do admin
 
   sb.auth.onAuthStateChange((evento, sessao) => {
     if (evento === 'SIGNED_OUT') location.reload();
@@ -130,23 +131,76 @@ $('#formLogin').addEventListener('submit', async e => {
   }
 });
 
-$('#btnCriarConta').addEventListener('click', async () => {
-  const email = $('#loginEmail').value.trim();
-  const senha = $('#loginSenha').value;
-  $('#loginErro').hidden = true;
+/* PRIMEIRO ACESSO
+   O botão só aparece enquanto o sistema não tem NINGUÉM. Quem criar a
+   primeira conta vira administrador.
 
-  if (!email || !senha) {
-    return mostrarErroLogin('Preencha e-mail e senha acima e clique de novo para criar a conta.');
-  }
-  if (senha.length < 6) return mostrarErroLogin('A senha precisa ter pelo menos 6 caracteres.');
-
+   Não usa sb.auth.signUp: ele exige confirmação por e-mail e recusa domínio
+   que não seja de e-mail de verdade — o @indycartaubate.com era recusado com
+   "Email address is invalid". O servidor cria a conta já valendo. */
+async function verPrimeiroAcesso() {
   try {
-    const { data, error } = await sb.auth.signUp({ email, password: senha });
-    if (error) throw error;
-    if (data.session) { await entrarNoApp(data.user); return; }
-    toast('✅ Conta criada. Confirme o e-mail e depois entre.');
+    const r = await fetch('/api/primeiro-acesso');
+    const j = await r.json();
+    $('#btnCriarConta').hidden = !j.aberto;
+    if (j.aberto) {
+      $('#loginTitulo').textContent = 'Vamos começar!';
+      $('#loginSub').textContent = 'Ninguém foi cadastrado ainda. Crie a sua conta de administrador.';
+      mostrarFormPrimeiro(true);
+    }
+  } catch { /* servidor fora do ar: a tela de login normal já cobre */ }
+}
+
+function mostrarFormPrimeiro(mostrar) {
+  $('#formLogin').hidden     = mostrar;
+  $('#formPrimeiro').hidden  = !mostrar;
+  $('#btnCriarConta').hidden = mostrar;
+  $('#btnVoltarLogin').hidden = !mostrar;
+  $('#loginTitulo').textContent = mostrar ? 'Vamos começar!' : 'Bem-vindo!';
+  $('#loginSub').textContent = mostrar
+    ? 'Ninguém foi cadastrado ainda. Crie a sua conta de administrador.'
+    : 'Informe seu e-mail e senha para entrar:';
+}
+
+$('#btnCriarConta').addEventListener('click', () => mostrarFormPrimeiro(true));
+$('#btnVoltarLogin').addEventListener('click', () => mostrarFormPrimeiro(false));
+
+$('#formPrimeiro').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const erro = $('#pnErro');
+  const btn  = $('#btnPrimeiro');
+  erro.hidden = true;
+
+  const nome  = $('#pnNome').value.trim();
+  const email = $('#pnEmail').value.trim().toLowerCase();
+  const senha = $('#pnSenha').value;
+
+  const falha = (m) => { erro.hidden = false; erro.textContent = m; };
+  if (!nome)  return falha('Informe seu nome.');
+  if (senha.length < 8) return falha('A senha precisa ter pelo menos 8 caracteres.');
+  if (senha !== $('#pnSenha2').value) return falha('As duas senhas não são iguais.');
+
+  btn.disabled = true; btn.textContent = 'Criando…';
+  try {
+    const r = await fetch('/api/primeiro-acesso', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome, email, senha }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.erro || 'Não consegui criar a conta.');
+
+    // já entra, sem obrigar a digitar tudo de novo
+    const { error } = await sb.auth.signInWithPassword({ email, password: senha });
+    if (error) {
+      mostrarFormPrimeiro(false);
+      toast('✅ Conta criada! Entre com seu e-mail e senha.');
+      return;
+    }
+    location.reload();
   } catch (err) {
-    mostrarErroLogin(traduzErroAuth(err.message));
+    falha(err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Criar minha conta de administrador';
   }
 });
 
@@ -781,13 +835,40 @@ async function carregarEquipe() {
       <div class="equipe-item${p.ativo ? '' : ' inativo'}">
         <span class="avatar">${esc(iniciais(p.nome))}</span>
         <div class="equipe-txt">
-          <strong>${esc(p.nome)}</strong><br><small>${esc(p.email)} ·
-          ${p.papel === 'admin' ? 'Administrador' : 'Atendente'}${p.ativo ? '' : ' · sem acesso'}</small>
+          <strong>${esc(p.nome)}</strong>${p.id === perfil.id ? ' <em class="voce">(você)</em>' : ''}
+          <br><small>${esc(p.email)}${p.ativo ? '' : ' · sem acesso'}</small>
         </div>
+        ${ehAdmin ? `
+          <select class="equipe-papel" data-papel="${esc(p.id)}" title="O que esta pessoa pode fazer">
+            <option value="atendente"${p.papel === 'admin' ? '' : ' selected'}>Atendente</option>
+            <option value="admin"${p.papel === 'admin' ? ' selected' : ''}>Administrador</option>
+          </select>` : `<span class="equipe-papel-txt">${p.papel === 'admin' ? 'Administrador' : 'Atendente'}</span>`}
         ${ehAdmin && p.id !== perfil.id ? `<button class="btn btn-ghost sm" data-membro="${esc(p.id)}"
             data-ativar="${p.ativo ? '0' : '1'}">${p.ativo ? 'Tirar acesso' : 'Devolver acesso'}</button>` : ''}
       </div>`).join('')
       : '<div class="vazio">Só você por enquanto.</div>';
+
+    /* Troca de função. O servidor recusa rebaixar o último administrador —
+       sem isso dá para se trancar para fora do próprio sistema. */
+    $$('#listaEquipe [data-papel]').forEach(s => s.addEventListener('change', async () => {
+      const antes = s.dataset.antes || (s.querySelector('option[selected]')?.value ?? 'atendente');
+      s.disabled = true;
+      try {
+        const r = await (await fetch('/api/equipe/papel', {
+          method: 'POST', headers: await authCabecalhos(),
+          body: JSON.stringify({ id: s.dataset.papel, papel: s.value }),
+        })).json();
+        if (!r.ok) throw new Error(r.erro || 'não consegui mudar');
+        toast(s.value === 'admin' ? '✅ Agora é administrador' : '✅ Agora é atendente');
+        // mudar o próprio papel muda o que você enxerga: recarrega o perfil
+        if (s.dataset.papel === perfil.id) { location.reload(); return; }
+        await carregarEquipe();
+      } catch (err) {
+        toast('⚠️ ' + err.message);
+        s.value = antes;
+        s.disabled = false;
+      }
+    }));
 
     // ligar/desligar o acesso de alguém
     $$('#listaEquipe [data-membro]').forEach(b => b.addEventListener('click', async () => {

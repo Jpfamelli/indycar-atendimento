@@ -37,8 +37,8 @@
         <img class="logo-img" src="logo.png" alt="IndyCar Centro Automotivo" width="225" height="225" />
       </span>
     </div>
-    <h1>Bem-vindo!</h1>
-    <p class="login-sub">Informe seu e-mail e senha para entrar:</p>
+    <h1 id="loginTitulo">Bem-vindo!</h1>
+    <p class="login-sub" id="loginSub">Informe seu e-mail e senha para entrar:</p>
 
     <form id="formLogin" novalidate>
       <label>E-mail
@@ -51,8 +51,30 @@
       <button type="submit" class="btn btn-primary full" id="btnEntrar">Entrar</button>
     </form>
 
+    <!-- Primeiro acesso: só aparece enquanto NÃO existir ninguém cadastrado.
+         Quem criar esta conta vira o administrador do sistema. -->
+    <form id="formPrimeiro" novalidate hidden>
+      <label>Seu nome
+        <input id="pnNome" placeholder="Ex.: João Pedro" maxlength="80" required />
+      </label>
+      <label>Seu e-mail
+        <input id="pnEmail" type="email" placeholder="seu@email.com" autocomplete="email" required />
+      </label>
+      <label>Crie uma senha
+        <input id="pnSenha" type="password" placeholder="pelo menos 8 caracteres"
+               minlength="8" autocomplete="new-password" required />
+      </label>
+      <label>Repita a senha
+        <input id="pnSenha2" type="password" placeholder="digite a mesma senha"
+               minlength="8" autocomplete="new-password" required />
+      </label>
+      <div id="pnErro" class="alerta" hidden></div>
+      <button type="submit" class="btn btn-primary full" id="btnPrimeiro">Criar minha conta de administrador</button>
+    </form>
+
     <div class="login-rodape">
-      <button type="button" class="link" id="btnCriarConta">Primeiro acesso? Criar conta</button>
+      <button type="button" class="link" id="btnCriarConta" hidden>Primeiro acesso? Criar minha conta</button>
+      <button type="button" class="link" id="btnVoltarLogin" hidden>Já tenho conta — entrar</button>
     </div>
   </div>
 

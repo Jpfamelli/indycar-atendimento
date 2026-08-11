@@ -1588,6 +1588,96 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    /* ---- Primeiro acesso ----
+       Enquanto não existir NINGUÉM cadastrado, esta rota deixa criar a conta
+       do dono, já como administrador. Assim que houver um perfil, ela fecha
+       sozinha e passa a responder 403 — daí em diante quem cadastra é o
+       admin, pela tela de Equipe.
+
+       Não usa o signUp público do Supabase de propósito: ele exige
+       confirmação por e-mail e recusa domínio que não seja de e-mail de
+       verdade (o @indycartaubate.com era recusado). Aqui a conta já nasce
+       valendo. */
+    if (pathname === '/api/primeiro-acesso' && req.method === 'GET') {
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { aberto: false, erro: 'Servidor sem a chave do banco.' });
+      const { count } = await sb.from('perfis').select('id', { count: 'exact', head: true });
+      return json(res, 200, { aberto: (count ?? 0) === 0 });
+    }
+
+    if (pathname === '/api/primeiro-acesso' && req.method === 'POST') {
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      // Sem login para chegar aqui, então o freio é o IP
+      const ip = req.socket?.remoteAddress || 'desconhecido';
+      if (!dentroDoLimite(`primeiro:${ip}`, 5, 600_000)) {
+        return json(res, 429, { erro: 'Muitas tentativas. Espere alguns minutos.' });
+      }
+
+      const { count } = await sb.from('perfis').select('id', { count: 'exact', head: true });
+      if ((count ?? 0) > 0) {
+        return json(res, 403, {
+          erro: 'O sistema já tem gente cadastrada. Peça ao administrador para criar seu acesso.' });
+      }
+
+      const bruto = await readBody(req);
+      const nome  = texto1(bruto.nome, 80).trim();
+      const email = texto1(bruto.email, 160).trim().toLowerCase();
+      const senha = texto1(bruto.senha, 200);
+
+      if (!nome) return json(res, 400, { erro: 'Informe seu nome.' });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+        return json(res, 400, { erro: 'Esse e-mail não parece válido.' });
+      }
+      if (senha.length < 8) {
+        return json(res, 400, { erro: 'A senha precisa ter pelo menos 8 caracteres.' });
+      }
+
+      const { data, error } = await sb.auth.admin.createUser({
+        email, password: senha, email_confirm: true, user_metadata: { nome },
+      });
+      if (error) return json(res, 400, { erro: error.message });
+
+      /* O gatilho do banco já marca o primeiro como admin. Reforçado aqui
+         porque uma corrida entre dois cadastros simultâneos poderia deixar
+         o dono como atendente no próprio sistema. */
+      await sb.from('perfis').update({ nome, papel: 'admin', ativo: true }).eq('id', data.user.id);
+      return json(res, 201, { ok: true, email });
+    }
+
+    /* ---- Trocar a função de alguém ---- */
+    if (pathname === '/api/equipe/papel' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') {
+        return json(res, 403, { erro: 'Só o administrador muda a função da equipe.' });
+      }
+      const bruto = await readBody(req);
+      const id    = texto1(bruto.id, 60);
+      const papel = bruto.papel === 'admin' ? 'admin' : 'atendente';
+      if (!id) return json(res, 400, { erro: 'Informe quem.' });
+
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      /* Rebaixar o último admin tranca todo mundo para fora: ninguém mais
+         cadastra ninguém, ninguém reconecta o WhatsApp, e a rota de primeiro
+         acesso não reabre porque ainda existem perfis. */
+      if (papel !== 'admin') {
+        const { count } = await sb.from('perfis')
+          .select('id', { count: 'exact', head: true }).eq('papel', 'admin').eq('ativo', true);
+        if ((count ?? 0) <= 1) {
+          return json(res, 409, {
+            erro: 'Este é o único administrador. Promova outra pessoa antes de rebaixar esta.' });
+        }
+      }
+
+      const { error } = await sb.from('perfis').update({ papel }).eq('id', id);
+      if (error) return json(res, 400, { erro: error.message });
+      return json(res, 200, { ok: true, papel });
+    }
+
     if (pathname === '/api/equipe' && req.method === 'POST') {
       const quem = await usuarioLogado(req);
       if (!quem) return json(res, 401, { erro: 'Faça login para cadastrar alguém.' });
@@ -1651,6 +1741,23 @@ const server = http.createServer(async (req, res) => {
       }
       const sb = adminSupabase();
       if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      /* Tirar o acesso do último administrador tranca o sistema para todo
+         mundo: ninguém cadastra ninguém, ninguém reconecta o WhatsApp, e a
+         tela de primeiro acesso não reabre porque perfis continuam existindo.
+         A regra de "não desligar a si mesmo" acima não cobre isto — dois
+         admins podem se desligar em sequência. */
+      if (bruto.ativo !== true) {
+        const { data: alvo } = await sb.from('perfis').select('papel').eq('id', id).maybeSingle();
+        if (alvo?.papel === 'admin') {
+          const { count } = await sb.from('perfis')
+            .select('id', { count: 'exact', head: true }).eq('papel', 'admin').eq('ativo', true);
+          if ((count ?? 0) <= 1) {
+            return json(res, 409, {
+              erro: 'Este é o único administrador ativo. Promova outra pessoa antes de tirar o acesso desta.' });
+          }
+        }
+      }
 
       const { error } = await sb.from('perfis')
         .update({ ativo: bruto.ativo === true }).eq('id', id);

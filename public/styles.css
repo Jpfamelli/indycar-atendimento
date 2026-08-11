@@ -853,3 +853,13 @@ select option:checked,select option:hover{
 .pareamento-prazo{margin:0 0 12px;text-align:center;font-size:.82rem;color:var(--texto-fraco)}
 .pareamento-passos{margin:0;padding-left:20px;font-size:.86rem;line-height:1.7;color:var(--texto-fraco)}
 .pareamento-passos b{color:var(--texto)}
+
+/* Função de cada pessoa na lista da equipe */
+.equipe-papel{
+  flex:none;padding:5px 8px;border-radius:8px;
+  border:1px solid var(--borda);background:var(--grafite);color:var(--texto);
+  font:inherit;font-size:.8rem;cursor:pointer;
+}
+.equipe-papel:disabled{opacity:.5;cursor:wait}
+.equipe-papel-txt{flex:none;font-size:.8rem;color:var(--texto-fraco)}
+.equipe-txt .voce{font-style:normal;font-size:.78rem;color:var(--texto-fraco);font-weight:600}
