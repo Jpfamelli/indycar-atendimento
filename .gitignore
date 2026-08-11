@@ -1,2 +1,8 @@
 .env
 node_modules/
+
+# Backups de segurança antes de apagar dados.
+# Ficam SÓ no disco: são cópias inteiras de conversa de cliente, e um deles
+# tinha uma chave de API que alguém mandou por WhatsApp — o scanner do GitHub
+# barrou o push, com razão. Dado de cliente não vai para repositório.
+backups/

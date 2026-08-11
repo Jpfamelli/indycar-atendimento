@@ -701,26 +701,50 @@ async function reinscreverNoFluxo() {
 // Assinatura com que o Carlos abre as mensagens dele
 const MARCA_DO_CARLOS = /^\s*\*?\s*carlos\s*\|/i;
 
+/* Devolve SEMPRE um dos três: {lista}, {erro} ou {desconfigurado}.
+   Nunca colapsa falha em lista vazia — foi assim que o erro
+   `/proxy/chats?limit=200 → 400 VALIDATION_ERROR` passou por "nenhuma
+   conversa" e me fez concluir que o aparelho estava sem histórico.
+   Se o CodeWords mudar de novo (já trocou device_id por phone_id hoje),
+   isto tem que aparecer, não sumir. */
 async function mensagensDoAparelho(g, telefone, limite = 30) {
   const jid = `${soDigitos(telefone)}@s.whatsapp.net`;
   const { data: cfg } = await g.sb.from('codewords_config').select('device_id').maybeSingle();
-  if (!cfg?.device_id) return null;
+  if (!cfg?.device_id) return { desconfigurado: true };
 
   const url = `${g.url}/proxy/chat/${encodeURIComponent(jid)}/messages`
             + `?phone_id=${encodeURIComponent(cfg.device_id)}&limit=${limite}`;
   try {
     const r = await fetch(url, { headers: { Authorization: g.chave }, signal: AbortSignal.timeout(20000) });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return j?.results?.data || [];
-  } catch { return null; }
+    const txt = await r.text();
+    if (!r.ok) {
+      console.error('sincronia:', r.status, txt.slice(0, 200));
+      return { erro: `o CodeWords respondeu ${r.status}: ${txt.slice(0, 120)}` };
+    }
+    let j; try { j = JSON.parse(txt); } catch {
+      console.error('sincronia: resposta não é JSON:', txt.slice(0, 200));
+      return { erro: 'resposta do CodeWords em formato inesperado' };
+    }
+    // envelope diferente do esperado é ERRO, não "chat vazio"
+    if (!Array.isArray(j?.results?.data)) {
+      console.error('sincronia: envelope inesperado:', txt.slice(0, 200));
+      return { erro: 'o CodeWords mudou o formato da resposta' };
+    }
+    return { lista: j.results.data };
+  } catch (e) {
+    console.error('sincronia:', e.message);
+    return { erro: `não deu para falar com o CodeWords: ${e.message}` };
+  }
 }
 
 /* Traz para o banco o que faltar de UMA conversa.
    Devolve quantas mensagens entraram. */
 async function sincronizarConversa(g, conversa) {
-  const doAparelho = await mensagensDoAparelho(g, conversa.telefone);
-  if (!doAparelho?.length) return 0;
+  const r = await mensagensDoAparelho(g, conversa.telefone);
+  if (r.erro) return { entraram: 0, erro: r.erro };
+  if (r.desconfigurado) return { entraram: 0, erro: 'aparelho não configurado' };
+  const doAparelho = r.lista;
+  if (!doAparelho.length) return { entraram: 0 };
 
   const { data: jaTemos } = await g.sb.from('whatsapp_mensagens')
     .select('id, wamid, corpo, direcao, created_at')
@@ -738,6 +762,10 @@ async function sincronizarConversa(g, conversa) {
 
     const direcao = m.is_from_me ? 'saida' : 'entrada';
     const quando  = m.timestamp || m.created_at || new Date().toISOString();
+    // data inválida gravaria 1970 e jogaria a mensagem para o começo do chat
+    if (Number.isNaN(new Date(quando).getTime())) {
+      console.error('sincronia: data inválida', quando); continue;
+    }
 
     /* A mensagem que o próprio painel enviou já está gravada, mas sem wamid
        (na hora do envio ainda não se sabe o id). Sem esta adoção, ela
@@ -767,7 +795,7 @@ async function sincronizarConversa(g, conversa) {
       console.error('sincronizar:', error.message);
     }
   }
-  return entraram;
+  return { entraram };
 }
 
 /* Sincroniza as conversas mexidas mais recentemente. */
@@ -783,20 +811,60 @@ async function sincronizarRespostas({ conversaId = null, quantas = 12 } = {}) {
   const { data: convs, error } = await consulta;
   if (error) return { ok: false, erro: error.message };
 
-  let total = 0;
+  let total = 0, falhas = 0, ultimoErro = null, tentadas = 0;
   for (const c of (convs || [])) {
     if (!c.telefone) continue;
-    total += await sincronizarConversa(g, c);
+    tentadas++;
+    const r = await sincronizarConversa(g, c);
+    total += r.entraram || 0;
+    if (r.erro) { falhas++; ultimoErro = r.erro; }
   }
-  return { ok: true, novas: total, conversas: (convs || []).length };
+
+  /* Falhar numa conversa não é motivo para dizer que tudo quebrou — pode ser
+     um chat específico. Erro só quando NENHUMA deu certo. */
+  const tudoFalhou = tentadas > 0 && falhas === tentadas;
+  await registrarSaudeDaSincronia(g, tudoFalhou ? ultimoErro : null);
+  return { ok: !tudoFalhou, novas: total, conversas: tentadas,
+           falhas, erro: tudoFalhou ? ultimoErro : undefined };
+}
+
+/* Guarda no banco se a sincronização está de pé.
+   Só acende o aviso depois de 2 ciclos ruins seguidos (~4 min): uma piscada
+   do CodeWords não vale acordar ninguém, mas parar de trazer as respostas
+   do Carlos em silêncio foi exatamente o defeito de hoje. */
+async function registrarSaudeDaSincronia(g, erro) {
+  try {
+    if (!erro) {
+      await g.sb.from('codewords_config')
+        .update({ sincronia_erro: null, sincronia_falhas: 0 }).eq('id', true);
+      return;
+    }
+    const { data } = await g.sb.from('codewords_config').select('sincronia_falhas').maybeSingle();
+    const seguidas = (data?.sincronia_falhas || 0) + 1;
+    await g.sb.from('codewords_config').update({
+      sincronia_falhas: seguidas,
+      sincronia_erro: seguidas >= 2 ? erro : null,
+      sincronia_erro_em: seguidas >= 2 ? new Date().toISOString() : null,
+    }).eq('id', true);
+  } catch { /* não vale derrubar a sincronia por causa do termômetro dela */ }
 }
 
 /* De 2 em 2 minutos, em segundo plano. É o que faz a resposta do Carlos
    aparecer sozinha para quem está com o painel aberto. */
 let relogioSincronia = null;
+let sincroniaRodando = false;
 function ligarSincronizacaoPeriodica() {
   if (relogioSincronia) return;
-  const rodar = () => sincronizarRespostas().catch(e => console.error('sincronia:', e.message));
+  /* Trava de reentrância: 12 conversas com 20s de espera cada podem passar
+     de 2 minutos, e sem isto as rodadas se empilhariam, dobrando as chamadas
+     ao CodeWords justamente quando ele está lento. */
+  const rodar = async () => {
+    if (sincroniaRodando) return;
+    sincroniaRodando = true;
+    try { await sincronizarRespostas(); }
+    catch (e) { console.error('sincronia:', e.message); }
+    finally { sincroniaRodando = false; }
+  };
   relogioSincronia = setInterval(rodar, 120_000);
   setTimeout(rodar, 8_000);   // uma logo depois de subir, sem atrasar o boot
 }
