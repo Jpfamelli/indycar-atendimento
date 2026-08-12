@@ -36,7 +36,11 @@ const MODELO_IA         = process.env.MODELO_IA || 'claude-opus-5';
 
 const MIME = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8',
                '.js':'text/javascript; charset=utf-8', '.png':'image/png',
-               '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.ico':'image/x-icon' };
+               '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.ico':'image/x-icon',
+               // sem isto o manifesto sai como octet-stream e o navegador
+               // pode recusar instalar o app
+               '.json':'application/json; charset=utf-8',
+               '.webmanifest':'application/manifest+json' };
 
 const json = (res, code, data) => {
   const corpo = JSON.stringify(data);
