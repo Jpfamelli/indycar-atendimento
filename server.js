@@ -1757,9 +1757,17 @@ const server = http.createServer(async (req, res) => {
          de volta é dizer "a IA continua conversando", não "esse cliente não
          é de ninguém". Quem quiser passar para outra pessoa usa a plaquinha
          de dono, que é explícito. */
+      /* `ia_ativa` só vira false se o Carlos REALMENTE parou. Antes marcava
+         de qualquer jeito: o painel mostrava "IA parada", o botão virava
+         "Devolver" e o Carlos continuava respondendo o cliente junto com o
+         atendente. Mentir sobre isso é pior que falhar — deixa quem está
+         atendendo sem saber que precisa tentar de novo. */
       const campos = assumir
-        ? { atribuida_a: quem.id, ia_ativa: false,
-            assumida_em: new Date().toISOString(), ia_pausada_em: new Date().toISOString() }
+        ? { atribuida_a: quem.id,
+            ...(carlos.ok
+                ? { ia_ativa: false, ia_pausada_em: new Date().toISOString() }
+                : { ia_ativa: true, ia_pausada_em: null }),
+            assumida_em: new Date().toISOString() }
         : { ia_ativa: true, assumida_em: null, ia_pausada_em: null };
 
       // Assumir move o cliente para "Em atendimento", como o dono pediu
@@ -2148,6 +2156,60 @@ const server = http.createServer(async (req, res) => {
       if (error) return json(res, 500, { erro: error.message });
 
       return json(res, 200, { ok: true, apagadas: (msgs || []).length });
+    }
+
+    /* ---- Apagar mensagens escolhidas ----
+       Serve para tirar do chat o que não é atendimento: teste, engano,
+       mensagem duplicada. Apaga só do painel — no celular do cliente a
+       mensagem continua lá, e é importante que quem apaga saiba disso.
+
+       Guarda cópia antes, como a exclusão de conversa. Só admin. */
+    if (pathname === '/api/mensagens/excluir' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') {
+        return json(res, 403, { erro: 'Só o administrador pode apagar mensagens.' });
+      }
+      const bruto = await readBody(req);
+      const ids = Array.isArray(bruto.ids) ? bruto.ids.filter(ehUuid).slice(0, 200) : [];
+      if (!ids.length) return json(res, 400, { erro: 'Escolha ao menos uma mensagem.' });
+
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+
+      const { data: msgs, error: erroLer } = await sb.from('whatsapp_mensagens')
+        .select('id, conversa_id, telefone, corpo, direcao, created_at').in('id', ids);
+      if (erroLer) return json(res, 500, { erro: 'Não consegui ler as mensagens: ' + erroLer.message });
+      if (!msgs?.length) return json(res, 404, { erro: 'Essas mensagens já não existem.' });
+
+      // cópia primeiro, e conferida: sem ela, nada é apagado
+      const { error: erroCopia } = await sb.from('codewords_eventos').insert({
+        direcao: 'saida', sucesso: true, telefone: msgs[0].telefone,
+        resumo: `${msgs.length} mensagem(ns) apagada(s) por ${quem.email}`,
+        payload: { apagadas_por: quem.email, em: new Date().toISOString(), mensagens: msgs },
+      }).select('id').single();
+      if (erroCopia) {
+        return json(res, 500, {
+          erro: 'Não consegui gravar a cópia de segurança. NADA foi apagado.' });
+      }
+
+      const { error } = await sb.from('whatsapp_mensagens').delete().in('id', ids);
+      if (error) return json(res, 500, { erro: error.message });
+
+      /* A prévia e a data da conversa vinham da mensagem apagada. Sem
+         recalcular, a lista mostraria texto de mensagem que já não existe. */
+      const conversaId = msgs[0].conversa_id;
+      if (conversaId) {
+        const { data: ultima } = await sb.from('whatsapp_mensagens')
+          .select('corpo, created_at').eq('conversa_id', conversaId)
+          .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        await sb.from('conversas').update({
+          ultima_previa: ultima ? String(ultima.corpo || '').slice(0, 120) : null,
+          ultima_mensagem_em: ultima ? ultima.created_at : null,
+        }).eq('id', conversaId);
+      }
+
+      return json(res, 200, { ok: true, apagadas: msgs.length });
     }
 
     /* ---- Puxar do aparelho o que falta nesta conversa ----

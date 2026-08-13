@@ -252,10 +252,23 @@
               </select>
               <button class="btn btn-ghost sm" id="btnPainelCliente" title="Mostrar/ocultar ficha">Ficha</button>
               <!-- Só admin enxerga: apaga histórico de cliente, sem desfazer -->
+              <!-- Só admin enxerga os dois: apagam histórico, sem desfazer -->
+              <button class="btn btn-ghost sm" id="btnSelecionarMsgs" hidden
+                      title="Escolher mensagens para apagar do painel">🗑 Mensagens</button>
               <button class="btn btn-excluir sm" id="btnExcluirConversa" hidden
-                      title="Excluir esta conversa do painel">🗑</button>
+                      title="Excluir esta conversa inteira do painel">🗑 Conversa</button>
             </div>
           </header>
+
+          <!-- Barra do modo "escolher mensagens". Fica entre o cabeçalho e o
+               chat para não cobrir mensagem nenhuma. -->
+          <div class="barra-selecao" id="barraSelecao" hidden>
+            <span id="selecaoTexto">Toque nas mensagens</span>
+            <div class="barra-selecao-acoes">
+              <button type="button" class="btn btn-ghost sm" id="btnCancelarSelecao">Cancelar</button>
+              <button type="button" class="btn btn-excluir sm" id="btnApagarMsgs" disabled>🗑 Apagar</button>
+            </div>
+          </div>
 
           <div class="mensagens" id="mensagens"></div>
 

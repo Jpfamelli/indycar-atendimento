@@ -235,7 +235,9 @@ async function entrarNoApp(user) {
   $('#perfilPapel').value = perfil.papel === 'admin' ? 'Administrador' : 'Atendente';
   aplicarPapelConfig();
   await carregarNomesDaEquipe();      // a plaquinha de dono precisa dos nomes
-  $('#btnExcluirConversa').hidden = perfil.papel !== 'admin';
+  const soAdmin = perfil.papel !== 'admin';
+  $('#btnExcluirConversa').hidden = soAdmin;
+  $('#btnSelecionarMsgs').hidden  = soAdmin;
   $('#btnSoMinhas')?.classList.toggle('ativo', soMinhas);
   vigiarConexao();   // acende a tarja se o WhatsApp estiver fora do ar
 
@@ -478,11 +480,78 @@ function renderMensagens() {
       sep = `<div class="dia-sep">${esc(dataLonga(m.created_at))}</div>`;
     }
     const hora = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
-    return sep + `<div class="msg ${m.direcao === 'entrada' ? 'entrada' : 'saida'}${m.gerada_por_ia ? ' ia-tag' : ''}">
+    const marcada = selecionadas.has(m.id);
+    return sep + `<div class="msg ${m.direcao === 'entrada' ? 'entrada' : 'saida'}${m.gerada_por_ia ? ' ia-tag' : ''}${
+        modoSelecao ? ' selecionavel' : ''}${marcada ? ' marcada' : ''}" data-msg="${esc(m.id)}">
+      ${modoSelecao ? `<span class="msg-marca">${marcada ? '✓' : ''}</span>` : ''}
       ${esc(m.corpo)}<span class="msg-hora">${esc(hora)}</span></div>`;
   }).join('');
-  el.scrollTop = el.scrollHeight;
+
+  if (modoSelecao) {
+    $$('#mensagens [data-msg]').forEach(d => d.addEventListener('click', () => {
+      const id = d.dataset.msg;
+      selecionadas.has(id) ? selecionadas.delete(id) : selecionadas.add(id);
+      renderMensagens();
+      atualizarBarraSelecao();
+    }));
+  } else {
+    el.scrollTop = el.scrollHeight;   // só rola no modo normal, senão pula a cada clique
+  }
 }
+
+/* ============================================================
+   APAGAR MENSAGENS
+   Serve para tirar do chat o que não é atendimento: teste, engano,
+   duplicada. Some do painel — NÃO some do celular do cliente, e o aviso
+   deixa isso claro para ninguém apagar achando que "desfez" o envio.
+   ============================================================ */
+let modoSelecao = false;
+const selecionadas = new Set();
+
+function alternarSelecao(ligar) {
+  modoSelecao = ligar ?? !modoSelecao;
+  if (!modoSelecao) selecionadas.clear();
+  $('#barraSelecao').hidden = !modoSelecao;
+  $('#btnSelecionarMsgs')?.classList.toggle('ativo', modoSelecao);
+  renderMensagens();
+  atualizarBarraSelecao();
+}
+
+function atualizarBarraSelecao() {
+  const n = selecionadas.size;
+  const t = $('#selecaoTexto');
+  if (t) t.textContent = n ? `${n} mensagem${n > 1 ? 's' : ''} marcada${n > 1 ? 's' : ''}` : 'Toque nas mensagens';
+  const b = $('#btnApagarMsgs');
+  if (b) b.disabled = !n;
+}
+
+$('#btnSelecionarMsgs')?.addEventListener('click', () => alternarSelecao());
+$('#btnCancelarSelecao')?.addEventListener('click', () => alternarSelecao(false));
+
+$('#btnApagarMsgs')?.addEventListener('click', async () => {
+  const ids = [...selecionadas];
+  if (!ids.length) return;
+  if (!confirm(
+      `Apagar ${ids.length} mensagem(ns) do painel?\n\n`
+    + `Elas somem daqui e do histórico da oficina, sem desfazer.\n`
+    + `No celular do cliente as mensagens CONTINUAM — isso não apaga o WhatsApp dele.`)) return;
+
+  const b = $('#btnApagarMsgs');
+  b.disabled = true;
+  try {
+    const r = await (await fetch('/api/mensagens/excluir', {
+      method: 'POST', headers: await authCabecalhos(), body: JSON.stringify({ ids }),
+    })).json();
+    if (!r.ok) throw new Error(r.erro || 'não consegui apagar');
+    toast(`🗑 ${r.apagadas} mensagem(ns) apagada(s)`);
+    alternarSelecao(false);
+    await carregarMensagens();
+    await carregarConversas();
+  } catch (err) {
+    toast('⚠️ ' + err.message);
+    b.disabled = false;
+  }
+});
 
 /* ---------------- Enviar ---------------- */
 const campo = $('#campoMensagem');
@@ -1541,24 +1610,28 @@ $('#btnVoltarLista').addEventListener('click', () => {
    fluxo dele) e a conversa vai para "Em atendimento" no funil.
    Ao devolver, ele volta a atender (/start-ai).
    ============================================================ */
+/* O botão fala sobre a IA, não sobre quem é o dono do cliente.
+   Eram a mesma coisa antes do rodízio: só quem assumia virava dono. Agora
+   TODA conversa nasce com dono, e decidir por `atribuida_a` fazia o botão
+   já aparecer como "Devolver para a IA" — o atendente clicava achando que
+   assumia e reativava o Carlos. Agora quem manda é `ia_ativa`. */
 function renderBotaoAssumir() {
   const b = $('#btnAssumir');
   if (!b || !conversaAtual) return;
-  const minha  = conversaAtual.atribuida_a === perfil?.id;
+  const iaRespondendo = conversaAtual.ia_ativa !== false;
+  const minha   = conversaAtual.atribuida_a === perfil?.id;
   const deOutro = conversaAtual.atribuida_a && !minha;
 
-  if (minha) {
-    b.textContent = '↩️ Devolver para a IA';
-    b.title = 'Devolver este cliente para o Carlos atender';
-    b.classList.add('assumido');
-  } else if (deOutro) {
+  if (iaRespondendo) {
     b.textContent = '🙋 Assumir';
-    b.title = 'Esta conversa já está com outro atendente';
+    b.title = deOutro
+      ? 'O Carlos está respondendo. Assumir também passa o cliente para você.'
+      : 'Assumir este atendimento — o Carlos para de responder este cliente';
     b.classList.remove('assumido');
   } else {
-    b.textContent = '🙋 Assumir';
-    b.title = 'Assumir este atendimento — o Carlos para de responder este cliente';
-    b.classList.remove('assumido');
+    b.textContent = '↩️ Devolver para a IA';
+    b.title = 'O Carlos está parado neste cliente. Clique para ele voltar a responder.';
+    b.classList.add('assumido');
   }
 }
 
@@ -1585,7 +1658,9 @@ async function assumirAtendimento(assumir, forcar = false) {
 
     // devolver ao Carlos não tira o dono — só assumir muda de responsável
     if (assumir) conversaAtual.atribuida_a = perfil.id;
-    conversaAtual.ia_ativa    = !assumir;
+    /* Só diz que a IA parou se ela parou mesmo. Se o CodeWords recusou, o
+       botão tem que continuar em "Assumir" para dar para tentar de novo. */
+    conversaAtual.ia_ativa = assumir ? !r.carlosPausado : true;
     await carregarConversas();
     if (abaVisivel('funil')) await carregarFunil();
     const atual = CONVERSAS.find(c => c.id === conversaAtual.id);
@@ -1605,7 +1680,8 @@ async function assumirAtendimento(assumir, forcar = false) {
 
 $('#btnAssumir').addEventListener('click', () => {
   if (!conversaAtual) return toast('Abra uma conversa primeiro.');
-  assumirAtendimento(conversaAtual.atribuida_a !== perfil?.id);
+  // pelo estado da IA, igual ao rótulo do botão — não por quem é o dono
+  assumirAtendimento(conversaAtual.ia_ativa !== false);
 });
 
 $('#btnAgendar').addEventListener('click', () => {

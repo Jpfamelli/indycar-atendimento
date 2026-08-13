@@ -1005,3 +1005,28 @@ select option:checked,select option:hover{
 .btn-editar-item:hover{
   background:var(--superficie-2);border-color:var(--vermelho);color:var(--vermelho-txt);
 }
+
+/* ============================================================
+   APAGAR MENSAGENS
+   ============================================================ */
+.barra-selecao{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:12px;flex-wrap:wrap;
+  padding:10px 16px;
+  background:rgba(229,9,20,.1);border-bottom:1px solid var(--linha);
+  font-size:.86rem;font-weight:600;color:var(--texto);
+}
+.barra-selecao-acoes{display:flex;gap:8px;flex:none}
+
+/* No modo escolher, a mensagem vira alvo de clique */
+.msg.selecionavel{cursor:pointer;padding-left:34px;position:relative}
+.msg.selecionavel:hover{outline:1px solid var(--vermelho);outline-offset:2px}
+.msg-marca{
+  position:absolute;left:9px;top:50%;transform:translateY(-50%);
+  width:17px;height:17px;border-radius:5px;
+  border:1.5px solid currentColor;opacity:.55;
+  display:flex;align-items:center;justify-content:center;
+  font-size:.7rem;font-weight:800;line-height:1;
+}
+.msg.marcada{outline:2px solid var(--vermelho);outline-offset:2px}
+.msg.marcada .msg-marca{opacity:1;background:var(--vermelho);color:#fff;border-color:var(--vermelho)}
