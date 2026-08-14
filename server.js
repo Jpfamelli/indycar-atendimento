@@ -404,6 +404,10 @@ async function usuarioLogado(req) {
     const { data: p, error } = await sb.from('perfis')
       .select('ativo, papel').eq('id', usuario.id).maybeSingle();
     if (error || !p?.ativo) return negar();
+    /* Papel 'agenda' (ex.: Franklin): acesso SÓ à Agenda, para marcar presença.
+       Aqui no Atendimento ele não entra — não vê conversa, não assume, não
+       fala com cliente. A trava é no servidor: esconder tela não protege. */
+    if (p.papel === 'agenda') return negar();
     usuario.papel = p.papel;
 
     if (CACHE_LOGIN.size > 500) CACHE_LOGIN.clear();          // nunca cresce sem limite
@@ -1916,7 +1920,8 @@ const server = http.createServer(async (req, res) => {
       }
       const bruto = await readBody(req);
       const id    = texto1(bruto.id, 60);
-      const papel = bruto.papel === 'admin' ? 'admin' : 'atendente';
+      // 'agenda' = só marca presença na Agenda (não entra aqui no Atendimento)
+      const papel = ['admin', 'agenda'].includes(bruto.papel) ? bruto.papel : 'atendente';
       if (!id) return json(res, 400, { erro: 'Informe quem.' });
 
       const sb = adminSupabase();
