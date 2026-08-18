@@ -437,7 +437,17 @@ async function abrirConversa(id) {
      cliente e nenhuma resposta, e acha que a IA está muda.
      Sem await de propósito: a conversa já abriu, isto completa depois. */
     sincronizarConversaAberta(conv.id);
+
+  /* Enquanto ESTA conversa estiver aberta, busca o que chegou a cada 15s —
+     é o que deixa a resposta aparecer quase na hora, sem esperar o relógio
+     geral. Aba escondida não busca (economiza chamada à toa). */
+  clearInterval(syncAbertaTimer);
+  syncAbertaTimer = setInterval(() => {
+    if (!document.hidden && conversaAtual?.id === conv.id) sincronizarConversaAberta(conv.id);
+  }, 15_000);
 }
+
+let syncAbertaTimer = null;
 
 async function sincronizarConversaAberta(id) {
   try {

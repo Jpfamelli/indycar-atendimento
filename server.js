@@ -857,8 +857,10 @@ async function registrarSaudeDaSincronia(g, erro) {
   } catch { /* não vale derrubar a sincronia por causa do termômetro dela */ }
 }
 
-/* De 2 em 2 minutos, em segundo plano. É o que faz a resposta do Carlos
-   aparecer sozinha para quem está com o painel aberto. */
+/* De 40 em 40 segundos, em segundo plano. É o que faz a resposta do Carlos
+   aparecer sozinha para quem está com o painel aberto. Era de 2 em 2 minutos
+   e a mensagem demorava demais para aparecer — o dono reclamou, com razão.
+   A trava de reentrância abaixo segura o ritmo se o CodeWords estiver lento. */
 let relogioSincronia = null;
 let sincroniaRodando = false;
 function ligarSincronizacaoPeriodica() {
@@ -873,7 +875,7 @@ function ligarSincronizacaoPeriodica() {
     catch (e) { console.error('sincronia:', e.message); }
     finally { sincroniaRodando = false; }
   };
-  relogioSincronia = setInterval(rodar, 120_000);
+  relogioSincronia = setInterval(rodar, 40_000);
   setTimeout(rodar, 8_000);   // uma logo depois de subir, sem atrasar o boot
 }
 
