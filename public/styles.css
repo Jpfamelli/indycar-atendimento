@@ -329,6 +329,12 @@ svg{display:block}
 .tag.pendente{background:rgba(245,158,11,.16);color:var(--amarelo-txt)}
 .tag.resolvida{background:var(--superficie-2);color:var(--cinza)}
 .tag.ia{background:rgba(229,9,20,.18);color:var(--vermelho-txt)}
+/* lead que CHEGOU hoje — plaquinha no card e aba própria nos filtros */
+.tag.novo-hoje{background:rgba(59,130,246,.18);color:var(--azul-txt,#7fb3ff);font-weight:700}
+.chip-num{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;
+  padding:0 5px;margin-left:4px;border-radius:9px;font-size:.68rem;font-weight:700;
+  background:rgba(59,130,246,.25);color:#fff;vertical-align:1px}
+.chip.chip-hoje.ativo .chip-num{background:rgba(255,255,255,.25)}
 .nao-lidas{background:var(--vermelho);color:#fff;font-size:.7rem;font-weight:700;
   padding:1px 7px;border-radius:20px;min-width:19px;text-align:center}
 .vazio{padding:40px 20px;text-align:center;color:var(--cinza-2);font-size:.9rem}

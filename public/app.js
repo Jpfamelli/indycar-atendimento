@@ -285,13 +285,20 @@ $$('.nav-item').forEach(b => b.addEventListener('click', () => {
 /* ============================================================
    CONVERSAS
    ============================================================ */
+/* Data de hoje no fuso da OFICINA (toISOString é UTC e vira amanhã às 21h). */
+const hojeSP = () => new Intl.DateTimeFormat('en-CA',
+  { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+const chegouHoje = (ts) => !!ts && new Intl.DateTimeFormat('en-CA',
+  { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(ts)) === hojeSP();
+
 async function carregarConversas() {
   try {
     let q = sb.from('conversas')
       .select('*')
       .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
       .limit(200);
-    if (filtroStatus) q = q.eq('status', filtroStatus);
+    // 'hoje' não é um status do banco: é o filtro "chegou hoje", aplicado depois
+    if (filtroStatus && filtroStatus !== 'hoje') q = q.eq('status', filtroStatus);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -314,6 +321,8 @@ async function carregarConversas() {
 
 function conversasFiltradas() {
   let base = CONVERSAS;
+  // aba "Novos hoje": só quem CHEGOU hoje (conversa criada hoje, fuso da oficina)
+  if (filtroStatus === 'hoje') base = base.filter(c => chegouHoje(c.created_at));
   // "só as minhas": o atendente trabalha a fila dele sem o ruído da do outro
   if (soMinhas && perfil?.id) base = base.filter(c => c.atribuida_a === perfil.id);
 
@@ -332,7 +341,8 @@ function renderConversas() {
 
   if (!lista.length) {
     el.innerHTML = `<div class="vazio">
-      ${CONVERSAS.length ? 'Nenhuma conversa com esse filtro.' : 'Nenhuma conversa ainda.'}
+      ${filtroStatus === 'hoje' ? 'Nenhum lead novo chegou hoje ainda. 🆕'
+        : CONVERSAS.length ? 'Nenhuma conversa com esse filtro.' : 'Nenhuma conversa ainda.'}
       <br><br><button class="btn btn-ghost sm" id="btnNovaVazio">+ Nova conversa</button></div>`;
     $('#btnNovaVazio')?.addEventListener('click', abrirModalNova);
     return;
@@ -348,6 +358,7 @@ function renderConversas() {
         </div>
         <div class="conversa-previa">${esc(c.ultima_previa || 'sem mensagens')}</div>
         <div class="conversa-tags">
+          ${chegouHoje(c.created_at) ? '<span class="tag novo-hoje">🆕 novo</span>' : ''}
           ${donoHtml(c)}
           ${plaquinhaHtml(c)}
           <span class="tag ${c.status}">${c.status}</span>
@@ -381,6 +392,22 @@ function atualizarBadge() {
   const b = $('#badgeNaoLidas');
   b.textContent = total;
   b.hidden = total === 0;
+  atualizarBadgeHoje();
+}
+
+/* Contador da aba "Novos hoje" — conta no BANCO, não na lista carregada:
+   com outro filtro de status ativo, a lista local não tem todos os de hoje. */
+async function atualizarBadgeHoje() {
+  const b = $('#badgeHoje');
+  if (!b) return;
+  try {
+    // meia-noite de hoje no fuso da oficina (SP é UTC-3 fixo)
+    const inicio = new Date(hojeSP() + 'T00:00:00-03:00').toISOString();
+    const { count } = await sb.from('conversas')
+      .select('id', { count: 'exact', head: true }).gte('created_at', inicio);
+    b.textContent = count ?? 0;
+    b.hidden = !count;
+  } catch { /* sem contador não é motivo de erro na tela */ }
 }
 
 $('#buscaConversa').addEventListener('input', e => {
@@ -389,9 +416,11 @@ $('#buscaConversa').addEventListener('input', e => {
 });
 
 /* Escopo preso à aba de conversas: os chips das outras abas (categorias
-   dos atalhos, período dos relatórios) não podem mexer neste filtro. */
-$$('#aba-conversas .filtros-status .chip').forEach(c => c.addEventListener('click', () => {
-  $$('#aba-conversas .filtros-status .chip').forEach(x => x.classList.toggle('ativo', x === c));
+   dos atalhos, período dos relatórios) não podem mexer neste filtro.
+   O "★ Meus" fica DE FORA: ele é um filtro de dono que se COMBINA com estes —
+   antes ele entrava aqui junto e zerava o filtro de status sem querer. */
+$$('#aba-conversas .filtros-status .chip:not(.chip-minhas)').forEach(c => c.addEventListener('click', () => {
+  $$('#aba-conversas .filtros-status .chip:not(.chip-minhas)').forEach(x => x.classList.toggle('ativo', x === c));
   filtroStatus = c.dataset.status;
   carregarConversas();
 }));

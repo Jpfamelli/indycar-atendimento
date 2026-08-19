@@ -1,6 +1,6 @@
 // Service Worker do IndyCar Atendimento — é o que torna o app instalável
 // e faz a casca abrir rápido mesmo com internet ruim na oficina.
-const CACHE = 'indycar-atendimento-v2';
+const CACHE = 'indycar-atendimento-v3';
 
 /* Se QUALQUER item desta lista faltar, o addAll rejeita e o service worker
    NÃO instala — o app deixa de ser instalável sem dizer por quê. Mantenha
