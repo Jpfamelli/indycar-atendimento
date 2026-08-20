@@ -302,8 +302,13 @@ async function carregarConversas() {
        quem está pedindo orçamento. */
     if (filtroStatus === 'disparo') q = q.eq('tipo', 'disparo');
     else q = q.eq('tipo', 'atendimento');
+    /* Fechou / não fechou tem aba própria; a fila principal ("Todas") é só
+       quem está EM ANDAMENTO. Cliente encerrado que escrever de novo pedindo
+       algo volta sozinho (gatilho do banco). */
+    if (filtroStatus === 'fechou' || filtroStatus === 'nao_fechou') q = q.eq('desfecho', filtroStatus);
+    else if (filtroStatus !== 'disparo') q = q.is('desfecho', null);
     // 'hoje' não é um status do banco: é o filtro "chegou hoje", aplicado depois
-    if (filtroStatus && !['hoje', 'disparo'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
+    if (filtroStatus && !['hoje', 'disparo', 'fechou', 'nao_fechou'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -348,6 +353,8 @@ function renderConversas() {
     el.innerHTML = `<div class="vazio">
       ${filtroStatus === 'hoje' ? 'Nenhum lead novo chegou hoje ainda. 🆕'
         : filtroStatus === 'disparo' ? 'Nenhuma mensagem em massa por aqui. 📢'
+        : filtroStatus === 'fechou' ? 'Nenhum fechado ainda. Marque <b>Concluído</b> na agenda (ou a plaquinha "Serviço concluído") que o cliente vem para cá sozinho. ✅'
+        : filtroStatus === 'nao_fechou' ? 'Ninguém marcado como "não fechou". ❌'
         : CONVERSAS.length ? 'Nenhuma conversa com esse filtro.' : 'Nenhuma conversa ainda.'}
       <br><br><button class="btn btn-ghost sm" id="btnNovaVazio">+ Nova conversa</button></div>`;
     $('#btnNovaVazio')?.addEventListener('click', abrirModalNova);

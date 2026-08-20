@@ -1042,3 +1042,6 @@ select option:checked,select option:hover{
 }
 .msg.marcada{outline:2px solid var(--vermelho);outline-offset:2px}
 .msg.marcada .msg-marca{opacity:1;background:var(--vermelho);color:#fff;border-color:var(--vermelho)}
+
+/* aba Fechadas: verde quando ativa (fechou = boa notícia) */
+.chip[data-status="fechou"].ativo{background:#16a34a;border-color:#16a34a}
