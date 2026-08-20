@@ -209,6 +209,10 @@
             <button class="chip" data-status="aberta">Abertas</button>
             <button class="chip" data-status="pendente">Pendentes</button>
             <button class="chip" data-status="resolvida">Resolvidas</button>
+            <!-- aniversário, promoção e afins: fora da fila de quem está sendo
+                 atendido de verdade. Se o cliente perguntar algo, volta sozinho -->
+            <button class="chip chip-disparo" data-status="disparo"
+                    title="Mensagens em massa (aniversário, promoções)">📢 Disparos <b class="chip-num" id="badgeDisparos" hidden>0</b></button>
             <!-- separado dos de status de propósito: filtra por DONO, não por
                  situação, e os dois se combinam -->
             <button class="chip chip-minhas" id="btnSoMinhas"

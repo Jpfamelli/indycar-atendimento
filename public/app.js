@@ -297,8 +297,13 @@ async function carregarConversas() {
       .select('*')
       .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
       .limit(200);
+    /* Disparo (aniversário, promoção) tem aba própria: fora dela, some da
+       lista. Sem isso, mandar parabéns para 30 pessoas empurrava para baixo
+       quem está pedindo orçamento. */
+    if (filtroStatus === 'disparo') q = q.eq('tipo', 'disparo');
+    else q = q.eq('tipo', 'atendimento');
     // 'hoje' não é um status do banco: é o filtro "chegou hoje", aplicado depois
-    if (filtroStatus && filtroStatus !== 'hoje') q = q.eq('status', filtroStatus);
+    if (filtroStatus && !['hoje', 'disparo'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -342,13 +347,20 @@ function renderConversas() {
   if (!lista.length) {
     el.innerHTML = `<div class="vazio">
       ${filtroStatus === 'hoje' ? 'Nenhum lead novo chegou hoje ainda. 🆕'
+        : filtroStatus === 'disparo' ? 'Nenhuma mensagem em massa por aqui. 📢'
         : CONVERSAS.length ? 'Nenhuma conversa com esse filtro.' : 'Nenhuma conversa ainda.'}
       <br><br><button class="btn btn-ghost sm" id="btnNovaVazio">+ Nova conversa</button></div>`;
     $('#btnNovaVazio')?.addEventListener('click', abrirModalNova);
     return;
   }
 
-  el.innerHTML = lista.map(c => `
+  /* Recado da aba de disparos: sem isso, "por que essa gente está aqui?" */
+  const aviso = filtroStatus === 'disparo'
+    ? `<div class="aviso-disparo">📢 Quem recebeu <b>aniversário ou promoção</b> e ainda não pediu
+       nada. Assim que a pessoa perguntar alguma coisa, ela volta sozinha para a fila de atendimento.</div>`
+    : '';
+
+  el.innerHTML = aviso + lista.map(c => `
     <div class="conversa ${conversaAtual?.id === c.id ? 'ativa' : ''}" data-id="${c.id}">
       <span class="avatar">${esc(iniciais(c.nome || c.telefone))}</span>
       <div class="conversa-txt">
@@ -358,7 +370,9 @@ function renderConversas() {
         </div>
         <div class="conversa-previa">${esc(c.ultima_previa || 'sem mensagens')}</div>
         <div class="conversa-tags">
-          ${chegouHoje(c.created_at) ? '<span class="tag novo-hoje">🆕 novo</span>' : ''}
+          ${c.tipo === 'disparo' && c.respondeu_disparo_em
+            ? '<span class="tag respondeu">💬 respondeu</span>' : ''}
+          ${chegouHoje(c.created_at) && c.tipo !== 'disparo' ? '<span class="tag novo-hoje">🆕 novo</span>' : ''}
           ${donoHtml(c)}
           ${plaquinhaHtml(c)}
           <span class="tag ${c.status}">${c.status}</span>
@@ -404,7 +418,24 @@ async function atualizarBadgeHoje() {
     // meia-noite de hoje no fuso da oficina (SP é UTC-3 fixo)
     const inicio = new Date(hojeSP() + 'T00:00:00-03:00').toISOString();
     const { count } = await sb.from('conversas')
-      .select('id', { count: 'exact', head: true }).gte('created_at', inicio);
+      .select('id', { count: 'exact', head: true })
+      .eq('tipo', 'atendimento')          // disparo não conta como lead novo
+      .gte('created_at', inicio);
+    b.textContent = count ?? 0;
+    b.hidden = !count;
+  } catch { /* sem contador não é motivo de erro na tela */ }
+  atualizarBadgeDisparos();
+}
+
+/* Contador da aba de disparos — mostra só quem RESPONDEU, que é o que pede
+   olhada. A lista inteira de parabéns enviados não é tarefa de ninguém. */
+async function atualizarBadgeDisparos() {
+  const b = $('#badgeDisparos');
+  if (!b) return;
+  try {
+    const { count } = await sb.from('conversas')
+      .select('id', { count: 'exact', head: true })
+      .eq('tipo', 'disparo').not('respondeu_disparo_em', 'is', null);
     b.textContent = count ?? 0;
     b.hidden = !count;
   } catch { /* sem contador não é motivo de erro na tela */ }

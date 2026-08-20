@@ -331,6 +331,12 @@ svg{display:block}
 .tag.ia{background:rgba(229,9,20,.18);color:var(--vermelho-txt)}
 /* lead que CHEGOU hoje — plaquinha no card e aba própria nos filtros */
 .tag.novo-hoje{background:rgba(59,130,246,.18);color:var(--azul-txt,#7fb3ff);font-weight:700}
+/* respondeu a um disparo: é o único da aba que pede olhada */
+.tag.respondeu{background:rgba(37,211,102,.2);color:var(--verde-txt,#4ade80);font-weight:700}
+.chip.chip-disparo.ativo{background:#7c5cff;border-color:#7c5cff}
+.chip-disparo .chip-num{background:rgba(124,92,255,.35)}
+.aviso-disparo{margin:0 0 10px;padding:11px 13px;border-radius:10px;font-size:.8rem;line-height:1.5;
+  background:rgba(124,92,255,.1);border:1px solid rgba(124,92,255,.3);color:var(--texto)}
 .chip-num{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;
   padding:0 5px;margin-left:4px;border-radius:9px;font-size:.68rem;font-weight:700;
   background:rgba(59,130,246,.25);color:#fff;vertical-align:1px}
