@@ -208,9 +208,11 @@
                     title="Só os leads que chegaram hoje">🆕 Novos hoje <b class="chip-num" id="badgeHoje" hidden>0</b></button>
             <!-- fechou/não fechou saem da fila principal — o dono pediu:
                  cliente encerrado acumulando na lista é só ruído -->
+            <!-- quem já tem horário marcado (ou está no serviço) também sai da
+                 fila principal: o trabalho com ele agora é da agenda -->
+            <button class="chip" data-status="agendada" title="Com horário marcado ou em serviço">📅 Agendadas</button>
             <button class="chip" data-status="fechou" title="Serviço concluído — cliente fechou">✅ Fechadas</button>
             <button class="chip" data-status="nao_fechou" title="Cliente que não fechou o serviço">❌ Não fechadas</button>
-            <button class="chip" data-status="resolvida">Resolvidas</button>
             <!-- aniversário, promoção e afins: fora da fila de quem está sendo
                  atendido de verdade. Se o cliente perguntar algo, volta sozinho -->
             <button class="chip chip-disparo" data-status="disparo"

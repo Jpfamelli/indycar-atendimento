@@ -1045,3 +1045,5 @@ select option:checked,select option:hover{
 
 /* aba Fechadas: verde quando ativa (fechou = boa notícia) */
 .chip[data-status="fechou"].ativo{background:#16a34a;border-color:#16a34a}
+/* aba Agendadas: azul-calendário quando ativa */
+.chip[data-status="agendada"].ativo{background:#2563eb;border-color:#2563eb}

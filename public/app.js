@@ -307,8 +307,8 @@ async function carregarConversas() {
        algo volta sozinho (gatilho do banco). */
     if (filtroStatus === 'fechou' || filtroStatus === 'nao_fechou') q = q.eq('desfecho', filtroStatus);
     else if (filtroStatus !== 'disparo') q = q.is('desfecho', null);
-    // 'hoje' não é um status do banco: é o filtro "chegou hoje", aplicado depois
-    if (filtroStatus && !['hoje', 'disparo', 'fechou', 'nao_fechou'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
+    // 'hoje' e 'agendada' não são status do banco: filtram depois, na lista
+    if (filtroStatus && !['hoje', 'agendada', 'disparo', 'fechou', 'nao_fechou'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -329,10 +329,21 @@ async function carregarConversas() {
   }
 }
 
+/* Conversa "agendada": a plaquinha está em Agendado ou Em serviço — o
+   trabalho com ela agora é da agenda, não da fila de conversa. */
+function estaAgendada(c) {
+  const e = etapaPorId(c.etapa_id);
+  return !!e && (e.nome === 'Agendado' || e.nome === 'Em serviço');
+}
+
 function conversasFiltradas() {
   let base = CONVERSAS;
   // aba "Novos hoje": só quem CHEGOU hoje (conversa criada hoje, fuso da oficina)
   if (filtroStatus === 'hoje') base = base.filter(c => chegouHoje(c.created_at));
+  // aba "Agendadas" mostra só elas; a fila principal as esconde
+  if (filtroStatus === 'agendada') base = base.filter(estaAgendada);
+  else if (filtroStatus !== 'disparo' && filtroStatus !== 'fechou' && filtroStatus !== 'nao_fechou')
+    base = base.filter(c => !estaAgendada(c));
   // "só as minhas": o atendente trabalha a fila dele sem o ruído da do outro
   if (soMinhas && perfil?.id) base = base.filter(c => c.atribuida_a === perfil.id);
 
@@ -353,6 +364,7 @@ function renderConversas() {
     el.innerHTML = `<div class="vazio">
       ${filtroStatus === 'hoje' ? 'Nenhum lead novo chegou hoje ainda. 🆕'
         : filtroStatus === 'disparo' ? 'Nenhuma mensagem em massa por aqui. 📢'
+        : filtroStatus === 'agendada' ? 'Ninguém com horário marcado agora. Quando o Carlos (ou vocês) agendar, o cliente vem para cá sozinho. 📅'
         : filtroStatus === 'fechou' ? 'Nenhum fechado ainda. Marque <b>Concluído</b> na agenda (ou a plaquinha "Serviço concluído") que o cliente vem para cá sozinho. ✅'
         : filtroStatus === 'nao_fechou' ? 'Ninguém marcado como "não fechou". ❌'
         : CONVERSAS.length ? 'Nenhuma conversa com esse filtro.' : 'Nenhuma conversa ainda.'}
