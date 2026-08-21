@@ -61,6 +61,26 @@ function readBody(req) {
   });
 }
 
+/* Corpo GRANDE — só para o envio de arquivo (base64 incha ~33%: 21 MB de
+   corpo = ~15 MB de arquivo, o teto do envio). As outras rotas continuam
+   com o limite apertado de 1 MB. */
+function readBodyGrande(req, limite = 21 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const partes = [];
+    let total = 0;
+    req.on('data', c => {
+      total += c.length;
+      if (total > limite) { reject(new Error('arquivo grande demais')); req.destroy(); return; }
+      partes.push(c);
+    });
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(partes).toString('utf8') || '{}')); }
+      catch { resolve({}); }
+    });
+    req.on('error', reject);
+  });
+}
+
 function serveStatic(res, urlPath) {
   const rel = urlPath === '/' ? 'index.html' : urlPath.slice(1);
   const file = path.join(PUBLIC, rel);
@@ -2094,6 +2114,78 @@ const server = http.createServer(async (req, res) => {
       const r = await enviarPeloCodeWords(dados);
       // "desligado" não é erro: a mensagem fica registrada aqui mesmo assim
       return json(res, r.ok || r.desligado ? 200 : 502, r);
+    }
+
+    /* ---- Enviar DOCUMENTO ou FOTO pelo WhatsApp da empresa ----
+       O navegador manda o arquivo em base64 (até 15 MB); daqui ele sai em
+       multipart para o proxy do aparelho pareado: send/image para foto
+       (chega como imagem, com legenda), send/file para o resto (PDF etc.).
+       Caminho testado de verdade antes de virar botão. */
+    if (pathname === '/api/mensagens/enviar-arquivo' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (!dentroDoLimite(`arquivo:${quem.id}`, 20, 60_000)) {
+        return json(res, 429, { erro: 'Muitos envios seguidos. Espere um minuto e continue.' });
+      }
+      let bruto;
+      try { bruto = await readBodyGrande(req); }
+      catch { return json(res, 413, { erro: 'Arquivo grande demais (máximo 15 MB).' }); }
+
+      const telefone   = texto1(bruto.telefone, 40);
+      const nomeArq    = (texto1(bruto.nome_arquivo, 150) || 'documento').replace(/[\\/:*?"<>|]/g, '_');
+      const mime       = texto1(bruto.mime, 100) || 'application/octet-stream';
+      const legenda    = texto1(bruto.legenda, 1000);
+      const conversaId = texto1(bruto.conversaId, 60) || null;
+      const b64 = typeof bruto.base64 === 'string' ? bruto.base64 : '';
+      if (!telefone || !b64) return json(res, 400, { erro: 'informe telefone e o arquivo' });
+
+      let arquivo;
+      try { arquivo = Buffer.from(b64, 'base64'); }
+      catch { return json(res, 400, { erro: 'não consegui ler o arquivo' }); }
+      if (!arquivo.length) return json(res, 400, { erro: 'arquivo vazio' });
+      if (arquivo.length > 15 * 1024 * 1024) {
+        return json(res, 413, { erro: 'Arquivo grande demais (máximo 15 MB).' });
+      }
+
+      const sb = adminSupabase();
+      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
+      const { data: cfg } = await sb.from('codewords_config').select('*').maybeSingle();
+      if (!cfg?.device_id || !cfg?.api_key) {
+        return json(res, 503, { erro: 'WhatsApp da empresa não conectado — veja Configurações › Conexão.' });
+      }
+
+      const base = (cfg.base_url || 'https://runtime.codewords.ai').replace(/\/+$/, '');
+      const ehImagem = /^image\//i.test(mime);
+      const fd = new FormData();
+      fd.append('phone', soDigitos(telefone));
+      if (legenda) fd.append('caption', legenda);
+      fd.append(ehImagem ? 'image' : 'file', new Blob([arquivo], { type: mime }), nomeArq);
+
+      try {
+        const resposta = await fetch(
+          `${base}/run/${cfg.servico_conexao || 'whatsapp_device_manager'}`
+          + `/proxy/${ehImagem ? 'send/image' : 'send/file'}`
+          + `?phone_id=${encodeURIComponent(cfg.device_id)}`,
+          { method: 'POST', headers: { Authorization: cfg.api_key }, body: fd,
+            signal: AbortSignal.timeout(120000) });
+        const texto = await resposta.text();
+        const ok = resposta.ok && /success/i.test(texto);
+
+        // o registro no chat é o que o painel mostra — com o nome do arquivo
+        const corpo = `${ehImagem ? '🖼 Foto' : '📎 Documento'}: ${nomeArq}`
+                    + (legenda ? `\n${legenda}` : '');
+        await sb.from('whatsapp_mensagens').insert({
+          conversa_id: conversaId, telefone: soDigitos(telefone), corpo,
+          direcao: 'saida', status: ok ? 'enviado' : 'falhou',
+          erro: ok ? null : texto.slice(0, 300),
+        });
+
+        if (!ok) return json(res, 502, { erro: `o aparelho recusou o envio: ${texto.slice(0, 200)}` });
+        return json(res, 200, { ok: true, nome: nomeArq });
+      } catch (e) {
+        return json(res, 502, { erro: e.name === 'TimeoutError'
+          ? 'O envio demorou demais — arquivo muito grande ou conexão lenta.' : e.message });
+      }
     }
 
     /* ---- Excluir uma conversa da aba de conversas ----

@@ -1047,3 +1047,5 @@ select option:checked,select option:hover{
 .chip[data-status="fechou"].ativo{background:#16a34a;border-color:#16a34a}
 /* aba Agendadas: azul-calendário quando ativa */
 .chip[data-status="agendada"].ativo{background:#2563eb;border-color:#2563eb}
+/* botão de anexo (📎): quadrado, do tamanho do Enviar */
+.btn-anexo{padding:8px 11px;font-size:1rem;line-height:1;flex:none}

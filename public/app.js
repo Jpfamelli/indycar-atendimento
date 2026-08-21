@@ -653,6 +653,48 @@ campo.addEventListener('keydown', e => {
 });
 $('#btnEnviar').addEventListener('click', enviarMensagem);
 
+/* ---------------- Enviar documento / foto ----------------
+   O arquivo sobe em base64 para o servidor, que repassa ao WhatsApp da
+   empresa. O que estiver escrito no campo vira a LEGENDA do arquivo. */
+$('#btnAnexo').addEventListener('click', () => {
+  if (!conversaAtual) return toast('Abra uma conversa primeiro.');
+  $('#arquivoInput').click();
+});
+
+$('#arquivoInput').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0];
+  e.target.value = '';                       // permite reescolher o mesmo arquivo
+  if (!f || !conversaAtual) return;
+  if (f.size > 15 * 1024 * 1024) return toast('⚠️ Arquivo grande demais (máximo 15 MB).');
+
+  const legenda = campo.value.trim();
+  const btn = $('#btnAnexo');
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const base64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(',')[1] || '');
+      r.onerror = () => rej(new Error('não consegui ler o arquivo'));
+      r.readAsDataURL(f);
+    });
+    const resp = await fetch('/api/mensagens/enviar-arquivo', {
+      method: 'POST', headers: await authCabecalhos(),
+      body: JSON.stringify({
+        telefone: conversaAtual.telefone, conversaId: conversaAtual.id,
+        nome_arquivo: f.name, mime: f.type || 'application/octet-stream',
+        base64, legenda,
+      }),
+    });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(j.erro || 'falha no envio');
+    if (legenda) campo.value = '';
+    toast('📎 Enviado: ' + f.name);
+    await carregarMensagens();
+    await carregarConversas();
+  } catch (err) { toast('⚠️ ' + err.message); }
+  finally { btn.disabled = false; btn.textContent = '📎'; }
+});
+
 async function enviarMensagem() {
   const texto = campo.value.trim();
   if (!texto || !conversaAtual) return;

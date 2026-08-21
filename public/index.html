@@ -295,6 +295,12 @@
             <button class="btn btn-ia sm" id="btnSugerir" title="Sugerir resposta com IA">
               <span class="ia-ico">✨</span> Sugerir
             </button>
+            <!-- documento/foto direto pelo WhatsApp da empresa (até 15 MB).
+                 O texto do campo vira a legenda do arquivo. -->
+            <input type="file" id="arquivoInput" hidden
+                   accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" />
+            <button class="btn sm btn-anexo" id="btnAnexo"
+                    title="Enviar documento ou foto (o texto digitado vira a legenda)">📎</button>
             <textarea id="campoMensagem" rows="1"
               placeholder="Escreva a resposta…  (digite / para usar um atalho)"></textarea>
             <button class="btn btn-primary sm" id="btnEnviar">Enviar</button>
