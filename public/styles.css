@@ -1049,3 +1049,11 @@ select option:checked,select option:hover{
 .chip[data-status="agendada"].ativo{background:#2563eb;border-color:#2563eb}
 /* botão de anexo (📎): quadrado, do tamanho do Enviar */
 .btn-anexo{padding:8px 11px;font-size:1rem;line-height:1;flex:none}
+/* anexo dentro da mensagem: cartão que abre o documento / miniatura da foto */
+.msg-anexo{display:flex;align-items:center;gap:8px;width:100%;margin-bottom:6px;padding:9px 12px;
+  border:1px solid var(--line,rgba(255,255,255,.15));border-radius:9px;background:rgba(0,0,0,.18);
+  color:inherit;font:inherit;font-weight:600;cursor:pointer;text-align:left}
+.msg-anexo:hover{background:rgba(0,0,0,.3)}
+.msg-anexo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.msg-imagem{display:block;max-width:260px;max-height:260px;border-radius:9px;margin-bottom:6px;
+  cursor:zoom-in;background:rgba(0,0,0,.15)}

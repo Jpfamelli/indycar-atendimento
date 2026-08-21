@@ -2171,6 +2171,23 @@ const server = http.createServer(async (req, res) => {
         const texto = await resposta.text();
         const ok = resposta.ok && /success/i.test(texto);
 
+        /* Guarda a CÓPIA no Storage — é ela que deixa a equipe abrir depois
+           e conferir o que foi mandado. Se a guarda falhar, o envio já
+           aconteceu: registra sem o link, mas não perde a mensagem. */
+        let caminhoAnexo = null;
+        if (ok) {
+          try {
+            caminhoAnexo = `${conversaId || 'avulso'}/${Date.now()}-${nomeArq}`;
+            const up = await fetch(
+              `${process.env.SUPABASE_URL}/storage/v1/object/anexos/${encodeURI(caminhoAnexo)}`,
+              { method: 'POST',
+                headers: { Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                           'Content-Type': mime, 'x-upsert': 'true' },
+                body: arquivo, signal: AbortSignal.timeout(60000) });
+            if (!up.ok) { console.error('Guarda do anexo:', up.status, (await up.text()).slice(0, 200)); caminhoAnexo = null; }
+          } catch (e) { console.error('Guarda do anexo:', e.message); caminhoAnexo = null; }
+        }
+
         // o registro no chat é o que o painel mostra — com o nome do arquivo
         const corpo = `${ehImagem ? '🖼 Foto' : '📎 Documento'}: ${nomeArq}`
                     + (legenda ? `\n${legenda}` : '');
@@ -2178,6 +2195,7 @@ const server = http.createServer(async (req, res) => {
           conversa_id: conversaId, telefone: soDigitos(telefone), corpo,
           direcao: 'saida', status: ok ? 'enviado' : 'falhou',
           erro: ok ? null : texto.slice(0, 300),
+          anexo: caminhoAnexo, anexo_mime: caminhoAnexo ? mime : null,
         });
 
         if (!ok) return json(res, 502, { erro: `o aparelho recusou o envio: ${texto.slice(0, 200)}` });

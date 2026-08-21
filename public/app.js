@@ -570,10 +570,21 @@ function renderMensagens() {
     }
     const hora = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
     const marcada = selecionadas.has(m.id);
+    /* Documento/foto enviado tem cópia guardada: vira cartão que ABRE.
+       Foto ganha miniatura (carregada depois, com link assinado). */
+    let anexoHtml = '';
+    if (m.anexo) {
+      const nomeArq = String(m.anexo).split('/').pop().replace(/^\d+-/, '');
+      anexoHtml = /^image\//i.test(m.anexo_mime || '')
+        ? `<img class="msg-imagem" data-anexo-img="${esc(m.anexo)}" alt="${esc(nomeArq)}"
+               title="Abrir a foto">`
+        : `<button type="button" class="msg-anexo" data-anexo="${esc(m.anexo)}"
+               title="Abrir o documento">📄 <span>${esc(nomeArq)}</span> ⤢</button>`;
+    }
     return sep + `<div class="msg ${m.direcao === 'entrada' ? 'entrada' : 'saida'}${m.gerada_por_ia ? ' ia-tag' : ''}${
         modoSelecao ? ' selecionavel' : ''}${marcada ? ' marcada' : ''}" data-msg="${esc(m.id)}">
       ${modoSelecao ? `<span class="msg-marca">${marcada ? '✓' : ''}</span>` : ''}
-      ${esc(m.corpo)}<span class="msg-hora">${esc(hora)}</span></div>`;
+      ${anexoHtml}${esc(m.corpo)}<span class="msg-hora">${esc(hora)}</span></div>`;
   }).join('');
 
   if (modoSelecao) {
@@ -586,6 +597,26 @@ function renderMensagens() {
   } else {
     el.scrollTop = el.scrollHeight;   // só rola no modo normal, senão pula a cada clique
   }
+
+  /* link assinado (1h) — só quem está logado consegue gerar e abrir */
+  const abrirAnexo = async (caminho) => {
+    try {
+      const { data, error } = await sb.storage.from('anexos').createSignedUrl(caminho, 3600);
+      if (error) throw error;
+      window.open(data.signedUrl, '_blank', 'noopener');
+    } catch (e) { toast('⚠️ Não consegui abrir o anexo: ' + (e.message || e)); }
+  };
+  $$('#mensagens [data-anexo]').forEach(b => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    abrirAnexo(b.dataset.anexo);
+  }));
+  $$('#mensagens [data-anexo-img]').forEach(async (img) => {
+    img.addEventListener('click', (ev) => { ev.stopPropagation(); abrirAnexo(img.dataset.anexoImg); });
+    try {
+      const { data } = await sb.storage.from('anexos').createSignedUrl(img.dataset.anexoImg, 3600);
+      if (data?.signedUrl) img.src = data.signedUrl;
+    } catch { /* fica sem miniatura; o clique ainda tenta abrir */ }
+  });
 }
 
 /* ============================================================
