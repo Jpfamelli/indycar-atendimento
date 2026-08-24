@@ -877,6 +877,82 @@ async function registrarSaudeDaSincronia(g, erro) {
   } catch { /* não vale derrubar a sincronia por causa do termômetro dela */ }
 }
 
+/* ============================================================
+   DESCOBRIDOR DE CONVERSAS
+   O painel só conhecia conversa que passava pelo webhook do Carlos —
+   chat atendido direto no CELULAR da oficina nunca aparecia (foram
+   achados mais de 2.000 assim). De 10 em 10 minutos, olha os 100 chats
+   mais recentes do aparelho e importa os que o painel não conhece; a
+   porteira do banco cuida de cliente, classificação e anti-duplicata.
+   ============================================================ */
+const semDDI = (d) => {
+  d = String(d ?? '').replace(/\D/g, '');
+  return (d.length === 12 || d.length === 13) && d.startsWith('55') ? d.slice(2) : d;
+};
+
+let descobridorRodando = false;
+async function descobrirConversasNovas() {
+  if (descobridorRodando) return;
+  descobridorRodando = true;
+  try {
+    const g = await baseDoGerenciador();
+    if (!g) return;
+    const { data: cfg } = await g.sb.from('codewords_config').select('device_id').maybeSingle();
+    if (!cfg?.device_id) return;
+
+    const r = await fetch(
+      `${g.url}/proxy/chats?phone_id=${encodeURIComponent(cfg.device_id)}&limit=100`,
+      { headers: { Authorization: g.chave }, signal: AbortSignal.timeout(25000) });
+    if (!r.ok) { console.error('descobridor:', r.status, (await r.text()).slice(0, 120)); return; }
+    const chats = ((await r.json())?.results?.data || [])
+      .filter(c => /@s\.whatsapp\.net$/.test(String(c.jid || '')));
+    if (!chats.length) return;
+
+    const tels = [...new Set(chats.map(c => semDDI(c.jid.split('@')[0])).filter(t => t.length >= 10))];
+    const [{ data: conhecidas }, { data: bloqueados }] = await Promise.all([
+      g.sb.from('conversas').select('telefone_e164').in('telefone_e164', tels),
+      g.sb.from('numeros_bloqueados').select('telefone').in('telefone', tels),
+    ]);
+    const fora = new Set([...(conhecidas || []).map(c => c.telefone_e164),
+                          ...(bloqueados || []).map(b => b.telefone),
+                          semDDI(NUMERO_DO_ATENDIMENTO)]);
+
+    // no máximo 10 por rodada: o ciclo fica leve e em 1h tudo entra
+    const novos = chats.filter(c => !fora.has(semDDI(c.jid.split('@')[0]))).slice(0, 10);
+    let importadas = 0;
+    for (const ch of novos) {
+      const telefone = ch.jid.split('@')[0];
+      const m = await mensagensDoAparelho(g, telefone);
+      if (m.erro || m.desconfigurado || !Array.isArray(m.lista)) continue;
+      const vistos = new Set();
+      const linhas = m.lista
+        .filter(x => x.id && String(x.content || '').trim() && !vistos.has(x.id) && vistos.add(x.id))
+        .sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))
+        .map(x => ({
+          telefone,
+          nome: ch.name && ch.name !== 'Atendimento Indy Car' ? ch.name : null,
+          corpo: String(x.content).trim().slice(0, 4000),
+          direcao: x.is_from_me ? 'saida' : 'entrada',
+          status: x.is_from_me ? 'enviado' : 'recebido',
+          wamid: x.id,
+          created_at: x.timestamp || new Date().toISOString(),
+          gerada_por_ia: !!x.is_from_me && MARCA_DO_CARLOS.test(String(x.content)),
+        }));
+      if (!linhas.length) continue;
+      const { error } = await g.sb.from('whatsapp_mensagens').insert(linhas);
+      if (error && error.code !== '23505') console.error('descobridor insert:', error.message);
+      else importadas++;
+    }
+    if (importadas) console.log(`descobridor: ${importadas} conversa(s) nova(s) trazida(s) do aparelho`);
+  } catch (e) {
+    console.error('descobridor:', e?.message || e);
+  } finally {
+    descobridorRodando = false;
+  }
+}
+setInterval(() => descobrirConversasNovas().catch(() => {}), 10 * 60 * 1000);
+setTimeout(() => descobrirConversasNovas().catch(() => {}), 25_000);
+
 /* De 40 em 40 segundos, em segundo plano. É o que faz a resposta do Carlos
    aparecer sozinha para quem está com o painel aberto. Era de 2 em 2 minutos
    e a mensagem demorava demais para aparecer — o dono reclamou, com razão.
