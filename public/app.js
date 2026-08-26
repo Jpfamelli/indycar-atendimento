@@ -575,7 +575,10 @@ function renderMensagens() {
     let anexoHtml = '';
     if (m.anexo) {
       const nomeArq = String(m.anexo).split('/').pop().replace(/^\d+-/, '');
-      anexoHtml = /^image\//i.test(m.anexo_mime || '')
+      // áudio toca ali mesmo; foto amplia; o resto abre em nova aba
+      anexoHtml = /^audio\//i.test(m.anexo_mime || '')
+        ? `<audio class="msg-audio" controls preload="none" data-anexo-audio="${esc(m.anexo)}"></audio>`
+        : /^image\//i.test(m.anexo_mime || '')
         ? `<img class="msg-imagem" data-anexo-img="${esc(m.anexo)}" alt="${esc(nomeArq)}"
                title="Abrir a foto">`
         : `<button type="button" class="msg-anexo" data-anexo="${esc(m.anexo)}"
@@ -610,6 +613,13 @@ function renderMensagens() {
     ev.stopPropagation();
     abrirAnexo(b.dataset.anexo);
   }));
+  $$('#mensagens [data-anexo-audio]').forEach(async (au) => {
+    au.addEventListener('click', ev => ev.stopPropagation());   // não seleciona a mensagem
+    try {
+      const { data } = await sb.storage.from('anexos').createSignedUrl(au.dataset.anexoAudio, 3600);
+      if (data?.signedUrl) au.src = data.signedUrl;
+    } catch { /* sem link: o player fica vazio, mas nada quebra */ }
+  });
   $$('#mensagens [data-anexo-img]').forEach(async (img) => {
     img.addEventListener('click', (ev) => { ev.stopPropagation(); abrirAnexo(img.dataset.anexoImg); });
     try {
@@ -690,6 +700,112 @@ $('#btnEnviar').addEventListener('click', enviarMensagem);
 $('#btnAnexo').addEventListener('click', () => {
   if (!conversaAtual) return toast('Abra uma conversa primeiro.');
   $('#arquivoInput').click();
+});
+
+/* ---------------- Mensagem de voz ----------------
+   Um toque começa a gravar, outro envia. O áudio é convertido para WAV
+   16 kHz mono aqui no navegador: é o formato que o WhatsApp da empresa
+   aceita com certeza (testado), sem depender do que cada navegador grava. */
+let gravador = null, pedacos = [], relogioAudio = null, comecouEm = 0;
+const MAX_AUDIO_S = 180;   // 3 minutos: passa disso vira arquivo grande demais
+
+function pintarStatusAudio(texto, gravando) {
+  const el = $('#audioStatus');
+  el.textContent = texto || '';
+  el.hidden = !texto;
+  $('#btnAudio').classList.toggle('gravando', !!gravando);
+  $('#btnAudio').textContent = gravando ? '⏹' : '🎤';
+}
+
+/** Áudio gravado (qualquer formato) → WAV 16 kHz mono. */
+async function paraWav(blob) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const audio = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const taxa = 16000;
+  const quadros = Math.round(audio.duration * taxa);
+  const off = new OfflineAudioContext(1, quadros, taxa);
+  const fonte = off.createBufferSource();
+  fonte.buffer = audio;
+  fonte.connect(off.destination);
+  fonte.start();
+  const pronto = await off.startRendering();
+  ctx.close();
+
+  const amostras = pronto.getChannelData(0);
+  const buf = new ArrayBuffer(44 + amostras.length * 2);
+  const v = new DataView(buf);
+  const escrever = (pos, txt) => { for (let i = 0; i < txt.length; i++) v.setUint8(pos + i, txt.charCodeAt(i)); };
+  escrever(0, 'RIFF'); v.setUint32(4, 36 + amostras.length * 2, true); escrever(8, 'WAVE');
+  escrever(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, taxa, true); v.setUint32(28, taxa * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  escrever(36, 'data'); v.setUint32(40, amostras.length * 2, true);
+  for (let i = 0; i < amostras.length; i++) {
+    const s = Math.max(-1, Math.min(1, amostras[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+$('#btnAudio').addEventListener('click', async () => {
+  if (!conversaAtual) return toast('Abra uma conversa primeiro.');
+
+  // já está gravando: para e envia
+  if (gravador && gravador.state === 'recording') { gravador.stop(); return; }
+
+  try {
+    const fluxo = await navigator.mediaDevices.getUserMedia({ audio: true });
+    pedacos = [];
+    gravador = new MediaRecorder(fluxo);
+    gravador.ondataavailable = (e) => { if (e.data.size) pedacos.push(e.data); };
+
+    gravador.onstop = async () => {
+      clearInterval(relogioAudio);
+      fluxo.getTracks().forEach(t => t.stop());
+      pintarStatusAudio('convertendo…', false);
+      $('#btnAudio').disabled = true;
+      try {
+        const bruto = new Blob(pedacos, { type: gravador.mimeType || 'audio/webm' });
+        if (bruto.size < 1000) throw new Error('gravação muito curta');
+        const wav = await paraWav(bruto);
+        const base64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result).split(',')[1] || '');
+          r.onerror = () => rej(new Error('não consegui ler a gravação'));
+          r.readAsDataURL(wav);
+        });
+        pintarStatusAudio('enviando…', false);
+        const legenda = campo.value.trim();
+        const resp = await fetch('/api/mensagens/enviar-arquivo', {
+          method: 'POST', headers: await authCabecalhos(),
+          body: JSON.stringify({
+            telefone: conversaAtual.telefone, conversaId: conversaAtual.id,
+            nome_arquivo: 'audio.wav', mime: 'audio/wav', base64, legenda,
+          }),
+        });
+        const j = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(j.erro || 'falha no envio');
+        if (legenda) campo.value = '';
+        toast('🎤 Áudio enviado');
+        await carregarMensagens();
+        await carregarConversas();
+      } catch (err) { toast('⚠️ ' + err.message); }
+      finally { pintarStatusAudio('', false); $('#btnAudio').disabled = false; gravador = null; }
+    };
+
+    gravador.start();
+    comecouEm = Date.now();
+    pintarStatusAudio('● 0:00 — toque para enviar', true);
+    relogioAudio = setInterval(() => {
+      const s = Math.floor((Date.now() - comecouEm) / 1000);
+      if (s >= MAX_AUDIO_S) { gravador.stop(); return; }
+      pintarStatusAudio(`● ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} — toque para enviar`, true);
+    }, 500);
+  } catch (err) {
+    toast(err.name === 'NotAllowedError'
+      ? '⚠️ Libere o microfone para o navegador e tente de novo.'
+      : '⚠️ Não consegui gravar: ' + err.message);
+    pintarStatusAudio('', false);
+  }
 });
 
 $('#arquivoInput').addEventListener('change', async (e) => {

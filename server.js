@@ -2232,15 +2232,21 @@ const server = http.createServer(async (req, res) => {
 
       const base = (cfg.base_url || 'https://runtime.codewords.ai').replace(/\/+$/, '');
       const ehImagem = /^image\//i.test(mime);
+      /* Áudio vai por send/audio: assim chega como MENSAGEM DE VOZ no
+         WhatsApp (com a onda e o play), não como arquivo para baixar. */
+      const ehAudio = /^audio\//i.test(mime);
+      const rota = ehAudio ? 'send/audio' : ehImagem ? 'send/image' : 'send/file';
+      const campo = ehAudio ? 'audio' : ehImagem ? 'image' : 'file';
       const fd = new FormData();
       fd.append('phone', soDigitos(telefone));
-      if (legenda) fd.append('caption', legenda);
-      fd.append(ehImagem ? 'image' : 'file', new Blob([arquivo], { type: mime }), nomeArq);
+      // o proxy de áudio não aceita legenda — o texto vai como mensagem à parte
+      if (legenda && !ehAudio) fd.append('caption', legenda);
+      fd.append(campo, new Blob([arquivo], { type: mime }), nomeArq);
 
       try {
         const resposta = await fetch(
           `${base}/run/${cfg.servico_conexao || 'whatsapp_device_manager'}`
-          + `/proxy/${ehImagem ? 'send/image' : 'send/file'}`
+          + `/proxy/${rota}`
           + `?phone_id=${encodeURIComponent(cfg.device_id)}`,
           { method: 'POST', headers: { Authorization: cfg.api_key }, body: fd,
             signal: AbortSignal.timeout(120000) });
@@ -2265,8 +2271,10 @@ const server = http.createServer(async (req, res) => {
         }
 
         // o registro no chat é o que o painel mostra — com o nome do arquivo
-        const corpo = `${ehImagem ? '🖼 Foto' : '📎 Documento'}: ${nomeArq}`
-                    + (legenda ? `\n${legenda}` : '');
+        const corpo = ehAudio
+          ? `🎤 Áudio${legenda ? `\n${legenda}` : ''}`
+          : `${ehImagem ? '🖼 Foto' : '📎 Documento'}: ${nomeArq}`
+            + (legenda ? `\n${legenda}` : '');
         await sb.from('whatsapp_mensagens').insert({
           conversa_id: conversaId, telefone: soDigitos(telefone), corpo,
           direcao: 'saida', status: ok ? 'enviado' : 'falhou',

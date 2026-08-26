@@ -301,6 +301,10 @@
                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" />
             <button class="btn sm btn-anexo" id="btnAnexo"
                     title="Enviar documento ou foto (o texto digitado vira a legenda)">📎</button>
+            <!-- mensagem de voz: toca para gravar, toca de novo para enviar -->
+            <button class="btn sm btn-anexo btn-audio" id="btnAudio"
+                    title="Gravar e enviar áudio para o cliente">🎤</button>
+            <span class="audio-status" id="audioStatus" hidden></span>
             <textarea id="campoMensagem" rows="1"
               placeholder="Escreva a resposta…  (digite / para usar um atalho)"></textarea>
             <button class="btn btn-primary sm" id="btnEnviar">Enviar</button>
