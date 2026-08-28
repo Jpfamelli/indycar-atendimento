@@ -305,10 +305,15 @@ async function carregarConversas() {
     /* Fechou / não fechou tem aba própria; a fila principal ("Todas") é só
        quem está EM ANDAMENTO. Cliente encerrado que escrever de novo pedindo
        algo volta sozinho (gatilho do banco). */
-    if (filtroStatus === 'fechou' || filtroStatus === 'nao_fechou') q = q.eq('desfecho', filtroStatus);
+    if (filtroStatus === 'aguardando') {
+      // fila mais quente: quem a IA passou e ninguém respondeu ainda.
+      // Mais antigo primeiro — é quem está esperando há mais tempo.
+      q = q.eq('aguardando_consultor', true).order('aguardando_desde', { ascending: true });
+    }
+    else if (filtroStatus === 'fechou' || filtroStatus === 'nao_fechou') q = q.eq('desfecho', filtroStatus);
     else if (filtroStatus !== 'disparo') q = q.is('desfecho', null);
     // 'hoje' e 'agendada' não são status do banco: filtram depois, na lista
-    if (filtroStatus && !['hoje', 'agendada', 'disparo', 'fechou', 'nao_fechou'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
+    if (filtroStatus && !['hoje', 'agendada', 'aguardando', 'disparo', 'fechou', 'nao_fechou'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -342,7 +347,7 @@ function conversasFiltradas() {
   if (filtroStatus === 'hoje') base = base.filter(c => chegouHoje(c.created_at));
   // aba "Agendadas" mostra só elas; a fila principal as esconde
   if (filtroStatus === 'agendada') base = base.filter(estaAgendada);
-  else if (filtroStatus !== 'disparo' && filtroStatus !== 'fechou' && filtroStatus !== 'nao_fechou')
+  else if (!['disparo', 'fechou', 'nao_fechou', 'aguardando'].includes(filtroStatus))
     base = base.filter(c => !estaAgendada(c));
   // "só as minhas": o atendente trabalha a fila dele sem o ruído da do outro
   if (soMinhas && perfil?.id) base = base.filter(c => c.atribuida_a === perfil.id);
@@ -374,6 +379,7 @@ function renderConversas() {
     el.innerHTML = `<div class="vazio">
       ${filtroStatus === 'hoje' ? 'Nenhum lead novo chegou hoje ainda. 🆕'
         : filtroStatus === 'disparo' ? 'Nenhuma mensagem em massa por aqui. 📢'
+        : filtroStatus === 'aguardando' ? 'Ninguém esperando resposta de consultor. 👏'
         : filtroStatus === 'agendada' ? 'Ninguém com horário marcado agora. Quando o Carlos (ou vocês) agendar, o cliente vem para cá sozinho. 📅'
         : filtroStatus === 'fechou' ? 'Nenhum fechado ainda. Marque <b>Concluído</b> na agenda (ou a plaquinha "Serviço concluído") que o cliente vem para cá sozinho. ✅'
         : filtroStatus === 'nao_fechou' ? 'Ninguém marcado como "não fechou". ❌'
@@ -384,7 +390,11 @@ function renderConversas() {
   }
 
   /* Recado da aba de disparos: sem isso, "por que essa gente está aqui?" */
-  const aviso = filtroStatus === 'disparo'
+  const aviso = filtroStatus === 'aguardando'
+    ? `<div class="aviso-espera">⏳ A IA passou estes clientes para um <b>consultor humano</b> e eles
+       ainda não receberam resposta. Os que esperam há mais tempo vêm primeiro. Respondeu? O cliente
+       sai daqui sozinho.</div>`
+    : filtroStatus === 'disparo'
     ? `<div class="aviso-disparo">📢 Quem recebeu <b>aniversário ou promoção</b> e ainda não pediu
        nada. Assim que a pessoa perguntar alguma coisa, ela volta sozinha para a fila de atendimento.</div>`
     : '';
@@ -399,6 +409,8 @@ function renderConversas() {
         </div>
         <div class="conversa-previa">${esc(c.ultima_previa || 'sem mensagens')}</div>
         <div class="conversa-tags">
+          ${c.aguardando_consultor
+            ? `<span class="tag esperando">⏳ espera ${esc(tempoDeEspera(c.aguardando_desde))}</span>` : ''}
           ${c.tipo === 'disparo' && c.respondeu_disparo_em
             ? '<span class="tag respondeu">💬 respondeu</span>' : ''}
           ${chegouHoje(c.created_at) && c.tipo !== 'disparo' ? '<span class="tag novo-hoje">🆕 novo</span>' : ''}
@@ -454,6 +466,31 @@ async function atualizarBadgeHoje() {
     b.hidden = !count;
   } catch { /* sem contador não é motivo de erro na tela */ }
   atualizarBadgeDisparos();
+  atualizarBadgeEspera();
+}
+
+/* Contador de quem espera consultor — conta no BANCO, não na lista
+   carregada: com outro filtro ativo a lista local não tem todos. */
+async function atualizarBadgeEspera() {
+  const b = $('#badgeEspera');
+  if (!b) return;
+  try {
+    const { count } = await sb.from('conversas')
+      .select('id', { count: 'exact', head: true }).eq('aguardando_consultor', true);
+    b.textContent = count ?? 0;
+    b.hidden = !count;
+  } catch { /* sem contador não é motivo de erro na tela */ }
+}
+
+/** "há 3 dias" / "há 2h" — o quanto o cliente já esperou. */
+function tempoDeEspera(desde) {
+  if (!desde) return '';
+  const min = Math.floor((Date.now() - new Date(desde).getTime()) / 60000);
+  if (min < 60) return `${Math.max(1, min)}min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? '1 dia' : `${d} dias`;
 }
 
 /* Contador da aba de disparos — mostra só quem RESPONDEU, que é o que pede

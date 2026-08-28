@@ -210,6 +210,9 @@
                  cliente encerrado acumulando na lista é só ruído -->
             <!-- quem já tem horário marcado (ou está no serviço) também sai da
                  fila principal: o trabalho com ele agora é da agenda -->
+            <!-- passado para humano e sem resposta: a fila mais quente -->
+            <button class="chip chip-espera" data-status="aguardando"
+                    title="Cliente que a IA passou e ainda espera resposta de um consultor">⏳ Aguardando consultor <b class="chip-num" id="badgeEspera" hidden>0</b></button>
             <button class="chip" data-status="agendada" title="Com horário marcado ou em serviço">📅 Agendadas</button>
             <button class="chip" data-status="fechou" title="Serviço concluído — cliente fechou">✅ Fechadas</button>
             <button class="chip" data-status="nao_fechou" title="Cliente que não fechou o serviço">❌ Não fechadas</button>
