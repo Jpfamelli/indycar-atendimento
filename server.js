@@ -971,8 +971,16 @@ async function descobrirConversasNovas() {
     descobridorRodando = false;
   }
 }
-setInterval(() => descobrirConversasNovas().catch(() => {}), 10 * 60 * 1000);
-setTimeout(() => descobrirConversasNovas().catch(() => {}), 25_000);
+/* DESLIGADO. Este descobridor trouxe 1.227 conversas antigas do celular
+   de uma vez e entupiu o painel: cliente de julho no topo da fila, sem
+   nome, gente já atendida reaparecendo. O histórico do aparelho JÁ FOI
+   importado — o que chega agora vem pelo webhook, que é o caminho certo.
+   Para religar algum dia, faça com corte de data (só conversa do dia) e
+   com o dono avisado. Ligue com DESCOBRIDOR=1 se precisar. */
+if (process.env.DESCOBRIDOR === "1") {
+  setInterval(() => descobrirConversasNovas().catch(() => {}), 10 * 60 * 1000);
+  setTimeout(() => descobrirConversasNovas().catch(() => {}), 25_000);
+}
 
 /* De 40 em 40 segundos, em segundo plano. É o que faz a resposta do Carlos
    aparecer sozinha para quem está com o painel aberto. Era de 2 em 2 minutos
