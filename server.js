@@ -729,6 +729,27 @@ async function reinscreverNoFluxo() {
 // Assinatura com que o Carlos abre as mensagens dele
 const MARCA_DO_CARLOS = /^\s*\*?\s*carlos\s*\|/i;
 
+/* Mensagem do aparelho vira texto para o painel.
+   ATENÇÃO: foto/áudio/vídeo chegam com content VAZIO e o tipo em
+   media_type. Antes essas mensagens eram DESCARTADAS — e o cliente que
+   mandava só a foto do carro (comuníssimo numa oficina) nunca aparecia
+   no painel. Agora vira um recado legível e a conversa existe. */
+const ROTULO_MIDIA = {
+  image: '🖼 Foto', video: '🎬 Vídeo', audio: '🎤 Áudio', ptt: '🎤 Áudio',
+  document: '📎 Documento', sticker: '💬 Figurinha', location: '📍 Localização',
+  contact: '👤 Contato', vcard: '👤 Contato',
+};
+function textoDaMensagem(m) {
+  const texto = String(m?.content || '').trim();
+  if (texto) return texto;
+  const tipo = String(m?.media_type || '').toLowerCase();
+  if (!tipo) return '';
+  const base = ROTULO_MIDIA[tipo] || `📦 ${tipo}`;
+  const arq = String(m?.filename || '').trim();
+  // o nome gerado pelo WhatsApp (audio_20260825_202724.ogg) não diz nada
+  return arq && !/^(audio|image|video|document)_\d{8}/i.test(arq) ? `${base}: ${arq}` : base;
+}
+
 /* Devolve SEMPRE um dos três: {lista}, {erro} ou {desconfigurado}.
    Nunca colapsa falha em lista vazia — foi assim que o erro
    `/proxy/chats?limit=200 → 400 VALIDATION_ERROR` passou por "nenhuma
@@ -784,8 +805,8 @@ async function sincronizarConversa(g, conversa) {
   let entraram = 0;
 
   for (const m of doAparelho) {
-    const texto = String(m.content || '').trim();
-    if (!m.id || !texto) continue;              // mídia sem legenda não vira mensagem de texto
+    const texto = textoDaMensagem(m);           // foto/áudio viram recado legível
+    if (!m.id || !texto) continue;
     if (porWamid.has(m.id)) continue;
 
     const direcao = m.is_from_me ? 'saida' : 'entrada';
@@ -926,12 +947,12 @@ async function descobrirConversasNovas() {
       if (m.erro || m.desconfigurado || !Array.isArray(m.lista)) continue;
       const vistos = new Set();
       const linhas = m.lista
-        .filter(x => x.id && String(x.content || '').trim() && !vistos.has(x.id) && vistos.add(x.id))
+        .filter(x => x.id && textoDaMensagem(x) && !vistos.has(x.id) && vistos.add(x.id))
         .sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0))
         .map(x => ({
           telefone,
           nome: ch.name && ch.name !== 'Atendimento Indy Car' ? ch.name : null,
-          corpo: String(x.content).trim().slice(0, 4000),
+          corpo: textoDaMensagem(x).slice(0, 4000),
           direcao: x.is_from_me ? 'saida' : 'entrada',
           status: x.is_from_me ? 'enviado' : 'recebido',
           wamid: x.id,
