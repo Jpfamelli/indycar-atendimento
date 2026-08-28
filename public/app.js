@@ -356,6 +356,16 @@ function conversasFiltradas() {
     (soDigitos && (c.telefone_e164 || '').includes(soDigitos)));
 }
 
+/* Sem nome cadastrado, o painel mostra o TELEFONE legível — reconhecer
+   "(12) 98842-7728" é bem melhor que "Cliente 7728" ou um monte de dígitos. */
+function telefoneBonito(t) {
+  const d = String(t || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return String(t || '');
+}
+const tituloDaConversa = (c) => c.nome || telefoneBonito(c.telefone);
+
 function renderConversas() {
   const lista = conversasFiltradas();
   const el = $('#listaConversas');
@@ -381,10 +391,10 @@ function renderConversas() {
 
   el.innerHTML = aviso + lista.map(c => `
     <div class="conversa ${conversaAtual?.id === c.id ? 'ativa' : ''}" data-id="${c.id}">
-      <span class="avatar">${esc(iniciais(c.nome || c.telefone))}</span>
+      <span class="avatar">${esc(iniciais(c.nome) || "#")}</span>
       <div class="conversa-txt">
         <div class="conversa-topo">
-          <span class="conversa-nome">${esc(c.nome || c.telefone)}</span>
+          <span class="conversa-nome">${esc(tituloDaConversa(c))}</span>
           <span class="conversa-hora">${esc(horaCurta(c.ultima_mensagem_em))}</span>
         </div>
         <div class="conversa-previa">${esc(c.ultima_previa || 'sem mensagens')}</div>
@@ -490,9 +500,9 @@ async function abrirConversa(id) {
 
   $('#chatVazio').hidden = true;
   $('#chat').hidden = false;
-  $('#chatNome').textContent = conv.nome || conv.telefone;
+  $('#chatNome').textContent = tituloDaConversa(conv);
   $('#chatTelefone').textContent = conv.telefone;
-  $('#chatAvatar').textContent = iniciais(conv.nome || conv.telefone);
+  $('#chatAvatar').textContent = iniciais(conv.nome) || '#';
   $('#chatStatus').value = conv.status;
   renderEtapaDoChat();
   renderBotaoAssumir();
