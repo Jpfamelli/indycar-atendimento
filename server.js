@@ -1081,9 +1081,15 @@ async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
     ? 'application/x-www-form-urlencoded' : 'application/json';
 
   try {
+    /* 60s, não 30s. O proxy do device manager normalmente responde em ~1,5s,
+       mas quando o gateway do CodeWords engasga (aconteceu 31/08 e 01/09) o
+       mesmo envio leva 18–27s. Com 30s ele era CORTADO no meio e virava
+       "CodeWords não respondeu a tempo" mesmo tendo entregue — o atendente
+       reenviava e o cliente recebia duas vezes. 60s dá folga para o envio
+       lento terminar em vez de morrer na porta. */
     const resposta = await fetch(destino, {
       method: 'POST', headers: cabecalhos, body: carga,
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
     });
 
     const txt = await resposta.text();
@@ -1142,7 +1148,7 @@ async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
     await registrarEvento(sb, { direcao:'saida', sucesso:true, telefone, resumo: corpo.slice(0,120) });
     return { ok:true, resposta: txt.slice(0, 500) };
   } catch (err) {
-    const msg = err.name === 'TimeoutError' ? 'CodeWords não respondeu a tempo (30s)' : err.message;
+    const msg = err.name === 'TimeoutError' ? 'CodeWords não respondeu a tempo (60s)' : err.message;
     await sb.from('codewords_config').update({ ultimo_erro: msg }).eq('id', true);
     await registrarEvento(sb, { direcao:'saida', sucesso:false, telefone,
       resumo: corpo.slice(0,120), erro: msg });
