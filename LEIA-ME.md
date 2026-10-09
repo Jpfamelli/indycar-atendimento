@@ -267,3 +267,73 @@ npm run mock      # http://localhost:3211 — tela real, dados de mentira, já l
 ```
 
 Banco: projeto `indycar-plataforma` no Supabase — o mesmo do CRM e da Agenda.
+
+---
+
+## ✨ Copiloto da IA (rodada 2 — 09/10/2026)
+
+A IA lê **tudo** sobre o cliente e diz o que fazer — e faz com um clique.
+
+**Na tela:** botão **✨ O que fazer agora?** no topo da ficha (ou o ✨ do chat).
+A IA lê as últimas 40 mensagens, o cadastro, o CRM, a Agenda, os orçamentos do
+Orçador, as mensagens do Comunicar, a satisfação, a etapa do funil, a próxima
+revisão e os **horários livres de verdade** dos próximos 7 dias — e devolve:
+
+- **resposta sugerida** (tom da casa, sem preço) → *Usar no campo* (nunca envia sozinha)
+- **🔥 quente / 🌤 morno / ❄ frio** + intenção, resumo em 3 linhas e pendências
+- **2 horários livres** clicáveis (viram frase pronta no campo)
+- **cartões de ação** com *Executar / Recusar / ↶ Desfazer*: agendar (lead + horário
+  amarrados, igual ao botão Agendar), remarcar, cancelar, mover etapa, completar ficha,
+  registrar orçamento, aguardando consultor, chamar de novo (fila do Comunicar)
+- **histórico** do que a IA propôs e do que foi feito na conversa
+
+Atualiza sozinho quando o **cliente** escreve (espera 6 s, no máximo 1× a cada 45 s,
+só com a tela visível; resposta do atendente no meio cancela). Dá para desligar no
+próprio painel.
+
+**Segurança (o servidor confere tudo, não a IA):** horário livre e dentro do expediente,
+serviço do catálogo (o "não fazemos" é barrado), etapa que existe, placa/e-mail/data
+válidos, ficha só com o que o **cliente** disse, valor só se o **atendente** informou,
+nada de preço no texto, cliente que pediu para parar não recebe retorno. A conversa vai
+cercada por marca aleatória (texto do cliente é DADO). Nenhum valor em R$ entra no prompt.
+
+**Autonomia** (`ia_config.autonomia`, só admin muda): `sugerir` = só mostra ·
+`confirmar` (padrão) = um clique executa · `automatico` = faz sozinho só o seguro
+(ficha, etapa comum, aguardando consultor). Agendar, remarcar, cancelar, valor,
+opt-out, etapa de ganho/perda e mensagem programada **sempre** pedem clique.
+Tudo vai para `ia_acoes` (proposta/executada/recusada/erro/desfeita, tokens, modelo, duração).
+
+### Rotas (todas com login; erros em JSON)
+| Rota | Para quê |
+|---|---|
+| `GET /api/ia/contexto/:conversaId` | Ficha completa para a tela (com valores) — `?fresco=1` fura o cache de 45 s |
+| `POST /api/ia/copiloto` `{conversaId, pedido?}` | `{resposta_sugerida, resposta_acao_id, acoes[], resumo, pendencias, intencao, temperatura, horarios_sugeridos[], autonomia, uso}` |
+| `POST /api/ia/acoes/:id/executar` · `/recusar` `{motivo?}` · `/desfazer` | Um clique; trava contra clique duplo; desfaz em até 24 h |
+| `GET /api/ia/acoes?conversaId=` | Histórico da conversa |
+| `GET /api/ia/config` · `PUT` (admin) | ativo, modelos, autonomia, limite do dia, instruções extras |
+| `GET /api/ia/uso` | Chamadas e tokens do dia, restante, as minhas |
+| `GET /api/ia/horarios?servico=&dias=&consultor=` | Horários livres + 2 sugestões (o modal Agendar usa) |
+| `POST /api/ia/resumo-do-dia` `{forte?}` | Gestor/admin: quem está esperando, quem pediu orçamento, quem quer agendar, reclamações |
+| `GET /api/conversa-por-telefone?t=` | `{conversaId, link:"/?conversa=<id>"}` — CRM/Agenda abrem a conversa certa (aceita +55, máscara e sem o 9) |
+
+CRM, Agenda, Comunicar e Orçador podem chamar essas rotas pelo navegador (CORS liberado
+só para os endereços do ecossistema), com o mesmo login do Supabase. Para só abrir a
+conversa, basta o link `https://indycar-atendimento.onrender.com/?tel=12999998888`
+ou `?conversa=<id>`.
+
+`/api/ia/sugerir` e `/api/ia/classificar` continuam iguais para a tela; o sugerir com
+`conversaId` agora usa a ficha completa. Os dois leem o modelo de `ia_config`
+(`MODELO_IA` no .env ainda manda, se existir), respeitam a IA desligada e o limite do
+dia, e ficam registrados em `ia_acoes`. `/api/relatorios` ganhou o bloco `copilotoIA`.
+
+### Arquivos
+| Arquivo | O quê |
+|---|---|
+| `lib/contexto.js` | Monta a ficha (cache 45 s) e o texto para a IA, sem valores |
+| `lib/horarios.js` | Horários livres e validação (regras puras) |
+| `lib/ia-copiloto.js` | Laço com ferramentas, validação, executar/recusar/desfazer, uso, config |
+| `lib/resumo-dia.js` | Resumo do dia do gestor |
+| `lib/rotas-ia.js` | As rotas acima |
+| `public/copiloto.js` / `copiloto.css` | O painel (pluga no `#copilotoSlot`; sem ele, vira botão flutuante) |
+| `test/*.test.js` | `npm test` — banco e IA de mentira, nada sai para a rede |
+| `test/apoio/servidor-copiloto.js` | Bancada do painel: `node test/apoio/servidor-copiloto.js --servir 3212` → `/bancada` |
