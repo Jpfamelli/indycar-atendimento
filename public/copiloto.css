@@ -15,7 +15,7 @@
 
 .cop-cab{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .cop-titulo{margin:0;font-family:var(--fonte-cond,'Barlow Condensed',sans-serif);font-weight:700;font-style:italic;
-  font-size:1.25rem;letter-spacing:.02em;text-transform:uppercase;flex:1}
+  font-size:clamp(1rem,2.4vw,1.25rem);letter-spacing:.02em;text-transform:uppercase;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cop-uso{font-size:.72rem;padding:3px 8px;border-radius:20px;border:1px solid var(--cop-borda);color:var(--cop-suave);white-space:nowrap}
 .cop-uso.pouco{border-color:var(--amarelo,#f59e0b);color:var(--amarelo-txt,#fbbf24)}
 .cop-aviso{margin:0;font-size:.8rem;padding:8px 10px;border-radius:10px;background:rgba(245,158,11,.1);color:var(--amarelo-txt,#fbbf24)}
