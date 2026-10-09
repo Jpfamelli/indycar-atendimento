@@ -291,7 +291,39 @@ const hojeSP = () => new Intl.DateTimeFormat('en-CA',
 const chegouHoje = (ts) => !!ts && new Intl.DateTimeFormat('en-CA',
   { timeZone:'America/Sao_Paulo', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date(ts)) === hojeSP();
 
+/* Placa, carro, aniversário e opt-out dos clientes das conversas carregadas.
+   Serve para a busca por placa e para as plaquinhas, sem uma ida ao banco por
+   conversa: uma consulta `in` para os ids que ainda não conhecemos. */
+const CLIENTES_INFO = new Map();   // cliente_id -> { placa, carro_modelo, nascimento, aceita_mensagens }
+async function carregarInfoClientes() {
+  const ids = [...new Set(CONVERSAS.map(c => c.cliente_id).filter(id => id && !CLIENTES_INFO.has(id)))];
+  if (!ids.length) return false;
+  try {
+    const { data } = await sb.from('clientes')
+      .select('id,placa,carro_modelo,nascimento,aceita_mensagens').in('id', ids.slice(0, 200));
+    (data || []).forEach(c => CLIENTES_INFO.set(c.id, c));
+    // quem não veio (apagado) entra como vazio, para não consultar de novo
+    ids.forEach(id => { if (!CLIENTES_INFO.has(id)) CLIENTES_INFO.set(id, {}); });
+    return (data || []).length > 0;
+  } catch { return false; }
+}
+
+/** Esqueleto da lista enquanto a primeira carga não chega (nada de tela em branco). */
+let jaCarregouConversas = false;
+function esqueletoConversas(n = 7) {
+  return Array.from({ length: n }, () => `
+    <div class="conversa esqueleto" aria-hidden="true">
+      <span class="avatar sk"></span>
+      <div class="conversa-txt">
+        <div class="sk-linha" style="width:55%"></div>
+        <div class="sk-linha fina" style="width:85%"></div>
+        <div class="sk-linha fina" style="width:40%"></div>
+      </div>
+    </div>`).join('');
+}
+
 async function carregarConversas() {
+  if (!jaCarregouConversas) $('#listaConversas').innerHTML = esqueletoConversas();
   try {
     let q = sb.from('conversas')
       .select('*')
@@ -312,12 +344,15 @@ async function carregarConversas() {
     }
     else if (filtroStatus === 'fechou' || filtroStatus === 'nao_fechou') q = q.eq('desfecho', filtroStatus);
     else if (filtroStatus !== 'disparo') q = q.is('desfecho', null);
-    // 'hoje' e 'agendada' não são status do banco: filtram depois, na lista
-    if (filtroStatus && !['hoje', 'agendada', 'aguardando', 'disparo', 'fechou', 'nao_fechou'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
+    // 'hoje', 'agendada' e 'nao_lidas' não são status do banco: filtram depois, na lista
+    if (filtroStatus && !['hoje', 'agendada', 'aguardando', 'disparo', 'fechou', 'nao_fechou', 'nao_lidas'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
 
     const { data, error } = await q;
     if (error) throw error;
     CONVERSAS = data || [];
+    jaCarregouConversas = true;
+    // placa/carro chegam depois e só redesenham se trouxeram algo novo
+    carregarInfoClientes().then(trouxe => { if (trouxe) renderConversas(); });
 
     /* A conversa aberta é uma referência para o array antigo: sem repontar,
        a plaquinha e o status do chat ficariam parados no passado. */
@@ -347,18 +382,81 @@ function conversasFiltradas() {
   if (filtroStatus === 'hoje') base = base.filter(c => chegouHoje(c.created_at));
   // aba "Agendadas" mostra só elas; a fila principal as esconde
   if (filtroStatus === 'agendada') base = base.filter(estaAgendada);
-  else if (!['disparo', 'fechou', 'nao_fechou', 'aguardando'].includes(filtroStatus))
+  else if (!['disparo', 'fechou', 'nao_fechou', 'aguardando', 'nao_lidas'].includes(filtroStatus))
     base = base.filter(c => !estaAgendada(c));
+  // aba "Não lidas": só quem tem mensagem sem ler, de qualquer etapa
+  if (filtroStatus === 'nao_lidas') base = base.filter(c => (c.nao_lidas || 0) > 0);
   // "só as minhas": o atendente trabalha a fila dele sem o ruído da do outro
   if (soMinhas && perfil?.id) base = base.filter(c => c.atribuida_a === perfil.id);
 
-  const t = termoBusca.trim().toLowerCase();
+  const t = semAcentoBusca(termoBusca);
   if (!t) return base;
-  const soDigitos = t.replace(/\D/g, '');
-  return base.filter(c =>
-    (c.nome || '').toLowerCase().includes(t) ||
-    (c.telefone || '').toLowerCase().includes(t) ||
-    (soDigitos && (c.telefone_e164 || '').includes(soDigitos)));
+  /* Telefone: compara só dígitos e sem o 55 dos dois lados — "+55 12 99683"
+     e "12996830272" acham a mesma conversa. Placa: sem hífen e sem espaço,
+     "abc-1d23" acha "ABC1D23". */
+  const digitos = normalizarDigitos(t);
+  const placaBusca = t.replace(/[\s-]/g, '');
+  return base.filter(c => {
+    if (semAcentoBusca(c.nome).includes(t)) return true;
+    if (digitos.length >= 3) {
+      const tel = normalizarDigitos(c.telefone_e164 || c.telefone);
+      if (tel.includes(digitos)) return true;
+      // termo parcial que começa com o DDI ("+55 12 98888"): tenta sem o 55 também
+      if (digitos.startsWith('55') && digitos.length >= 5 && tel.includes(digitos.slice(2))) return true;
+    }
+    const info = CLIENTES_INFO.get(c.cliente_id);
+    if (!info) return false;
+    const placa = semAcentoBusca(info.placa).replace(/[\s-]/g, '');
+    if (placaBusca.length >= 3 && placa && placa.includes(placaBusca)) return true;
+    return !!info.carro_modelo && semAcentoBusca(info.carro_modelo).includes(t);
+  });
+}
+
+/** Busca sem acento e sem caixa: "jose" acha "José". */
+function semAcentoBusca(v) {
+  return String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+/** Só dígitos, sem o DDI 55 quando ele é DDI (sobram 10 ou 11 dígitos). */
+function normalizarDigitos(v) {
+  return String(v ?? '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+}
+
+/* Rascunho por conversa: o que foi digitado e não enviado fica guardado
+   neste navegador e volta quando a conversa é reaberta. */
+const RASCUNHO_KEY = id => `indycar_rascunho_${id}`;
+function lerRascunho(id) { try { return localStorage.getItem(RASCUNHO_KEY(id)) || ''; } catch { return ''; } }
+function guardarRascunho(id, texto) {
+  try {
+    if (texto && texto.trim()) localStorage.setItem(RASCUNHO_KEY(id), texto);
+    else localStorage.removeItem(RASCUNHO_KEY(id));
+  } catch { /* armazenamento cheio ou bloqueado: o rascunho só não persiste */ }
+}
+
+/** "DD/MM" ou "DD/MM/AAAA"; ano 1904 é o combinado para "só dia e mês". */
+function aniversarioTexto(nasc) {
+  if (!nasc) return '';
+  const [a, m, d] = String(nasc).slice(0, 10).split('-');
+  if (!a || !m || !d) return '';
+  return a === '1904' ? `${d}/${m}` : `${d}/${m}/${a}`;
+}
+/** Quantos dias faltam para o aniversário (0 = hoje). null sem data. */
+function diasParaAniversario(nasc, hoje = new Date()) {
+  if (!nasc) return null;
+  const [, m, d] = String(nasc).slice(0, 10).split('-').map(Number);
+  if (!m || !d) return null;
+  const base = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  let prox = new Date(hoje.getFullYear(), m - 1, d);
+  if (prox < base) prox = new Date(hoje.getFullYear() + 1, m - 1, d);
+  return Math.round((prox - base) / 86400000);
+}
+/** Idade em anos; null quando só há dia/mês (1904). */
+function idadeDe(nasc, hoje = new Date()) {
+  if (!nasc) return null;
+  const [a, m, d] = String(nasc).slice(0, 10).split('-').map(Number);
+  if (!a || a <= 1904) return null;
+  let idade = hoje.getFullYear() - a;
+  if (hoje.getMonth() + 1 < m || (hoje.getMonth() + 1 === m && hoje.getDate() < d)) idade--;
+  return idade;
 }
 
 /* Sem nome cadastrado, o painel mostra o TELEFONE legível — reconhecer
@@ -399,16 +497,26 @@ function renderConversas() {
        nada. Assim que a pessoa perguntar alguma coisa, ela volta sozinha para a fila de atendimento.</div>`
     : '';
 
-  el.innerHTML = aviso + lista.map(c => `
-    <div class="conversa ${conversaAtual?.id === c.id ? 'ativa' : ''}" data-id="${c.id}">
+  el.innerHTML = aviso + lista.map(c => {
+    const info = CLIENTES_INFO.get(c.cliente_id) || {};
+    const carro = [info.carro_modelo, info.placa].filter(Boolean).join(' · ');
+    const rascunho = lerRascunho(c.id);
+    const dias = diasParaAniversario(info.nascimento);
+    return `
+    <div class="conversa ${conversaAtual?.id === c.id ? 'ativa' : ''}" data-id="${esc(c.id)}">
       <span class="avatar">${esc(iniciais(c.nome) || "#")}</span>
       <div class="conversa-txt">
         <div class="conversa-topo">
           <span class="conversa-nome">${esc(tituloDaConversa(c))}</span>
           <span class="conversa-hora">${esc(horaCurta(c.ultima_mensagem_em))}</span>
         </div>
-        <div class="conversa-previa">${esc(c.ultima_previa || 'sem mensagens')}</div>
+        <div class="conversa-previa">${rascunho
+          ? `<span class="previa-rascunho">✎ ${esc(rascunho.slice(0, 60))}</span>`
+          : esc(c.ultima_previa || 'sem mensagens')}</div>
+        ${carro ? `<div class="conversa-carro">🚗 ${esc(carro)}</div>` : ''}
         <div class="conversa-tags">
+          ${dias === 0 ? '<span class="tag niver" title="Aniversário hoje">🎂 hoje</span>' : ''}
+          ${info.aceita_mensagens === false ? '<span class="tag mudo" title="Não quer mensagens automáticas">🔕</span>' : ''}
           ${c.aguardando_consultor
             ? `<span class="tag esperando">⏳ espera ${esc(tempoDeEspera(c.aguardando_desde))}</span>` : ''}
           ${c.tipo === 'disparo' && c.respondeu_disparo_em
@@ -421,7 +529,7 @@ function renderConversas() {
           ${c.nao_lidas > 0 ? `<span class="nao-lidas">${c.nao_lidas}</span>` : ''}
         </div>
       </div>
-    </div>`).join('');
+    </div>`; }).join('');
 
   $$('.conversa', el).forEach(d =>
     d.addEventListener('click', () => abrirConversa(d.dataset.id)));
@@ -547,6 +655,16 @@ async function abrirConversa(id) {
   // No celular, abrir a conversa troca a lista pelo chat
   $('.conversas-layout').classList.add('vendo-chat');
 
+  // rascunho desta conversa volta para o campo (e o da anterior já ficou guardado)
+  if (campo.value.trim() === '' || campo.dataset.conversa !== conv.id) {
+    campo.value = lerRascunho(conv.id);
+    campo.dataset.conversa = conv.id;
+    campo.dispatchEvent(new Event('input'));
+  }
+  conversaRenderizada = null;          // conversa nova: a rolagem vai para o fim
+  $('#pillNovas').hidden = true;
+  $('#chatAvisos').hidden = true;
+
   renderConversas();
   await Promise.all([carregarMensagens(), carregarFicha(conv)]);
 
@@ -601,10 +719,23 @@ async function carregarMensagens() {
   } catch (err) { toast('⚠️ ' + err.message); }
 }
 
-function renderMensagens() {
+/* Rolagem: só vai para o fim quando a conversa acabou de abrir, quando o
+   atendente já estava perto do fim, ou quando ELE mandou a mensagem. Se ele
+   subiu para reler algo e chega mensagem nova, a tela fica onde está e a
+   pílula "↓ Novas mensagens" avisa. */
+let conversaRenderizada = null;
+const PERTO_DO_FIM = 90;   // px
+function pertoDoFim(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < PERTO_DO_FIM; }
+
+function renderMensagens({ forcarFim = false } = {}) {
   const el = $('#mensagens');
+  const trocouConversa = conversaRenderizada !== conversaAtual?.id;
+  const estavaNoFim = trocouConversa || forcarFim || pertoDoFim(el);
+  const alturaAntes = el.scrollHeight, topoAntes = el.scrollTop;
+  conversaRenderizada = conversaAtual?.id || null;
   if (!MENSAGENS.length) {
     el.innerHTML = '<div class="vazio">Nenhuma mensagem ainda. Escreva abaixo para começar.</div>';
+    $('#pillNovas').hidden = true;
     return;
   }
   let ultimoDia = '';
@@ -644,8 +775,13 @@ function renderMensagens() {
       renderMensagens();
       atualizarBarraSelecao();
     }));
-  } else {
+  } else if (estavaNoFim) {
     el.scrollTop = el.scrollHeight;   // só rola no modo normal, senão pula a cada clique
+    $('#pillNovas').hidden = true;
+  } else {
+    // mantém a posição de leitura (o que mudou está abaixo) e avisa que chegou coisa nova
+    el.scrollTop = topoAntes;
+    if (el.scrollHeight > alturaAntes) $('#pillNovas').hidden = false;
   }
 
   /* link assinado (1h) — só quem está logado consegue gerar e abrir */
@@ -732,14 +868,58 @@ $('#btnApagarMsgs')?.addEventListener('click', async () => {
 
 /* ---------------- Enviar ---------------- */
 const campo = $('#campoMensagem');
+const LIMITE_MENSAGEM = 4000;   // o mesmo teto do servidor (/api/enviar corta em 4000)
+/** Contador discreto: só aparece a partir de 500 caracteres; fica vermelho perto do teto. */
+function atualizarContador() {
+  const n = campo.value.length, el = $('#contadorChars');
+  if (!el) return;
+  el.hidden = n < 500;
+  el.textContent = `${n.toLocaleString('pt-BR')}/${LIMITE_MENSAGEM.toLocaleString('pt-BR')}`;
+  el.classList.toggle('perto', n >= LIMITE_MENSAGEM - 200);
+}
 campo.addEventListener('input', () => {
   campo.style.height = 'auto';
   campo.style.height = Math.min(campo.scrollHeight, 130) + 'px';
+  atualizarContador();
+  if (conversaAtual) guardarRascunho(conversaAtual.id, campo.value);
 });
 campo.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarMensagem(); }
+  // Enter envia; Shift+Enter quebra linha; Ctrl+Enter envia sempre (mesmo com Shift)
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !e.shiftKey)) { e.preventDefault(); enviarMensagem(); }
 });
 $('#btnEnviar').addEventListener('click', enviarMensagem);
+
+/* "↓ Novas mensagens": desce até o fim e some */
+$('#pillNovas').addEventListener('click', () => {
+  const el = $('#mensagens');
+  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  // aba em segundo plano não anima a rolagem: garante o fim por tempo
+  setTimeout(() => { if (!pertoDoFim(el)) el.scrollTop = el.scrollHeight; }, 500);
+  $('#pillNovas').hidden = true;
+});
+$('#mensagens').addEventListener('scroll', () => {
+  if (pertoDoFim($('#mensagens'))) $('#pillNovas').hidden = true;
+});
+
+/* Marcar como NÃO lida: a conversa volta a contar no badge e, no celular,
+   a tela volta para a lista — é o jeito de "deixar para depois" sem perder. */
+$('#btnNaoLida').addEventListener('click', async () => {
+  if (!conversaAtual) return;
+  const conv = conversaAtual;
+  try {
+    const { error } = await sb.from('conversas').update({ nao_lidas: Math.max(1, conv.nao_lidas || 0) }).eq('id', conv.id);
+    if (error) throw error;
+    conv.nao_lidas = Math.max(1, conv.nao_lidas || 0);
+    conversaAtual = null;
+    clearInterval(syncAbertaTimer);
+    $('#chat').hidden = true;
+    $('#chatVazio').hidden = false;
+    $('.conversas-layout').classList.remove('vendo-chat');
+    renderConversas();
+    atualizarBadge();
+    toast('✉ Marcada como não lida');
+  } catch (err) { toast('⚠️ ' + err.message); }
+});
 
 /* ---------------- Enviar documento / foto ----------------
    O arquivo sobe em base64 para o servidor, que repassa ao WhatsApp da
@@ -908,8 +1088,11 @@ async function enviarMensagem() {
     if (error) throw error;
     campo.value = '';
     campo.style.height = 'auto';
+    guardarRascunho(conversaAtual.id, '');
+    atualizarContador();
     fecharMenuAtalhos();
     await carregarMensagens();
+    renderMensagens({ forcarFim: true });   // quem envia quer ver a própria mensagem
     await carregarConversas();
 
     // Entrega de verdade no WhatsApp, via CodeWords.
@@ -924,7 +1107,11 @@ async function enviarMensagem() {
           conversaId: conversaAtual.id,
         }),
       })).json();
-      if (!r.ok && !r.desligado) toast('⚠️ Registrado aqui, mas o envio falhou: ' + (r.erro || ''));
+      if (!r.ok && !r.desligado) {
+        toast('⚠️ Registrado aqui, mas o envio falhou: ' + (r.erro || ''));
+        // chave recusada: a faixa de saúde acende na hora, sem esperar o vigia
+        if (r.codigo === 'codewords-401') mostrarSaude({ problema: 'codewords-fora', texto: r.erro, desde: null });
+      }
     } catch (err) {
       // A mensagem já está salva; o que falhou foi a entrega. Avisa, para
       // ninguém achar que o cliente recebeu.
@@ -1058,38 +1245,63 @@ async function carregarFicha(conv) {
   }
 
   vazio.hidden = true; alvo.hidden = false;
-  alvo.innerHTML = '<div class="vazio"><span class="girando"></span>Carregando ficha…</div>';
+  alvo.innerHTML = esqueletoFicha();
 
   try {
     /* O catálogo entra no Promise.all: fora dele, o datalist era montado
        antes das sugestões chegarem e o campo de serviço abria vazio na
-       primeira conversa. É cache, então só custa na primeira vez. */
-    const [, c360, leads, agend] = await Promise.all([
+       primeira conversa. É cache, então só custa na primeira vez.
+       A parte do Comunicar (aniversário, opt-out, revisão, fila) vem do
+       servidor: essas tabelas não têm leitura pelo navegador. */
+    const [, c360, leads, agend, fx] = await Promise.all([
       carregarCatalogo(),
       sb.from('v_cliente_360').select('*').eq('id', conv.cliente_id).maybeSingle(),
       sb.from('leads').select('*').eq('cliente_id', conv.cliente_id)
         .order('created_at', { ascending:false }).limit(5),
       sb.from('agendamentos').select('*, consultores(nome)').eq('cliente_id', conv.cliente_id)
         .order('inicio_em', { ascending:false }).limit(5),
+      fichaDoServidor(conv.cliente_id),
     ]);
+    if (conversaAtual?.id !== conv.id) return;   // o atendente já abriu outra conversa
 
     const f = c360?.data || {};
-    fichaCache = f;              // alimenta as variáveis dos atalhos ({carro}, {horario}…)
+    const cli = fx?.ok ? fx.cliente : {};
+    const rev = fx?.ok ? fx.revisao : null;
+    const ultimo = fx?.ok ? fx.ultimoServico : null;
+    const envios = fx?.ok ? (fx.envios || []) : [];
+    const aceita = cli.aceita_mensagens !== false;
+    const diasNiver = diasParaAniversario(cli.nascimento);
+    const idade = idadeDe(cli.nascimento);
+    const revAtrasada = !!rev && new Date(rev.prevista) < new Date();
+    // alimenta as variáveis dos atalhos ({carro}, {horario}, {proxima_revisao}…)
+    fichaCache = { ...f, nascimento: cli.nascimento, aceita_mensagens: aceita,
+                   proxima_revisao: rev?.prevista || null, ultimo_servico: ultimo?.servico || null };
+    CLIENTES_INFO.set(conv.cliente_id, { ...(CLIENTES_INFO.get(conv.cliente_id) || {}),
+      placa: f.placa, carro_modelo: f.carro_modelo, nascimento: cli.nascimento, aceita_mensagens: aceita });
     const listaLeads = leads.data || [];
     const listaAgend = agend.data || [];
+    const dataCurta = iso => iso ? new Date(iso).toLocaleDateString('pt-BR') : '—';
+
+    renderAvisosDoChat({ diasNiver, aceita, rev, revAtrasada });
 
     alvo.innerHTML = `
       <div class="ficha-cab">
         <span class="avatar">${esc(iniciais(f.nome || conv.nome))}</span>
         <strong>${esc(f.nome || conv.nome || conv.telefone)}</strong>
         <small>${esc(conv.telefone)}</small>
+        <div class="ficha-selos">
+          ${diasNiver === 0 ? '<span class="tag niver">🎂 aniversário hoje</span>'
+            : diasNiver !== null && diasNiver <= 7 ? `<span class="tag niver">🎂 em ${diasNiver} dia${diasNiver > 1 ? 's' : ''}</span>` : ''}
+          ${!aceita ? '<span class="tag mudo">🔕 sem mensagens automáticas</span>' : ''}
+          ${revAtrasada ? '<span class="tag atrasada">🔧 revisão atrasada</span>' : ''}
+        </div>
       </div>
 
       <div class="ficha-stats">
         <div class="mini-kpi"><b>${brl(f.total_gasto)}</b><small>já gastou</small></div>
         <div class="mini-kpi"><b>${f.servicos_feitos ?? 0}</b><small>serviços</small></div>
         <div class="mini-kpi"><b>${f.total_leads ?? 0}</b><small>contatos</small></div>
-        <div class="mini-kpi"><b>${f.faltas ?? 0}</b><small>faltas</small></div>
+        <div class="mini-kpi${(f.faltas ?? 0) > 0 ? ' alerta' : ''}"><b>${f.faltas ?? 0}</b><small>faltas</small></div>
       </div>
 
       ${f.proximo_horario ? `
@@ -1103,14 +1315,30 @@ async function carregarFicha(conv) {
         </div>` : ''}
 
       <div class="ficha-bloco">
+        <div class="ficha-titulo">Revisão</div>
+        ${fx && !fx.ok ? `<div class="vazio" style="padding:10px">${esc(fx.erro || 'Não consegui ler o Comunicar.')}</div>`
+        : ultimo ? `
+          <div class="ficha-linha"><span>Último serviço</span>
+            <b>${esc(ultimo.servico || 'serviço')}<small class="ficha-sub">${esc(dataCurta(ultimo.inicio_em))} · ${esc(tempoRelativo(ultimo.inicio_em))}</small></b></div>
+          <div class="ficha-linha"><span>Próxima revisão</span>
+            <b class="${revAtrasada ? 'rev-atrasada' : 'rev-ok'}">${esc(dataCurta(rev?.prevista))}
+              <small class="ficha-sub">${esc(rev?.rotulo || 'Revisão geral')} · ${esc(String(rev?.meses || 6))} meses${rev?.padrao ? ' (padrão)' : ''}
+              ${revAtrasada ? ' · atrasada' : rev ? ' · ' + esc(tempoRelativo(rev.prevista)) : ''}</small></b></div>`
+        : '<div class="vazio" style="padding:10px">Nenhum serviço concluído ainda — a revisão aparece depois do primeiro.</div>'}
+      </div>
+
+      <div class="ficha-bloco">
         <div class="ficha-titulo">
-          Cliente e veículo
+          Cliente e carro
           <button type="button" class="ficha-editar" id="btnEditarCliente">✎ Editar</button>
         </div>
         <div id="clienteVer">
           <div class="ficha-linha"><span>Nome</span><b>${esc(f.nome) || '—'}</b></div>
           <div class="ficha-linha"><span>Carro</span><b>${esc(f.carro_modelo) || '—'}</b></div>
           <div class="ficha-linha"><span>Placa</span><b>${esc(f.placa) || '—'}</b></div>
+          <div class="ficha-linha"><span>Aniversário</span><b>${cli.nascimento
+            ? esc(aniversarioTexto(cli.nascimento)) + (idade !== null ? `<small class="ficha-sub">${idade} anos</small>` : '')
+            : '<span class="ficha-faltando">não informado</span>'}</b></div>
           <div class="ficha-linha"><span>Origem</span><b>${esc(f.origem) || '—'}</b></div>
           <div class="ficha-linha"><span>Cliente desde</span><b>${esc(
             f.cliente_desde ? new Date(f.cliente_desde).toLocaleDateString('pt-BR') : '—')}</b></div>
@@ -1121,6 +1349,15 @@ async function carregarFicha(conv) {
                  value="${esc(f.carro_modelo || '')}" /></label>
           <label>Placa<input id="fcPlaca" maxlength="10" placeholder="ABC-1D23"
                  value="${esc(f.placa || '')}" /></label>
+          <div class="ficha-campo">
+            <span>Aniversário</span>
+            <div class="ficha-form-lado">
+              <input id="fcNascimento" type="date" min="1920-01-01" max="${esc(hojeSP())}"
+                     value="${esc(valorDataParaInput(cli.nascimento))}" aria-label="Data de nascimento" />
+              <label class="switch mini"><input type="checkbox" id="fcSemAno" ${cli.nascimento && String(cli.nascimento).startsWith('1904') ? 'checked' : ''} />
+                <span>só dia e mês</span></label>
+            </div>
+          </div>
           <label>E-mail<input id="fcEmail" type="email" maxlength="160" value="${esc(f.email || '')}" /></label>
           <label>Observações<textarea id="fcObs" rows="2" maxlength="600"
                  placeholder="O que é bom lembrar deste cliente">${esc(f.observacoes || '')}</textarea></label>
@@ -1174,6 +1411,28 @@ async function carregarFicha(conv) {
       </div>
 
       <div class="ficha-bloco">
+        <div class="ficha-titulo">
+          Mensagens automáticas
+          <a class="ficha-link" href="${esc(fx?.comunicarUrl || 'https://indycar-posvenda.onrender.com')}"
+             target="_blank" rel="noopener" title="Abrir o IndyCar Comunicar">Abrir no Comunicar ↗</a>
+        </div>
+        <label class="switch aceita${aceita ? '' : ' desligado'}">
+          <input type="checkbox" id="fcAceita" ${aceita ? 'checked' : ''} ${fx?.ok ? '' : 'disabled'} />
+          <span>Aceita mensagens automáticas</span>
+        </label>
+        ${!aceita ? `<small class="aceita-motivo">Desligado${cli.aceita_mensagens_em ? ' em ' + esc(dataCurta(cli.aceita_mensagens_em)) : ''}${
+            cli.aceita_mensagens_motivo ? ' · ' + esc(cli.aceita_mensagens_motivo) : ''}</small>` : ''}
+        ${envios.length ? `<div class="envios">${envios.map(e => `
+          <div class="envio-linha">
+            <span class="envio-tipo">${esc(e.rotulo)}</span>
+            <span class="tag envio-${esc(e.status || 'pendente')}">${esc(ROTULO_ENVIO[e.status] || e.status || '—')}</span>
+            <small>${esc(dataCurta(e.enviado_em || e.enviar_em))}</small>
+            ${e.resposta_tipo ? `<span class="resp resp-${esc(e.resposta_tipo)}" title="Resposta: ${esc(ROTULO_RESPOSTA[e.resposta_tipo] || e.resposta_tipo)}">${esc(ICONE_RESPOSTA[e.resposta_tipo] || '💬')}</span>` : ''}
+          </div>`).join('')}</div>`
+        : fx?.ok ? '<div class="vazio" style="padding:10px">Nenhuma mensagem automática para este cliente ainda.</div>' : ''}
+      </div>
+
+      <div class="ficha-bloco">
         <div class="ficha-titulo">Agenda</div>
         ${listaAgend.length ? listaAgend.map(a => `
           <div class="item-hist">
@@ -1190,16 +1449,108 @@ async function carregarFicha(conv) {
         ${CATALOGO.map(n => `<option value="${esc(n)}"></option>`).join('')}
       </datalist>`;
 
-    ligarEdicaoDaFicha(conv, f, listaLeads);
+    ligarEdicaoDaFicha(conv, f, listaLeads, cli);
   } catch (err) {
     alvo.innerHTML = `<div class="vazio">Não consegui carregar a ficha: ${esc(err.message)}</div>`;
   }
 }
 
+/* Parte da ficha que o navegador não enxerga (fila do Comunicar, regras de
+   revisão): vem do servidor, com o login do atendente. */
+async function fichaDoServidor(clienteId) {
+  try {
+    const r = await fetch(`/api/clientes/${encodeURIComponent(clienteId)}/ficha`, { headers: await authCabecalhos() });
+    if (r.status === 401) { await sessaoMorreu(); return null; }
+    const j = await r.json();
+    return j.ok ? j : { ok: false, erro: j.erro || 'não consegui ler o Comunicar' };
+  } catch (e) { return { ok: false, erro: e.message || 'sem resposta do servidor' }; }
+}
+
+const ROTULO_ENVIO = { pendente: 'na fila', enviado: 'enviada', falhou: 'falhou', cancelado: 'cancelada', pulado: 'pulada' };
+const ROTULO_ENVIO_TIPO = { aniversario: 'Aniversário', posvenda: 'Pós-venda', retorno: 'Retorno de revisão',
+  campanha: 'Campanha', avulsa: 'Avulsa', lembrete: 'Lembrete de horário', orcamento: 'Orçamento',
+  nao_fechou: 'Não fechou', reativacao: 'Reativação', avaliacao: 'Avaliação' };
+const ROTULO_RESPOSTA = { positiva: 'positiva', negativa: 'negativa', parar: 'pediu para parar', neutra: 'neutra' };
+const ICONE_RESPOSTA = { positiva: '👍', negativa: '👎', parar: '🔕', neutra: '💬' };
+
+/** Esqueleto da ficha enquanto as consultas não voltam. */
+function esqueletoFicha() {
+  return `<div class="ficha-esqueleto" aria-hidden="true">
+    <span class="avatar sk grande"></span>
+    <div class="sk-linha" style="width:60%;margin:10px auto 6px"></div>
+    <div class="sk-linha fina" style="width:40%;margin:0 auto 18px"></div>
+    <div class="ficha-stats"><div class="mini-kpi sk"></div><div class="mini-kpi sk"></div><div class="mini-kpi sk"></div><div class="mini-kpi sk"></div></div>
+    <div class="sk-linha" style="width:35%;margin-top:18px"></div>
+    <div class="sk-linha fina"></div><div class="sk-linha fina"></div><div class="sk-linha fina" style="width:70%"></div>
+  </div>`;
+}
+
+/** "há 4 meses", "em 12 dias", "hoje" — para datas de serviço e revisão. */
+function tempoRelativo(iso, agora = new Date()) {
+  if (!iso) return '';
+  const dias = Math.round((new Date(iso) - agora) / 86400000);
+  const abs = Math.abs(dias);
+  const txt = abs === 0 ? 'hoje'
+    : abs < 30 ? `${abs} dia${abs > 1 ? 's' : ''}`
+    : abs < 365 ? `${Math.round(abs / 30)} ${Math.round(abs / 30) > 1 ? 'meses' : 'mês'}`
+    : `${Math.floor(abs / 365)} ano${Math.floor(abs / 365) > 1 ? 's' : ''}`;
+  if (abs === 0) return txt;
+  return dias < 0 ? `há ${txt}` : `em ${txt}`;
+}
+
+/** O <input type=date> precisa de um ano de verdade: 1904 ("só dia e mês") vira 2000 na tela. */
+function valorDataParaInput(nasc) {
+  if (!nasc) return '';
+  const v = String(nasc).slice(0, 10);
+  return v.startsWith('1904') ? '2000' + v.slice(4) : v;
+}
+
+/* Plaquinhas no topo do chat: aniversário, opt-out e revisão — o que o
+   atendente precisa saber ANTES de escrever, sem abrir a ficha. */
+function renderAvisosDoChat({ diasNiver, aceita, rev, revAtrasada }) {
+  const el = $('#chatAvisos');
+  if (!el) return;
+  const avisos = [];
+  if (diasNiver === 0) avisos.push('<span class="tag niver">🎂 Aniversário hoje!</span>');
+  else if (diasNiver !== null && diasNiver <= 7) avisos.push(`<span class="tag niver">🎂 aniversário em ${diasNiver} dia${diasNiver > 1 ? 's' : ''}</span>`);
+  if (!aceita) avisos.push('<span class="tag mudo" title="Pediu para não receber mensagens automáticas">🔕 sem mensagens automáticas</span>');
+  if (rev) {
+    const d = new Date(rev.prevista).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    avisos.push(revAtrasada
+      ? `<span class="tag atrasada" title="${esc(rev.rotulo)}">🔧 revisão atrasada desde ${esc(d)}</span>`
+      : `<span class="tag revisao" title="${esc(rev.rotulo)}">🔧 revisão prevista ${esc(d)}</span>`);
+  }
+  el.innerHTML = avisos.join('');
+  el.hidden = !avisos.length;
+}
+
 /* Liga os botões da ficha. Fica separado do HTML para o template acima
    continuar legível e para poder religar tudo depois de cada recarga. */
-function ligarEdicaoDaFicha(conv, f, leads) {
+function ligarEdicaoDaFicha(conv, f, leads, cli = {}) {
   const ver = $('#clienteVer'), form = $('#clienteEditar');
+
+  /* Chave "Aceita mensagens automáticas": grava em clientes (o atendente tem
+     permissão) com data e motivo, para o Comunicar saber por que pulou. */
+  $('#fcAceita')?.addEventListener('change', async (ev) => {
+    const ligar = ev.target.checked;
+    ev.target.disabled = true;
+    try {
+      const { error } = await sb.from('clientes').update({
+        aceita_mensagens: ligar,
+        aceita_mensagens_em: new Date().toISOString(),
+        aceita_mensagens_motivo: ligar ? null : `Desligado no Atendimento por ${perfil?.nome || 'atendente'}`,
+      }).eq('id', conv.cliente_id);
+      if (error) throw error;
+      toast(ligar ? '🔔 Mensagens automáticas ligadas para este cliente'
+                  : '🔕 Este cliente não recebe mais mensagens automáticas');
+      await carregarFicha(conv);
+      renderConversas();
+    } catch (err) {
+      ev.target.checked = !ligar;
+      ev.target.disabled = false;
+      toast('⚠️ ' + err.message);
+    }
+  });
 
   $('#btnEditarCliente')?.addEventListener('click', () => {
     const abrindo = form.hidden;
@@ -1219,12 +1570,17 @@ function ligarEdicaoDaFicha(conv, f, leads) {
     const botao = form.querySelector('[type="submit"]');
     botao.disabled = true;
     try {
+      /* Aniversário: com "só dia e mês" marcado, o ano gravado é 1904 — o
+         combinado do ecossistema para "ano desconhecido". */
+      let nascimento = $('#fcNascimento').value || null;
+      if (nascimento && $('#fcSemAno').checked) nascimento = '1904' + nascimento.slice(4);
       const campos = {
         nome,
         carro_modelo: $('#fcCarro').value.trim() || null,
         placa:        $('#fcPlaca').value.trim().toUpperCase() || null,
         email:        $('#fcEmail').value.trim() || null,
         observacoes:  $('#fcObs').value.trim() || null,
+        nascimento,
       };
       const { error } = await sb.from('clientes').update(campos).eq('id', conv.cliente_id);
       if (error) throw error;
@@ -1346,7 +1702,35 @@ $('#btnApagarLead')?.addEventListener('click', async () => {
 /* ============================================================
    TEMPO REAL — mensagem nova aparece sozinha
    ============================================================ */
+/* Tempo real caiu (rede oscilou, aba dormiu, token renovou): avisa com uma
+   pílula discreta e religa sozinho, esperando cada vez um pouco mais
+   (5s, 10s, 20s… até 60s). Ao voltar, recarrega a lista e a conversa aberta,
+   porque pode ter chegado mensagem enquanto estava fora. */
+let realtimeTentativa = 0, realtimeTimer = null, realtimeCaiu = false;
+function statusDoTempoReal(status) {
+  const pill = $('#pillRealtime');
+  if (status === 'SUBSCRIBED') {
+    realtimeTentativa = 0;
+    if (realtimeCaiu) {
+      realtimeCaiu = false;
+      carregarConversas();
+      if (conversaAtual) carregarMensagens();
+      toast('✅ Tempo real de volta');
+    }
+    if (pill) pill.hidden = true;
+    return;
+  }
+  if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+    realtimeCaiu = true;
+    if (pill) pill.hidden = false;
+    clearTimeout(realtimeTimer);
+    const espera = Math.min(60_000, 5_000 * 2 ** Math.min(realtimeTentativa++, 4));
+    realtimeTimer = setTimeout(() => { if (sb) ligarTempoReal(); }, espera);
+  }
+}
+
 function ligarTempoReal() {
+  clearTimeout(realtimeTimer);
   if (canalRealtime) sb.removeChannel(canalRealtime);
   canalRealtime = sb.channel('atendimento')
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'whatsapp_mensagens' },
@@ -1374,8 +1758,10 @@ function ligarTempoReal() {
     .on('postgres_changes', { event:'*', schema:'public', table:'etapas_funil' },
       async () => { await carregarEtapas(); renderConversas(); renderEtapaDoChat();
                     renderEtapasAdmin(); if (abaVisivel('funil')) carregarFunil(); })
-    .subscribe();
+    .subscribe(status => statusDoTempoReal(status));
 }
+// Voltou a ter rede: não espera o próximo intervalo, religa já.
+window.addEventListener('online', () => { if (sb && realtimeCaiu) ligarTempoReal(); });
 
 /* ============================================================
    NOVA CONVERSA
@@ -1712,7 +2098,8 @@ let atalhoEditando = null;
 let filtroCategoria = '';
 let menuAberto = false, menuIndice = 0, menuFiltrados = [];
 
-const VARIAVEIS = ['{nome}','{primeiro_nome}','{carro}','{placa}','{servico}','{horario}','{consultor}','{atendente}'];
+const VARIAVEIS = ['{nome}','{primeiro_nome}','{carro}','{placa}','{servico}','{horario}','{consultor}','{atendente}',
+                   '{ultimo_servico}','{proxima_revisao}'];
 
 async function carregarAtalhos() {
   try {
@@ -1753,6 +2140,10 @@ function aplicarVariaveis(texto, extra = {}) {
       : ''),
     consultor: extra.consultor || '',
     atendente: perfil?.nome || '',
+    // vêm da ficha do Comunicar: "sua troca de óleo" / "revisão prevista para 10/04"
+    ultimo_servico: fichaCache?.ultimo_servico || '',
+    proxima_revisao: fichaCache?.proxima_revisao
+      ? new Date(fichaCache.proxima_revisao).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '',
   };
   return String(texto).replace(/\{(\w+)\}/g, (m, k) =>
     dados[k] !== undefined && dados[k] !== '' ? dados[k] : m);
@@ -1780,14 +2171,20 @@ function abrirMenuAtalhos(termo = '') {
 }
 
 function renderMenuAtalhos() {
-  $('#atalhoLista').innerHTML = menuFiltrados.map((a, i) => `
+  /* A prévia já vem com as variáveis trocadas ("Oi, Camila! Seu Corolla…"):
+     o atendente vê o que vai sair, não o molde. Variável sem valor fica
+     marcada em amarelo para ele completar antes de enviar. */
+  $('#atalhoLista').innerHTML = menuFiltrados.map((a, i) => {
+    const previa = aplicarVariaveis(a.corpo).replace(/\n/g, ' ').slice(0, 90);
+    const comMarcas = esc(previa).replace(/\{(\w+)\}/g, '<mark class="var-vazia" title="Sem valor para esta variável">{$1}</mark>');
+    return `
     <div class="atalho-op ${i === menuIndice ? 'marcado' : ''}" data-i="${i}">
       <span class="atalho-op-cmd">/${esc(a.comando)}</span>
       <span class="atalho-op-txt">
         <strong>${esc(a.titulo)}</strong>
-        <small>${esc(a.corpo.replace(/\n/g, ' ').slice(0, 70))}</small>
+        <small>${comMarcas}</small>
       </span>
-    </div>`).join('');
+    </div>`; }).join('');
   $$('.atalho-op', $('#atalhoLista')).forEach(el =>
     el.addEventListener('click', () => usarAtalho(menuFiltrados[+el.dataset.i])));
   $('.atalho-op.marcado')?.scrollIntoView({ block: 'nearest' });
@@ -2961,6 +3358,7 @@ $('#btnClassificar').addEventListener('click', async () => {
    ============================================================ */
 async function carregarCodeWords() {
   const ehAdmin = perfil?.papel === 'admin';
+  carregarChaveCW();   // trava ou carrega o bloco da chave conforme o papel
   // O botão Copiar fica FORA do formulário: precisa ser travado à parte
   $$('#formCodeWords input, #formCodeWords button, #btnCopiarWebhook')
     .forEach(i => i.disabled = !ehAdmin);
@@ -2972,7 +3370,11 @@ async function carregarCodeWords() {
     return;
   }
   try {
-    const { data } = await sb.from('codewords_config').select('*').maybeSingle();
+    /* Colunas nomeadas de propósito: a chave de API (api_key) NÃO vem para o
+       navegador — a máscara dela chega pelo servidor (/api/codewords/chave). */
+    const { data } = await sb.from('codewords_config')
+      .select('url_envio,service_id,token_webhook,ativo,responder_auto,ultimo_erro,ultimo_evento_em,url_webhook_publica,modo_envio')
+      .maybeSingle();
     // O webhook mora no Supabase (Edge Function) — funciona 24h, sem depender deste PC.
     // Só mostra o endereço quando ele veio do banco; nunca inventa localhost.
     $('#urlWebhook').textContent = data?.url_webhook_publica
@@ -2984,8 +3386,6 @@ async function carregarCodeWords() {
     f.token_webhook.value  = data.token_webhook || '';
     f.ativo.checked        = !!data.ativo;
     f.responder_auto.checked = !!data.responder_auto;
-    $('#maskCW').textContent = data.api_key
-      ? `Salva: ${MASCARA.repeat(8)}${String(data.api_key).slice(-4)} — deixe em branco para manter.` : '';
 
     const selo = $('#seloCW');
     selo.textContent = data.ativo ? 'ligado' : 'desligado';
@@ -3011,13 +3411,11 @@ $('#formCodeWords').addEventListener('submit', async e => {
     ativo:          f.ativo.checked,
     responder_auto: f.responder_auto.checked,
   };
-  const k = f.api_key.value.trim();
-  if (k && !k.startsWith(MASCARA)) dados.api_key = k;
+  // a chave de API tem bloco próprio (teste + troca nas duas tabelas), não entra aqui
 
   try {
     const { error } = await sb.from('codewords_config').upsert(dados);
     if (error) throw error;
-    f.api_key.value = '';
     await carregarCodeWords();
     await carregarFluxos();     // o Service ID novo pode ter trocado qual fluxo é o de envio
     toast('✅ CodeWords configurado');
@@ -3038,6 +3436,75 @@ $('#btnTestarCW').addEventListener('click', async () => {
     await carregarCodeWords();
   } catch (err) { toast('⚠️ ' + err.message); }
   finally { btn.disabled = false; btn.textContent = 'Testar conexão'; }
+});
+
+/* ============================================================
+   CHAVE DO CODEWORDS
+   Desde 01/10 a chave está sendo recusada (401) e nada sai nem entra. O
+   dono precisa trocar sem chamar ninguém: ver a máscara, testar (sem
+   gastar cota) e colar a nova — que vai para as duas tabelas que a leem.
+   ============================================================ */
+async function carregarChaveCW() {
+  const ehAdmin = perfil?.papel === 'admin';
+  $$('#chaveBox input, #chaveBox button').forEach(i => i.disabled = !ehAdmin);
+  if (!ehAdmin) { $('#chaveMascara').textContent = 'só admin'; return; }
+  try {
+    const r = await (await fetch('/api/codewords/chave', { headers: await authCabecalhos() })).json();
+    const selo = $('#chaveSelo');
+    if (!r.ok) { $('#chaveMascara').textContent = '—'; selo.textContent = r.erro || 'erro'; selo.className = 'selo mini off'; return; }
+    $('#chaveMascara').textContent = r.mascara || 'nenhuma chave salva';
+    if (!r.mascara) { selo.textContent = 'sem chave'; selo.className = 'selo mini off'; }
+    else if (r.ultimoErro && /recusad|401/i.test(r.ultimoErro)) { selo.textContent = 'recusada (401)'; selo.className = 'selo mini off'; }
+    else if (!r.iguais) { selo.textContent = 'Agenda com chave diferente'; selo.className = 'selo mini'; }
+    else { selo.textContent = 'salva nos dois sistemas'; selo.className = 'selo mini on'; }
+  } catch { $('#chaveMascara').textContent = '—'; }
+}
+
+function mostrarResultadoChave(r) {
+  const el = $('#chaveResultado');
+  el.hidden = false;
+  el.className = 'chave-resultado ' + (r.resultado === 'ok' ? 'ok' : r.resultado === 'recusada' ? 'erro' : 'aviso');
+  const ico = r.resultado === 'ok' ? '✅' : r.resultado === 'recusada' ? '⛔' : '⚠️';
+  el.textContent = `${ico} ${r.mensagem || r.erro || ''}`;
+}
+
+$('#btnTestarChave').addEventListener('click', async () => {
+  const btn = $('#btnTestarChave');
+  btn.disabled = true; btn.innerHTML = '<span class="girando"></span>Testando…';
+  try {
+    const r = await (await fetch('/api/codewords/testar-chave', {
+      method: 'POST', headers: await authCabecalhos(), body: JSON.stringify({}),
+    })).json();
+    mostrarResultadoChave(r);
+    if (r.resultado === 'ok') verSaude();   // se o vigia ainda acusa, a faixa reavalia
+  } catch (err) { mostrarResultadoChave({ resultado: 'outro', mensagem: err.message }); }
+  finally { btn.disabled = false; btn.textContent = 'Testar chave'; }
+});
+
+$('#formChave').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const campoChave = $('#chaveNova'), btn = $('#btnSalvarChave');
+  const chave = campoChave.value.trim();
+  if (chave.length < 20) return mostrarResultadoChave({ resultado: 'outro', mensagem: 'Cole a chave inteira (ela é longa, começa com cwk-).' });
+  btn.disabled = true; btn.innerHTML = '<span class="girando"></span>Testando e salvando…';
+  try {
+    const r = await (await fetch('/api/codewords/chave', {
+      method: 'POST', headers: await authCabecalhos(), body: JSON.stringify({ chave }),
+    })).json();
+    if (r.ok) {
+      campoChave.value = '';
+      mostrarResultadoChave({ resultado: 'ok',
+        mensagem: `Chave ${r.mascara} salva em ${r.salvoEm.length} sistema${r.salvoEm.length > 1 ? 's' : ''}${
+          r.avisos?.length ? ' — ' + r.avisos.join(' ') : ''}. ${r.teste?.mensagem || ''}` });
+      toast('✅ Chave do CodeWords trocada');
+      await carregarChaveCW();
+      await carregarCodeWords();
+      verSaude();
+    } else {
+      mostrarResultadoChave({ resultado: r.teste?.resultado || 'outro', mensagem: r.erro });
+    }
+  } catch (err) { mostrarResultadoChave({ resultado: 'outro', mensagem: err.message }); }
+  finally { btn.disabled = false; btn.textContent = 'Testar e salvar'; }
 });
 
 /* Lista dos fluxos cadastrados no CodeWords. O de envio é o que
@@ -3557,6 +4024,27 @@ function desenharRelatorios(r) {
            <b>${esc(num(r.mapaCalor.total))}</b>.</p>`
       : semDados('Sem dados no período — nenhuma mensagem recebida entre essas datas.')));
 
+  /* (z) mensagens automáticas do Comunicar — só números, sem texto de cliente */
+  if (r.comunicar) {
+    const c = r.comunicar;
+    partes.push(bloco('Mensagens automáticas (Comunicar)',
+      'Aniversário, pós-venda, retorno de revisão e campanhas programadas no período.',
+      c.total
+        ? `<div class="kpis kpis-mini">
+            <div class="kpi verde"><span>Enviadas</span><b>${esc(num(c.enviadas))}</b><small>de ${esc(num(c.total))} programadas</small></div>
+            <div class="kpi roxa"><span>Responderam</span><b>${esc(num(c.respondidas))}</b><small>${esc(num(c.positivas))} positivas · ${esc(num(c.agendaram))} agendaram</small></div>
+            <div class="kpi laranja"><span>Pediram para parar</span><b>${esc(num(c.pararam))}</b><small>viram opt-out</small></div>
+            <div class="kpi vermelha"><span>Falharam</span><b>${esc(num(c.falharam))}</b><small>${esc(num(c.pendentes))} ainda na fila</small></div>
+          </div>`
+          + (Object.keys(c.porTipo || {}).length
+            ? tabelaHtml({ colunas: ['Tipo', 'Programadas'],
+                linhas: Object.entries(c.porTipo).sort((a, b) => b[1] - a[1])
+                  .map(([t, n]) => [ROTULO_ENVIO_TIPO[t] || t, num(n)]) })
+            : '')
+        : semDados('Nenhuma mensagem automática programada no período.'),
+      `<a class="btn btn-ghost sm" href="https://indycar-posvenda.onrender.com" target="_blank" rel="noopener">Abrir o Comunicar ↗</a>`));
+  }
+
   $('#relCorpo').innerHTML = partes.join('');
 
   /* ---- botões de CSV ---- */
@@ -3617,7 +4105,18 @@ const temaAtual = () =>
 
 function aplicarTema(tema) {
   const claro = tema === 'claro';
-  document.documentElement.setAttribute('data-tema', claro ? 'claro' : 'escuro');
+  const html = document.documentElement;
+  /* Regra da casa: na troca de tema, NENHUMA transição roda por um quadro.
+     Sem isso, cada componente com transition de cor atravessa um estado
+     "meio claro, meio escuro" e a tela pisca em retalhos. */
+  const trocando = html.getAttribute('data-tema') !== (claro ? 'claro' : 'escuro');
+  if (trocando) html.setAttribute('data-trocando-tema', '');
+  html.setAttribute('data-tema', claro ? 'claro' : 'escuro');
+  if (trocando) {
+    const soltar = () => html.removeAttribute('data-trocando-tema');
+    requestAnimationFrame(() => requestAnimationFrame(soltar));
+    setTimeout(soltar, 120);   // aba em segundo plano não roda rAF: solta por tempo também
+  }
 
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', claro ? '#eaecf0' : '#0a0a0b');
@@ -3677,19 +4176,76 @@ async function sessaoMorreu() {
   }
 }
 
-/* Empurra o app exatamente a altura da tarja — nem um pixel a mais. */
+/* Empurra o app exatamente a altura das faixas visíveis (tarja vermelha do
+   WhatsApp + faixa de saúde, empilhadas) — nem um pixel a mais. */
 function reservarEspacoDaTarja() {
   const tarja = document.getElementById('tarjaConexao');
+  const faixa = document.getElementById('faixaSaude');
   const app   = document.getElementById('telaApp');
   if (!tarja || !app) return;
-  app.style.paddingTop = tarja.hidden ? '' : `${Math.ceil(tarja.getBoundingClientRect().height)}px`;
+  const hTarja = tarja.hidden ? 0 : Math.ceil(tarja.getBoundingClientRect().height);
+  if (faixa) faixa.style.top = `${hTarja}px`;      // a faixa fica logo abaixo da tarja
+  const hFaixa = (!faixa || faixa.hidden) ? 0 : Math.ceil(faixa.getBoundingClientRect().height);
+  const total = hTarja + hFaixa;
+  app.style.paddingTop = total ? `${total}px` : '';
 }
 // Redimensionar a janela faz o texto quebrar e a tarja mudar de altura.
 if (typeof ResizeObserver === 'function') {
-  const alvo = () => document.getElementById('tarjaConexao');
   const obs = new ResizeObserver(() => reservarEspacoDaTarja());
-  const t0 = alvo(); if (t0) obs.observe(t0);
+  ['tarjaConexao', 'faixaSaude'].forEach(id => { const t = document.getElementById(id); if (t) obs.observe(t); });
 }
+
+/* ============================================================
+   FAIXA DE SAÚDE DO ECOSSISTEMA
+   O vigia grava em vigia_estado o que está quebrado (hoje: a chave do
+   CodeWords recusada desde 01/10). Aqui vira uma faixa discreta com o que
+   fazer e um botão que leva direto para Integrações. Dá para dispensar
+   por uma hora — mas volta se o problema continuar.
+   ============================================================ */
+var SAUDE_ATUAL = null;
+const SAUDE_DISPENSA_KEY = 'indycar_saude_dispensada';
+function saudeDispensada(problema) {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(SAUDE_DISPENSA_KEY) || 'null');
+    return !!v && v.problema === problema && v.ate > Date.now();
+  } catch { return false; }
+}
+function mostrarSaude(s) {
+  const faixa = document.getElementById('faixaSaude');
+  if (!faixa) return;
+  SAUDE_ATUAL = s;
+  const temProblema = !!s?.problema;
+  if (!temProblema || saudeDispensada(s.problema)) {
+    faixa.hidden = true;
+    reservarEspacoDaTarja();
+    return;
+  }
+  document.getElementById('faixaTexto').textContent = s.texto || `Atenção: ${s.resumo || s.problema}`;
+  const desde = document.getElementById('faixaDesde');
+  desde.textContent = s.desde ? `desde ${new Date(s.desde).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}` : '';
+  const btn = document.getElementById('faixaBtn');
+  // só quem pode trocar a chave vê o atalho para Integrações
+  btn.hidden = !(perfil?.papel === 'admin' && /codewords/.test(s.problema));
+  faixa.hidden = false;
+  reservarEspacoDaTarja();
+}
+async function verSaude() {
+  try {
+    const r = await fetch('/api/saude', { headers: await authCabecalhos() });
+    if (r.status === 401) { await sessaoMorreu(); return; }
+    const s = await r.json();
+    mostrarSaude(s);
+  } catch { /* sem rede: não inventa problema nem apaga o que já está na tela */ }
+}
+document.getElementById('faixaBtn')?.addEventListener('click', () => {
+  document.querySelector('[data-aba="integracoes"]')?.click();
+  document.getElementById('chaveBox')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+document.getElementById('faixaFechar')?.addEventListener('click', () => {
+  try { sessionStorage.setItem(SAUDE_DISPENSA_KEY, JSON.stringify({ problema: SAUDE_ATUAL?.problema, ate: Date.now() + 3_600_000 })); } catch { /* ignora */ }
+  document.getElementById('faixaSaude').hidden = true;
+  reservarEspacoDaTarja();
+});
 
 async function verConexao({ silencioso = true } = {}) {
   const bolinha = document.getElementById('conexaoBolinha');
@@ -3837,11 +4393,40 @@ document.getElementById('tarjaBtn')?.addEventListener('click', () => {
    noite toda numa TV, não faz sentido bater no CodeWords o tempo todo. */
 function vigiarConexao() {
   verConexao();
+  verSaude();
   clearInterval(conexaoTimer);
   conexaoTimer = setInterval(() => {
-    if (document.visibilityState === 'visible') verConexao();
+    if (document.visibilityState === 'visible') { verConexao(); verSaude(); }
   }, 120000);
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') verConexao();
+  if (document.visibilityState === 'visible') { verConexao(); verSaude(); }
+});
+
+/* ============================================================
+   ECOSSISTEMA INDYCAR — o seletor da barra lateral
+   Escolheu outro sistema: abre em nova aba e o seletor volta a marcar
+   "Atendimento", que é onde a pessoa continua.
+   ============================================================ */
+(() => {
+  const sel = document.getElementById('ecoSeletor');
+  if (!sel) return;
+  const atual = sel.querySelector('[data-atual]')?.value;
+  sel.addEventListener('change', () => {
+    const url = sel.value;
+    if (url && url !== atual) window.open(url, '_blank', 'noopener');
+    if (atual) sel.value = atual;
+  });
+})();
+
+/* Esc: fecha o que estiver aberto por cima do chat — a gaveta da ficha no
+   celular, ou o próprio chat (volta para a lista) quando a tela é estreita. */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || menuAberto) return;
+  if (document.querySelector('.modal-bg.aberto')) return;   // modais já cuidam do Esc
+  const ficha = document.getElementById('colFicha');
+  if (ficha?.classList.contains('aberta')) { ficha.classList.remove('aberta'); return; }
+  if (window.matchMedia('(max-width:900px)').matches && document.querySelector('.conversas-layout.vendo-chat')) {
+    document.querySelector('.conversas-layout').classList.remove('vendo-chat');
+  }
 });

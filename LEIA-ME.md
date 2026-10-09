@@ -74,11 +74,19 @@ Os dois fluxos conhecidos ficam registrados na tabela `codewords_fluxos`:
 - **Carlos — Indycar Centro Automotivo** (`indycar_carlos_whatsapp_e3cd01d3`) → envio de mensagens
 - **Indycar — Banco de Agendamentos** (`indycar_agendamentos_db_6657a75c`) → referência
 
-> ⚠️ **Cota do CodeWords:** no teste de conexão, o CodeWords avisou que as
-> **2.500 execuções do mês já foram usadas**. A conexão está certa — assim que
-> o plano for renovado (ou virar o mês), o envio passa a funcionar sem mexer
-> em nada. Enquanto isso, o que você mandar fica registrado no painel e o
-> atendente vê o aviso na hora.
+> ⛔ **Situação em 09/10/2026 — chave recusada (401):** desde 01/10 o CodeWords
+> recusa a chave `cwk-…` com **401** e **nenhum WhatsApp entra nem sai** até
+> trocar a chave. O painel mostra isso de três jeitos:
+> 1. a **faixa laranja no topo** ("WhatsApp parado: a chave do CodeWords foi
+>    recusada (401). Troque em Configurações › Integrações"), lida de
+>    `vigia_estado` pelo robô vigia (`GET /api/saude`);
+> 2. ao tentar enviar, o aviso diz exatamente isso (não mais "erro genérico");
+> 3. em **Integrações › Chave de API do CodeWords**: botão **Testar chave**
+>    (não gasta cota — só lista as conexões) e campo para **colar a chave nova**.
+>    A troca grava nos **dois** lugares que leem a chave: `codewords_config.api_key`
+>    (este painel) e `agenda_ia_config.cw_api_key` (a Agenda). Se o CodeWords
+>    recusar a nova, nada é salvo. A chave inteira **nunca** volta para o
+>    navegador — só a máscara `••••••••943a`.
 
 **No CodeWords**, mande as mensagens recebidas para o endereço abaixo
 (o mesmo aparece na tela, com botão *Copiar*):
@@ -122,9 +130,34 @@ na internet, ninguém dispara mensagens pelo seu CodeWords nem gasta sua IA.
 Assim que a conversa é aberta, o app mostra, do mesmo cliente:
 - Quanto **já gastou**, quantos **serviços fez**, quantas vezes **faltou**
 - **Próximo horário marcado** (vindo da Agenda)
-- Carro, placa, origem e desde quando é cliente
+- **Revisão**: último serviço concluído e a **próxima revisão prevista**
+  (prazo das regras do Comunicar casando com o nome do serviço; sem regra, 6 meses).
+  Atrasou? Aparece em vermelho na ficha e no topo do chat.
+- Carro, placa, origem, desde quando é cliente e **aniversário** (dá para editar;
+  "só dia e mês" grava o ano 1904, o combinado do ecossistema)
+- Chave **"Aceita mensagens automáticas"**: desligada, mostra desde quando e o
+  motivo — e o Comunicar pula esse cliente
+- **Mensagens automáticas**: as 5 últimas da fila do Comunicar (tipo, situação,
+  data, resposta 👍/👎/🔕) e o link *Abrir no Comunicar*
 - Últimos **leads do CRM** com status e valor
 - Últimos **agendamentos** com consultor e valor
+
+> A parte do Comunicar vem pela rota `GET /api/clientes/:id/ficha` (exige login;
+> o servidor lê `posvenda_envios` e `comunicar_regras_retorno` com a chave de
+> serviço, porque essas tabelas não têm leitura pelo navegador).
+
+### Lista de conversas
+- Busca por **nome, telefone (com ou sem +55) ou placa/carro** (`abc-1d23` acha `ABC1D23`)
+- Filtro **✉ Não lidas** e botão **✉ Não lida** no chat (deixa para depois sem perder)
+- Cada conversa mostra o carro/placa e plaquinhas 🎂 (aniversário hoje) e 🔕 (sem mensagens automáticas)
+- **Rascunho por conversa**: o que você digitou e não enviou volta quando reabre
+- Mensagem nova **não pula a tela** se você estiver lendo lá em cima — aparece "↓ Novas mensagens"
+- Tempo real caiu? Pílula "⟳ Reconectando…" e volta sozinho
+- Atalhos (`/`) já mostram a **prévia com as variáveis trocadas**; novas: `{ultimo_servico}` e `{proxima_revisao}`
+
+### Barra lateral — Ecossistema IndyCar
+Um seletor abre os outros sistemas (Agenda, CRM, Comunicar, Orçador, Site) em
+nova aba; o atual aparece marcado.
 
 > O cliente é reconhecido pelo telefone. `(12) 99999-8888`,
 > `+55 12 99999-8888` e `5512999998888` são a mesma pessoa.
@@ -157,10 +190,12 @@ ANTHROPIC_API_KEY=sua-chave-aqui
 Pegue em: https://console.anthropic.com/settings/keys
 Depois reinicie o servidor.
 
-### 2. Cota do CodeWords (para as mensagens saírem)
+### 2. Chave do CodeWords (para as mensagens saírem)
 O caminho até o WhatsApp **já está pronto e ligado** — entrada pela Edge
-Function, saída pelo fluxo *Carlos*. O que trava hoje é a **cota mensal do
-CodeWords** (2.500/2.500 usadas). Renovando o plano, volta a sair sozinho.
+Function, saída pelo aparelho pareado. O que trava hoje é a **chave recusada
+(401)**: abra **Integrações › Chave de API do CodeWords**, clique em *Testar
+chave* para confirmar, pegue a chave nova no painel do CodeWords e cole em
+*Testar e salvar*. A faixa laranja some sozinha quando o vigia confirmar.
 
 > **WhatsApp Cloud API da Meta:** o cartão existe em *Configurações*, mas
 > continua **não implementado** — é um caminho alternativo, para o caso de
@@ -203,10 +238,32 @@ update public.perfis set papel = 'admin' where email = 'pessoa@exemplo.com';
 
 | Arquivo | O quê |
 |---|---|
-| `server.js` | Entrega a interface e faz a ponte com a Claude |
+| `server.js` | Entrega a interface, faz a ponte com a Claude e as rotas `/api/*` |
+| `lib/comunicar.js` | Regras puras: próxima revisão, máscara/teste da chave, textos de erro, resumo do Comunicar |
+| `test/comunicar.test.js` | Testes dessas regras (`npm test`) |
+| `scripts/mock-server.mjs` | Servidor de MENTIRA (`npm run mock`, porta 3211): a tela real com dados inventados, sem login |
+| `scripts/conferir-ficha-real.mjs` | Conferência só-leitura da ficha contra o banco real (usa o `.env`) |
 | `public/index.html` | Telas (login, conversas, IA, configurações) |
-| `public/styles.css` | Visual IndyCar (preto / vermelho / branco) |
+| `public/styles.css` | Visual IndyCar (preto / vermelho / branco), tema claro e escuro |
 | `public/app.js` | Toda a lógica: login, conversas, tempo real, ficha, IA |
+| `MELHORIAS.md` | Registro numerado do que mudou em cada rodada |
 | `.env` | Configuração (não vai para o Git) |
+
+### Rotas novas (todas exigem login; as de chave exigem admin)
+| Rota | Para quê |
+|---|---|
+| `GET /api/saude` | O que o vigia acusa (`problema`, `desde`, `texto`) — alimenta a faixa do topo |
+| `GET /api/clientes/:id/ficha` | Aniversário, opt-out, último serviço, próxima revisão, 5 últimas mensagens automáticas |
+| `GET /api/codewords/chave` | Máscara da chave e se Atendimento e Agenda estão com a mesma |
+| `POST /api/codewords/testar-chave` | Testa a chave salva (ou uma colada) sem gastar cota |
+| `POST /api/codewords/chave` | Testa e grava a chave nova nas duas tabelas |
+| `GET /api/relatorios` | Ganhou o bloco `comunicar` (enviadas, respondidas, pediram para parar) |
+
+### Testar sem a senha de ninguém
+```bash
+npm test          # regras puras
+npm run mock      # http://localhost:3211 — tela real, dados de mentira, já logado como admin
+                  # /?papel=atendente mostra a visão do atendente; /?saude=ok esconde a faixa
+```
 
 Banco: projeto `indycar-plataforma` no Supabase — o mesmo do CRM e da Agenda.

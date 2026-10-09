@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["-e", "process.env.PORT='3210';require('./server.js')"],
       "port": 3210
+    },
+    {
+      "name": "mock",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/mock-server.mjs"],
+      "port": 3211
     }
   ]
 }

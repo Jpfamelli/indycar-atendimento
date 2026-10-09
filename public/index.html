@@ -111,6 +111,17 @@
     <button type="button" class="tarja-btn" id="tarjaBtn">Reconectar</button>
   </div>
 
+  <!-- Faixa de saúde do ecossistema: o vigia (robô de fora) grava o que está
+       quebrado e aqui vira um aviso discreto com o que fazer. Diferente da
+       tarja vermelha, esta dá para dispensar por uma hora. -->
+  <div class="faixa-saude" id="faixaSaude" hidden role="status" aria-live="polite">
+    <span class="faixa-ico" aria-hidden="true">⚠️</span>
+    <span id="faixaTexto">—</span>
+    <span class="faixa-desde" id="faixaDesde"></span>
+    <button type="button" class="faixa-btn" id="faixaBtn" hidden>Abrir Integrações</button>
+    <button type="button" class="faixa-x" id="faixaFechar" title="Dispensar por uma hora" aria-label="Dispensar por uma hora">×</button>
+  </div>
+
   <!-- Barra lateral -->
   <nav class="sidebar">
     <div class="marca">
@@ -159,17 +170,21 @@
       <span>Configurações</span>
     </button>
 
-    <div class="nav-grupo">Outros sistemas</div>
-    <a class="nav-item nav-externo" id="linkCRM" href="http://localhost:3100" target="_blank" rel="noopener">
-      <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
-      <span>Abrir o CRM</span>
-      <svg class="ico-sai" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M19 14v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
-    </a>
-    <a class="nav-item nav-externo" id="linkAgenda" href="http://localhost:3000" target="_blank" rel="noopener">
-      <svg viewBox="0 0 24 24"><path d="M7 2v3M17 2v3M3 8h18M5 5h14a2 2 0 012 2v13a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" stroke="currentColor" stroke-width="2" fill="none"/></svg>
-      <span>Abrir a Agenda</span>
-      <svg class="ico-sai" viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9 9M19 14v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
-    </a>
+    <div class="nav-grupo">Ecossistema IndyCar</div>
+    <!-- Um seletor só, em vez de um link por sistema: escolhe e abre noutra
+         aba. O sistema atual aparece marcado e não leva a lugar nenhum. -->
+    <label class="eco-seletor" title="Abrir outro sistema da IndyCar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" fill="currentColor"/></svg>
+      <select id="ecoSeletor" aria-label="Ecossistema IndyCar: abrir outro sistema">
+        <option value="https://indycar-agendamentos.onrender.com">Agenda</option>
+        <option value="https://indycar-crm.onrender.com">CRM</option>
+        <option value="https://indycar-atendimento.onrender.com" data-atual="1" selected>● Atendimento (aqui)</option>
+        <option value="https://indycar-posvenda.onrender.com">Comunicar</option>
+        <option value="https://indycar-orcador.netlify.app">Orçador</option>
+        <option value="https://indycar-taubate.netlify.app">Site</option>
+      </select>
+      <svg class="ico-sai" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M21 3l-9 9M19 14v6a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1h6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+    </label>
 
     <div class="sidebar-fim">
       <div class="usuario" id="usuarioBox">
@@ -199,10 +214,14 @@
         <div class="lista-topo">
           <div class="busca">
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            <input id="buscaConversa" placeholder="Buscar cliente ou telefone…" />
+            <input id="buscaConversa" placeholder="Buscar nome, telefone ou placa…"
+                   aria-label="Buscar conversa por nome, telefone ou placa" autocomplete="off" />
           </div>
           <div class="filtros-status">
             <button class="chip ativo" data-status="">Todas</button>
+            <!-- só quem tem mensagem sem ler: filtra na lista carregada -->
+            <button class="chip chip-naolidas" data-status="nao_lidas"
+                    title="Só conversas com mensagem sem ler">✉ Não lidas</button>
             <!-- só quem chegou HOJE: o lead novinho que ninguém pode deixar esfriar -->
             <button class="chip chip-hoje" data-status="hoje"
                     title="Só os leads que chegaram hoje">🆕 Novos hoje <b class="chip-num" id="badgeHoje" hidden>0</b></button>
@@ -239,15 +258,19 @@
         <div class="chat" id="chat" hidden>
           <header class="chat-topo">
             <div class="chat-quem">
-              <button class="chat-voltar" id="btnVoltarLista" title="Voltar para as conversas">‹</button>
+              <button class="chat-voltar" id="btnVoltarLista" title="Voltar para as conversas"
+                      aria-label="Voltar para as conversas">‹</button>
               <span class="avatar" id="chatAvatar">?</span>
               <div>
                 <strong id="chatNome">—</strong>
                 <small id="chatTelefone">—</small>
+                <!-- avisos vindos da ficha: aniversário, não quer mensagens automáticas, revisão -->
+                <div id="chatAvisos" class="chat-avisos" hidden></div>
                 <div id="chatEtapa" class="chat-etapa"></div>
               </div>
             </div>
             <div class="chat-acoes">
+              <button class="btn btn-ghost sm" id="btnNaoLida" title="Marcar como não lida e voltar para a lista">✉ Não lida</button>
               <button class="btn btn-ia sm" id="btnClassificar"
                 title="Deixar a IA dizer em que etapa do funil esta conversa está">
                 <span class="ia-ico">✨</span> Classificar
@@ -284,7 +307,11 @@
             </div>
           </div>
 
-          <div class="mensagens" id="mensagens"></div>
+          <div class="mensagens-wrap">
+            <div class="mensagens" id="mensagens"></div>
+            <!-- chegou mensagem enquanto o atendente lia lá em cima: não pula a tela -->
+            <button type="button" class="pill-novas" id="pillNovas" hidden>↓ Novas mensagens</button>
+          </div>
 
           <footer class="chat-envio">
             <!-- Menu que abre ao digitar "/" -->
@@ -303,14 +330,17 @@
             <input type="file" id="arquivoInput" hidden
                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" />
             <button class="btn sm btn-anexo" id="btnAnexo"
-                    title="Enviar documento ou foto (o texto digitado vira a legenda)">📎</button>
+                    title="Enviar documento ou foto (o texto digitado vira a legenda)"
+                    aria-label="Enviar documento ou foto">📎</button>
             <!-- mensagem de voz: toca para gravar, toca de novo para enviar -->
             <button class="btn sm btn-anexo btn-audio" id="btnAudio"
-                    title="Gravar e enviar áudio para o cliente">🎤</button>
+                    title="Gravar e enviar áudio para o cliente" aria-label="Gravar áudio">🎤</button>
             <span class="audio-status" id="audioStatus" hidden></span>
-            <textarea id="campoMensagem" rows="1"
+            <textarea id="campoMensagem" rows="1" maxlength="4000" aria-label="Mensagem para o cliente"
               placeholder="Escreva a resposta…  (digite / para usar um atalho)"></textarea>
-            <button class="btn btn-primary sm" id="btnEnviar">Enviar</button>
+            <!-- contador: só aparece quando a mensagem fica longa -->
+            <span class="contador" id="contadorChars" hidden aria-live="polite"></span>
+            <button class="btn btn-primary sm" id="btnEnviar" title="Enviar (Enter ou Ctrl+Enter)">Enviar</button>
           </footer>
         </div>
       </div>
@@ -494,10 +524,6 @@
             <label>Service ID do fluxo <small>o código que aparece no link do seu fluxo no CodeWords</small>
               <input name="service_id" placeholder="ex.: 7f3a9c1b-…" autocomplete="off" />
             </label>
-            <label>Chave de API
-              <input name="api_key" type="password" placeholder="cwk-…" autocomplete="off" data-secreto="1" />
-              <small class="mascara" id="maskCW"></small>
-            </label>
             <label>URL de envio <small>deixe em branco — montamos sozinho:
                 https://runtime.codewords.ai/run/&lt;service id&gt;</small>
               <input name="url_envio" placeholder="(automático)" autocomplete="off" />
@@ -516,6 +542,27 @@
               <button type="submit" class="btn btn-primary sm">Salvar</button>
             </div>
           </form>
+
+          <!-- A chave mora aqui, separada do formulário: o teste não gasta cota
+               (só lista as conexões) e a troca grava nos dois lugares que leem
+               a chave — este painel e a Agenda. A chave inteira nunca volta. -->
+          <div class="chave-box" id="chaveBox">
+            <div class="ficha-titulo">Chave de API do CodeWords</div>
+            <div class="chave-estado">
+              <span class="chave-mascara" id="chaveMascara">—</span>
+              <span class="selo mini" id="chaveSelo">—</span>
+              <button type="button" class="btn btn-ghost sm" id="btnTestarChave">Testar chave</button>
+            </div>
+            <p class="chave-resultado" id="chaveResultado" hidden></p>
+            <form id="formChave" class="chave-form" autocomplete="off">
+              <input id="chaveNova" type="password" placeholder="Colar a chave nova (cwk-…)"
+                     autocomplete="new-password" spellcheck="false" aria-label="Chave nova do CodeWords" />
+              <button type="submit" class="btn btn-primary sm" id="btnSalvarChave">Testar e salvar</button>
+            </form>
+            <p class="aviso">Salva nos dois lugares que usam a chave: este painel
+              (<code>codewords_config</code>) e a Agenda (<code>agenda_ia_config</code>).
+              Se o CodeWords recusar a chave nova, nada é gravado.</p>
+          </div>
 
           <div class="ficha-bloco" style="margin-top:18px">
             <div class="ficha-titulo">Fluxos cadastrados</div>
@@ -704,7 +751,9 @@
   </section>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<!-- Tempo real caiu: avisa e tenta voltar sozinho -->
+<div class="pill-realtime" id="pillRealtime" hidden role="status">⟳ Reconectando ao tempo real…</div>
 
 <!-- Menu flutuante para trocar a etapa (plaquinhas e cartões do funil) -->
 <div class="menu-etapas" id="menuEtapas" hidden>

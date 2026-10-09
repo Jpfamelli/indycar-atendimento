@@ -1068,3 +1068,143 @@ select option:checked,select option:hover{
 .tag.esperando{background:rgba(217,119,6,.2);color:var(--amarelo-txt,#fbbf24);font-weight:700}
 .aviso-espera{margin:0 0 10px;padding:11px 13px;border-radius:10px;font-size:.8rem;line-height:1.5;
   background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.32);color:var(--texto)}
+
+/* ============================================================
+   RODADA 09/10/2026 — ficha 360, saúde do ecossistema, chave do
+   CodeWords, busca por placa, rascunho, tempo real, esqueletos.
+   Tudo por var(--...) para valer nos dois temas.
+   ============================================================ */
+
+/* Troca de tema: nenhuma transição roda por um quadro (regra da casa) */
+[data-trocando-tema] *,[data-trocando-tema] *::before,[data-trocando-tema] *::after{transition:none !important}
+
+/* ---------- Faixa de saúde (abaixo da tarja vermelha, quando as duas estão) ---------- */
+.faixa-saude{
+  position:fixed;top:0;left:0;right:0;z-index:890;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:8px 16px;font-size:.86rem;font-weight:500;line-height:1.35;
+  background:linear-gradient(90deg,#b45309,#d97706);color:#fffbeb;
+  box-shadow:0 2px 10px rgba(0,0,0,.25)}
+:root[data-tema="claro"] .faixa-saude{background:linear-gradient(90deg,#f59e0b,#fbbf24);color:#451a03}
+.faixa-ico{flex:none}
+.faixa-desde{opacity:.8;font-size:.78rem;white-space:nowrap}
+.faixa-btn{margin-left:auto;flex:none;border:1px solid currentColor;border-radius:8px;background:transparent;
+  color:inherit;padding:4px 12px;font:inherit;font-size:.8rem;font-weight:600;cursor:pointer}
+.faixa-btn:hover{background:rgba(255,255,255,.18)}
+.faixa-x{flex:none;width:28px;height:28px;border-radius:50%;background:transparent;color:inherit;
+  font-size:1.2rem;line-height:1;opacity:.75;cursor:pointer}
+.faixa-x:hover{opacity:1;background:rgba(255,255,255,.18)}
+.faixa-btn[hidden] + .faixa-x{margin-left:auto}
+@media (max-width:600px){
+  /* no celular a faixa fica enxuta: só o texto e o botão */
+  .faixa-saude{padding:6px 10px;font-size:.78rem;gap:6px}
+  .faixa-ico,.faixa-desde{display:none}
+  .faixa-btn{padding:3px 9px;font-size:.74rem}
+  .faixa-x{width:24px;height:24px;font-size:1.05rem}
+}
+
+/* ---------- Seletor do ecossistema (barra lateral) ---------- */
+.eco-seletor{display:flex;align-items:center;gap:10px;width:100%;padding:8px 12px;border-radius:10px;
+  color:var(--cinza);cursor:pointer;transition:background-color .2s,color .2s;margin-bottom:2px}
+.eco-seletor:hover{background:var(--superficie);color:var(--texto)}
+.eco-seletor > svg{width:19px;height:19px;flex:none}
+.eco-seletor .ico-sai{width:12px;height:12px;opacity:.45;flex:none}
+.eco-seletor select{flex:1;min-width:0;appearance:none;-webkit-appearance:none;background:transparent;border:none;
+  color:inherit;font-family:var(--fonte-cond);font-weight:600;font-size:1.02rem;letter-spacing:.02em;
+  cursor:pointer;padding:3px 0;outline:none}
+.eco-seletor select option{background:var(--pop-solid);color:var(--texto);font-family:var(--fonte);font-size:.95rem}
+.eco-seletor:focus-within{outline:2px solid var(--vermelho);outline-offset:2px}
+@media (max-width:900px){
+  .eco-seletor{width:auto;padding:6px 8px;gap:6px}
+  .eco-seletor select{max-width:120px;font-size:.92rem}
+  .eco-seletor .ico-sai{display:none}
+}
+
+/* ---------- Lista: carro/placa, rascunho, plaquinhas novas ---------- */
+.conversa-carro{color:var(--cinza-2);font-size:.76rem;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.previa-rascunho{color:var(--amarelo-txt);font-style:italic}
+.tag.niver{background:rgba(236,72,153,.18);color:#f9a8d4;font-weight:700}
+:root[data-tema="claro"] .tag.niver{color:#be185d}
+.tag.mudo{background:var(--superficie-2);color:var(--cinza)}
+.tag.atrasada{background:rgba(229,9,20,.18);color:var(--vermelho-txt);font-weight:700}
+.tag.revisao{background:rgba(14,165,233,.16);color:var(--azul-txt)}
+.chip.chip-naolidas.ativo{background:#0ea5e9;border-color:#0ea5e9}
+.chat-avisos{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.chat-avisos:empty{display:none}
+
+/* ---------- Chat: rolagem que não pula, contador, tempo real ---------- */
+.mensagens-wrap{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+.pill-novas{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:5;
+  padding:7px 14px;border-radius:20px;background:var(--vermelho);color:#fff;font-weight:700;font-size:.82rem;
+  box-shadow:0 6px 18px rgba(0,0,0,.35);cursor:pointer;animation:aparece .25s var(--ease)}
+.pill-novas:hover{background:var(--vermelho-esc)}
+.contador{position:absolute;right:112px;bottom:4px;font-size:.68rem;color:var(--cinza-2);pointer-events:none}
+.contador.perto{color:var(--vermelho-txt);font-weight:700}
+.pill-realtime{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:880;
+  padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:600;
+  background:rgba(217,119,6,.95);color:#fffbeb;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+@media (max-width:900px){.contador{right:80px}}
+
+/* ---------- Ficha: selos, revisão, aniversário, mensagens automáticas ---------- */
+.ficha-selos{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin-top:8px}
+.ficha-selos:empty{display:none}
+.ficha-sub{display:block;color:var(--cinza-2);font-size:.72rem;font-weight:400;line-height:1.3}
+.ficha-faltando{color:var(--cinza-2);font-weight:400;font-style:italic}
+.rev-atrasada{color:var(--vermelho-txt)}
+.rev-ok{color:var(--verde-txt)}
+.mini-kpi.alerta{border-color:rgba(229,9,20,.45)}
+.mini-kpi.alerta b{color:var(--vermelho-txt)}
+.ficha-campo{display:flex;flex-direction:column;gap:5px;font-size:.78rem;color:var(--rotulo)}
+.ficha-campo > span{font-family:var(--fonte-cond);font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:.72rem}
+.ficha-campo input[type=date]{flex:1 1 140px;padding:8px 10px;border-radius:9px;background:var(--campo-fundo);
+  border:1px solid var(--linha);color:var(--texto);font-size:.88rem}
+.ficha-campo input[type=date]:focus{outline:none;border-color:var(--vermelho)}
+.switch.mini{font-size:.8rem;gap:6px;flex:1 1 110px;color:var(--cinza)}
+.switch.aceita{padding:9px 11px;border-radius:10px;background:rgba(37,211,102,.1);border:1px solid rgba(37,211,102,.3);
+  font-size:.86rem;color:var(--texto)}
+.switch.aceita.desligado{background:var(--superficie);border-color:var(--linha);color:var(--cinza)}
+.aceita-motivo{display:block;color:var(--cinza-2);font-size:.74rem;margin:6px 2px 0;line-height:1.4}
+.ficha-link{margin-left:auto;font-size:.72rem;letter-spacing:.04em;text-transform:none;font-family:var(--fonte);
+  font-weight:600;color:var(--azul-txt);text-decoration:none}
+.ficha-link:hover{text-decoration:underline}
+.envios{margin-top:10px;display:flex;flex-direction:column;gap:5px}
+.envio-linha{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:7px;
+  padding:7px 9px;border-radius:9px;background:var(--superficie);border:1px solid var(--linha-2);font-size:.8rem}
+.envio-tipo{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.envio-linha small{color:var(--cinza-2);font-size:.72rem;white-space:nowrap}
+.tag.envio-enviado{background:rgba(37,211,102,.16);color:var(--verde-txt)}
+.tag.envio-pendente{background:rgba(245,158,11,.16);color:var(--amarelo-txt)}
+.tag.envio-falhou{background:rgba(229,9,20,.18);color:var(--vermelho-txt)}
+.tag.envio-cancelado,.tag.envio-pulado{background:var(--superficie-2);color:var(--cinza)}
+.resp{font-size:.9rem;line-height:1}
+
+/* ---------- Esqueletos ---------- */
+@keyframes sk-pulsa{0%,100%{opacity:.55}50%{opacity:1}}
+.sk,.sk-linha,.mini-kpi.sk{background:var(--superficie-2);animation:sk-pulsa 1.3s ease-in-out infinite}
+.avatar.sk{color:transparent}
+.avatar.sk.grande{width:58px;height:58px;margin:0 auto}
+.sk-linha{height:12px;border-radius:6px;margin:6px 0}
+.sk-linha.fina{height:9px}
+.mini-kpi.sk{height:56px;border-color:transparent}
+.conversa.esqueleto{pointer-events:none}
+.ficha-esqueleto{padding-top:6px}
+
+/* ---------- Integrações: chave do CodeWords ---------- */
+.chave-box{margin-top:18px;padding:14px;border-radius:11px;background:var(--superficie);border:1px solid var(--linha)}
+.chave-estado{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.chave-mascara{font-family:ui-monospace,Consolas,monospace;font-size:.95rem;letter-spacing:.08em;color:var(--texto-forte)}
+.chave-resultado{margin:10px 0 0;padding:9px 11px;border-radius:9px;font-size:.84rem;line-height:1.45}
+.chave-resultado.ok{background:rgba(37,211,102,.12);color:var(--verde-txt);border:1px solid rgba(37,211,102,.35)}
+.chave-resultado.erro{background:rgba(229,9,20,.12);color:var(--vermelho-txt);border:1px solid rgba(229,9,20,.4)}
+.chave-resultado.aviso{background:rgba(245,158,11,.12);color:var(--amarelo-txt);border:1px solid rgba(245,158,11,.4)}
+.chave-form{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
+.chave-form input{flex:1 1 220px;padding:10px 12px;border-radius:10px;background:var(--campo-fundo);
+  border:1px solid var(--linha);color:var(--texto);font-family:ui-monospace,Consolas,monospace;font-size:.88rem}
+.chave-form input:focus{outline:none;border-color:var(--vermelho);box-shadow:0 0 0 3px rgba(229,9,20,.14)}
+
+/* ---------- Atalhos: variável sem valor na prévia ---------- */
+mark.var-vazia{background:rgba(245,158,11,.25);color:var(--amarelo-txt);border-radius:4px;padding:0 3px}
+
+/* ---------- Relatórios: bloco do Comunicar ---------- */
+.kpis-mini{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.kpis-mini .kpi b{font-size:1.7rem}

@@ -10,6 +10,8 @@
 const http = require('node:http');
 const fs   = require('node:fs');
 const path = require('node:path');
+// Regras puras da ficha, da chave do CodeWords e do Comunicar (testadas em test/)
+const COM  = require('./lib/comunicar.js');
 
 // Configuração via .env (sem depender do Registro do Windows)
 try {
@@ -45,18 +47,23 @@ const MIME = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf
 const json = (res, code, data) => {
   const corpo = JSON.stringify(data);
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8',
-                        'Content-Length': Buffer.byteLength(corpo) });
+                        'Content-Length': Buffer.byteLength(corpo),
+                        // resposta de API nunca fica em cache (conversa muda a cada minuto)
+                        // e o navegador não pode "adivinhar" outro tipo de conteúdo
+                        'Cache-Control': 'no-store',
+                        'X-Content-Type-Options': 'nosniff' });
   res.end(corpo);
 };
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let d = '';
+    let d = '', excedeu = false;
     req.on('data', c => {
+      if (excedeu) return;            // drena o resto sem guardar, para a resposta 413 conseguir sair
       d += c;
-      if (d.length > 1e6) { reject(new Error('payload grande demais')); req.destroy(); }
+      if (d.length > 1e6) { excedeu = true; d = ''; reject(new Error('payload grande demais')); }
     });
-    req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}); } catch { resolve({}); } });
+    req.on('end', () => { if (excedeu) return; try { resolve(d ? JSON.parse(d) : {}); } catch { resolve({}); } });
     req.on('error', reject);
   });
 }
@@ -87,7 +94,8 @@ function serveStatic(res, urlPath) {
   if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end('acesso negado'); }
   fs.readFile(file, (err, buf) => {
     if (err) { res.writeHead(404); return res.end('não encontrado'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+                         'X-Content-Type-Options': 'nosniff' });
     res.end(buf);
   });
 }
@@ -1098,24 +1106,17 @@ async function enviarPeloCodeWords({ telefone, corpo, nome, conversaId }) {
       await registrarEvento(sb, { direcao:'saida', sucesso:false, telefone,
         resumo: corpo.slice(0,120), erro:`HTTP ${resposta.status}` });
 
-      // Erros comuns traduzidos para o atendente entender na hora
-      let erro = `CodeWords respondeu ${resposta.status}`;
-      /* O celular da oficina cai do WhatsApp de tempos em tempos (sessão expira,
-         aparelho sem bateria, "Aparelhos conectados" desconectado na mão). O
-         CodeWords devolve 500 INVALID_WA_CLI, que não diz nada para o atendente
-         e faz parecer defeito do sistema. Aqui vira instrução do que fazer. */
-      if (/INVALID_WA_CLI|whatsapp cli is invalid|not_connected|logged_out/i.test(txt)) {
-        erro = 'O WhatsApp da oficina está desconectado — nenhuma mensagem sai enquanto isso. '
-             + 'Reconecte em Configurações › Conexão do WhatsApp (leva 30 segundos no celular).';
-      } else if (resposta.status === 429 && /limit/i.test(txt)) {
-        erro = 'A cota mensal do CodeWords acabou — a mensagem ficou registrada aqui, '
-             + 'mas não saiu no WhatsApp. Renove o plano ou aguarde virar o mês.';
-      } else if (resposta.status === 401 || resposta.status === 403) {
-        erro = 'O CodeWords recusou a chave de API — confira em Configurações.';
-      } else if (resposta.status === 404) {
-        erro = 'O CodeWords não achou esse fluxo — confira o Service ID em Configurações.';
+      /* Erros comuns traduzidos para o atendente entender na hora (regras em
+         lib/comunicar.js, com teste). O celular da oficina cai do WhatsApp de
+         tempos em tempos e o CodeWords devolve 500 INVALID_WA_CLI; a chave
+         revogada devolve 401 — cada caso vira instrução do que fazer, e o
+         `codigo` deixa a tela reagir (acender a faixa de saúde, por exemplo). */
+      const { erro, codigo } = COM.textoErroEnvio(resposta.status, txt);
+      if (codigo === 'codewords-401') {
+        // guarda o texto claro, não o "HTTP 401" cru — é o que a tela de Integrações mostra
+        await sb.from('codewords_config').update({ ultimo_erro: erro }).eq('id', true);
       }
-      return { ok:false, erro };
+      return { ok:false, erro, codigo, status: resposta.status };
     }
 
     /* HTTP 200 NÃO basta. O fluxo do Carlos devolve 200 com
@@ -1562,6 +1563,14 @@ async function montarRelatorio(de, ate) {
       'conversa_id,tipo,em', q => q.eq('tipo', 'resolvida').order('em'))),
   ]);
 
+  /* Fila do Comunicar (aniversário, pós-venda, retorno…) no período. Só
+     números: quantas saíram, quantas tiveram resposta, quantas pediram para
+     parar. A tabela não tem leitura pelo navegador — por isso vem daqui. */
+  const enviosComunicar = await buscar('as mensagens automáticas', () => paginar(sb, 'posvenda_envios',
+    'id,tipo,status,enviar_em,enviado_em,respondido_em,resposta_tipo,agendou_depois_id',
+    q => q.gte('enviar_em', inicio).lt('enviar_em', fim).order('enviar_em')));
+  const comunicar = COM.resumoComunicar(enviosComunicar);
+
   /* Quando cada conversa foi resolvida (pode ter sido mais de uma vez). */
   const resolucoesPor = new Map();
   for (const e of eventos) {
@@ -1802,8 +1811,182 @@ async function montarRelatorio(de, ate) {
     atendentes: linhasDe(porPessoa),
     equipes: linhasDe(porEquipe),
     mapaCalor: { matriz, total: totalEntradas, pico },
+    comunicar,
     avisos,
   };
+}
+
+/* ============================================================
+   SAÚDE DO ECOSSISTEMA
+   O vigia (robô que roda fora daqui) grava em vigia_estado o que está
+   quebrado: problema='codewords-fora' desde 01/10, por exemplo. A tela
+   lê isto e mostra uma faixa discreta com o que fazer. A tabela não tem
+   leitura pelo navegador, então passa por aqui (com login) e fica em
+   cache 30s para não bater no banco a cada aba aberta.
+   ============================================================ */
+let SAUDE_CACHE = { em: 0, dados: null };
+async function lerSaude() {
+  if (SAUDE_CACHE.dados && Date.now() - SAUDE_CACHE.em < 30_000) return SAUDE_CACHE.dados;
+  const sb = adminSupabase();
+  if (!sb) return { ok: true, problema: null, desde: null, resumo: null, texto: '', semVigia: true };
+  const { data, error } = await sb.from('vigia_estado')
+    .select('problema,desde,checado_em,ultimo_resumo').eq('id', true).maybeSingle();
+  if (error) return { ok: true, problema: null, desde: null, resumo: null, texto: '', semVigia: true };
+  const problema = data?.problema || null;
+  const dados = {
+    ok: !problema,
+    problema,
+    desde: data?.desde || null,
+    checadoEm: data?.checado_em || null,
+    resumo: data?.ultimo_resumo || null,
+    texto: COM.textoDaSaude(problema, data?.ultimo_resumo),
+  };
+  SAUDE_CACHE = { em: Date.now(), dados };
+  return dados;
+}
+
+/* ============================================================
+   FICHA DO CLIENTE (parte que o navegador não enxerga)
+   posvenda_envios e comunicar_regras_retorno não têm política de leitura
+   para o atendente logado; clientes e v_cliente_360 têm, mas vêm juntas
+   aqui para a ficha montar numa ida só.
+   ============================================================ */
+let REGRAS_CACHE = { em: 0, lista: [] };
+async function regrasDeRetorno(sb) {
+  if (Date.now() - REGRAS_CACHE.em < 5 * 60_000) return REGRAS_CACHE.lista;
+  try {
+    const { data } = await sb.from('comunicar_regras_retorno')
+      .select('id,rotulo,palavras,meses,ativo,ordem').eq('ativo', true)
+      .order('ordem', { ascending: true, nullsFirst: false });
+    REGRAS_CACHE = { em: Date.now(), lista: data || [] };
+  } catch { /* tabela ainda não existe: fica o padrão de 6 meses */ }
+  return REGRAS_CACHE.lista;
+}
+
+async function fichaDoCliente(clienteId) {
+  const sb = adminSupabase();
+  if (!sb) return { ok: false, erro: 'Servidor sem SUPABASE_SERVICE_ROLE_KEY — a ficha completa não carrega.' };
+
+  const { data: cliente, error } = await sb.from('clientes')
+    .select('id,nome,telefone,telefone_e164,carro_modelo,placa,nascimento,aceita_mensagens,aceita_mensagens_em,aceita_mensagens_motivo')
+    .eq('id', clienteId).maybeSingle();
+  if (error) return { ok: false, erro: error.message };
+  if (!cliente) return { ok: false, erro: 'Cliente não encontrado.' };
+
+  const telefones = COM.variantesDoTelefone(cliente.telefone_e164 || cliente.telefone);
+  const [c360, ultimo, regras, envios] = await Promise.all([
+    sb.from('v_cliente_360').select('total_gasto,servicos_feitos,faltas,total_leads,ultimo_servico_em,proximo_horario')
+      .eq('id', clienteId).maybeSingle(),
+    sb.from('agendamentos').select('id,servico,inicio_em,valor,consultor_id')
+      .eq('cliente_id', clienteId).eq('status', 'concluido')
+      .order('inicio_em', { ascending: false }).limit(1).maybeSingle(),
+    regrasDeRetorno(sb),
+    (async () => {
+      // pela ligação direta OU pelo telefone (fila antiga não tinha cliente_id)
+      const filtro = [`cliente_id.eq.${clienteId}`];
+      if (telefones.length) filtro.push(`telefone.in.(${telefones.map(t => `"${t}"`).join(',')})`);
+      const { data } = await sb.from('posvenda_envios')
+        .select('id,tipo,status,enviar_em,enviado_em,respondido_em,resposta_tipo,agendou_depois_id,erro')
+        .or(filtro.join(','))
+        .order('enviar_em', { ascending: false }).limit(5);
+      return data || [];
+    })(),
+  ]);
+
+  const ultimoServico = ultimo?.data || null;
+  const revisao = ultimoServico
+    ? COM.proximaRevisao({ servico: ultimoServico.servico, concluidoEm: ultimoServico.inicio_em, regras })
+    : null;
+
+  return {
+    ok: true,
+    cliente: {
+      id: cliente.id, nome: cliente.nome, nascimento: cliente.nascimento,
+      aceita_mensagens: cliente.aceita_mensagens !== false,
+      aceita_mensagens_em: cliente.aceita_mensagens_em, aceita_mensagens_motivo: cliente.aceita_mensagens_motivo,
+    },
+    resumo: c360?.data || {},
+    ultimoServico,
+    revisao,
+    envios: envios.map(e => ({ ...e, rotulo: COM.ROTULO_TIPO[e.tipo] || e.tipo || 'Mensagem' })),
+    comunicarUrl: 'https://indycar-posvenda.onrender.com',
+  };
+}
+
+/* ============================================================
+   CHAVE DO CODEWORDS
+   Teste sem gastar cota: GET .../connections com a chave crua. Troca grava
+   nas DUAS tabelas que leem a chave (este painel lê codewords_config; a
+   Agenda lê agenda_ia_config.cw_api_key). A chave inteira nunca volta ao
+   navegador — só a máscara.
+   ============================================================ */
+async function testarChaveCodeWords(chave) {
+  const sb = adminSupabase();
+  if (!sb) return { ok: false, resultado: 'outro', mensagem: 'Servidor sem SUPABASE_SERVICE_ROLE_KEY.' };
+  const { data: cfg } = await sb.from('codewords_config')
+    .select('api_key,base_url,servico_conexao').eq('id', true).maybeSingle();
+  const k = String(chave || cfg?.api_key || '').trim();
+  if (!k) return { ok: false, resultado: 'outro', mensagem: 'Nenhuma chave salva para testar.' };
+
+  const base = (cfg?.base_url || 'https://runtime.codewords.ai').replace(/\/+$/, '');
+  const servico = cfg?.servico_conexao || 'whatsapp_device_manager';
+  let status = 0, txt = '';
+  try {
+    const r = await fetch(`${base}/run/${servico}/connections`, {
+      headers: { Authorization: k, 'X-API-Key': k, Accept: 'application/json' },
+      signal: AbortSignal.timeout(20_000),
+    });
+    status = r.status;
+    txt = await r.text();
+  } catch (e) {
+    txt = e?.name === 'TimeoutError' ? 'sem resposta em 20s' : (e?.message || '');
+  }
+  const r = COM.classificarTesteChave(status, txt);
+  return { ok: r.resultado === 'ok', resultado: r.resultado, mensagem: r.mensagem, status,
+           mascara: COM.mascararChave(k), salva: !chave };
+}
+
+async function lerChaveMascarada() {
+  const sb = adminSupabase();
+  if (!sb) return { ok: false, erro: 'Servidor sem SUPABASE_SERVICE_ROLE_KEY.' };
+  const [cw, ag] = await Promise.all([
+    sb.from('codewords_config').select('api_key,updated_at,ultimo_erro').eq('id', true).maybeSingle(),
+    sb.from('agenda_ia_config').select('cw_api_key,updated_at').eq('id', true).maybeSingle(),
+  ]);
+  const a = cw?.data?.api_key || '', b = ag?.data?.cw_api_key || '';
+  return {
+    ok: true,
+    mascara: COM.mascararChave(a),
+    mascaraAgenda: COM.mascararChave(b),
+    iguais: !!a && a === b,
+    atualizadoEm: cw?.data?.updated_at || null,
+    ultimoErro: cw?.data?.ultimo_erro || null,
+  };
+}
+
+async function salvarChaveCodeWords(chave, { testar = true } = {}) {
+  const sb = adminSupabase();
+  if (!sb) return { ok: false, erro: 'Servidor sem SUPABASE_SERVICE_ROLE_KEY.' };
+  const k = String(chave || '').trim();
+  if (!COM.chaveParece(k)) {
+    return { ok: false, erro: 'Isso não parece uma chave do CodeWords (cole a chave inteira, sem espaços).' };
+  }
+  let teste = null;
+  if (testar) {
+    teste = await testarChaveCodeWords(k);
+    if (teste.resultado === 'recusada') {
+      return { ok: false, erro: 'O CodeWords recusou essa chave (401) — nada foi salvo. Confira se copiou a chave nova inteira.', teste };
+    }
+  }
+  const agora = new Date().toISOString();
+  const r1 = await sb.from('codewords_config').upsert({ id: true, api_key: k, ultimo_erro: null, updated_at: agora });
+  if (r1.error) return { ok: false, erro: `Não consegui gravar em codewords_config: ${r1.error.message}` };
+  const r2 = await sb.from('agenda_ia_config').upsert({ id: true, cw_api_key: k, updated_at: agora });
+  const avisos = [];
+  if (r2.error) avisos.push(`Gravou aqui, mas não na Agenda (agenda_ia_config): ${r2.error.message}`);
+  SAUDE_CACHE = { em: 0, dados: null };   // a faixa de saúde deve reavaliar logo
+  return { ok: true, mascara: COM.mascararChave(k), salvoEm: ['codewords_config', ...(r2.error ? [] : ['agenda_ia_config'])],
+           teste, avisos };
 }
 
 /* ------------------------------------------------------------
@@ -2510,6 +2693,60 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ---- Teste da conexão com o CodeWords ----
+    // ---- Saúde do ecossistema (vigia): a faixa do topo lê daqui ----
+    if (pathname === '/api/saude' && req.method === 'GET') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      return json(res, 200, await lerSaude());
+    }
+
+    // ---- Ficha do cliente: a parte que o navegador não enxerga (Comunicar) ----
+    {
+      const m = /^\/api\/clientes\/([^/]+)\/ficha$/.exec(pathname);
+      if (m && req.method === 'GET') {
+        const quem = await usuarioLogado(req);
+        if (!quem) return json(res, 401, { erro: 'Faça login para ver a ficha.' });
+        const id = decodeURIComponent(m[1]);
+        if (!COM.ehUuid(id)) return json(res, 400, { erro: 'id de cliente inválido' });
+        if (!dentroDoLimite(`ficha:${quem.id}`, 120, 60_000)) {
+          return json(res, 429, { erro: 'Muitas fichas seguidas. Espere um minuto.' });
+        }
+        const r = await fichaDoCliente(id);
+        return json(res, r.ok ? 200 : (r.erro === 'Cliente não encontrado.' ? 404 : 503), r);
+      }
+    }
+
+    // ---- Chave do CodeWords: máscara, teste sem gastar cota e troca ----
+    if (pathname === '/api/codewords/chave' && req.method === 'GET') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') return json(res, 403, { erro: 'Só o administrador vê a chave.' });
+      const r = await lerChaveMascarada();
+      return json(res, r.ok ? 200 : 503, r);
+    }
+    if (pathname === '/api/codewords/testar-chave' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') return json(res, 403, { erro: 'Só o administrador testa a chave.' });
+      if (!dentroDoLimite(`chave:${quem.id}`, 10, 60_000)) {
+        return json(res, 429, { erro: 'Muitos testes seguidos. Espere um minuto.' });
+      }
+      const bruto = await readBody(req);
+      const r = await testarChaveCodeWords(texto1(bruto.chave, 300));
+      return json(res, 200, r);
+    }
+    if (pathname === '/api/codewords/chave' && req.method === 'POST') {
+      const quem = await usuarioLogado(req);
+      if (!quem) return json(res, 401, { erro: 'Faça login.' });
+      if (quem.papel !== 'admin') return json(res, 403, { erro: 'Só o administrador troca a chave.' });
+      if (!dentroDoLimite(`chave:${quem.id}`, 10, 60_000)) {
+        return json(res, 429, { erro: 'Muitas trocas seguidas. Espere um minuto.' });
+      }
+      const bruto = await readBody(req);
+      const r = await salvarChaveCodeWords(texto1(bruto.chave, 300), { testar: bruto.testar !== false });
+      return json(res, r.ok ? 200 : 400, r);
+    }
+
     if (pathname === '/api/codewords/testar' && req.method === 'POST') {
       // Manda WhatsApp de verdade e gasta cota: só admin, e só para um
       // número fixo (senão viraria uma máquina de spam).
@@ -2567,11 +2804,18 @@ const server = http.createServer(async (req, res) => {
 
     serveStatic(res, pathname);
   } catch (err) {
+    // corpo acima do limite não é defeito do servidor: é 413, com JSON legível
+    if (/grande demais/i.test(err?.message || '')) {
+      return json(res, 413, { erro: 'Conteúdo grande demais para esta rota.' });
+    }
     json(res, 500, { erro: err.message || 'erro interno' });
   }
 });
 
-server.listen(PORT, HOST, () => {
+/* Com SO_FUNCOES=1 o arquivo só exporta as funções (para scripts de conferência
+   contra o banco real, sem abrir porta). Em produção nada muda: `node server.js`. */
+module.exports = { lerSaude, fichaDoCliente, testarChaveCodeWords, lerChaveMascarada, salvarChaveCodeWords, server };
+if (process.env.SO_FUNCOES !== '1') server.listen(PORT, HOST, () => {
   console.log(`\n💬 IndyCar Atendimento em http://localhost:${PORT}`);
   console.log(SUPABASE_URL && SUPABASE_ANON_KEY
     ? '   🗄️  Supabase conectado'
