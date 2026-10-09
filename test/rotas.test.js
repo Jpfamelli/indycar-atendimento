@@ -168,7 +168,8 @@ test('resumo do dia: só gestor/admin; lista quem está esperando sem IA e o que
     assert.equal(r.j.resumo_geral, 'Dia calmo.');
     assert.equal(r.j.ia, true);
     const p = s.ia.chamadas[0].params;
-    assert.equal(p.tool_choice.name, 'relatorio_do_dia');
+    assert.equal(p.tool_choice.type, 'auto'); // os modelos 5.5 recusam ferramenta forçada
+    assert.ok(p.tools.some(t => t.name === 'relatorio_do_dia'));
     assert.ok(!p.messages[0].content.includes('R$ 450'), 'sem valores');
     assert.ok(s.sb.db.ia_acoes.some(a => a.tipo === 'resumo_do_dia'));
     const r2 = await s.chamar('POST', '/api/ia/resumo-do-dia', { papel: 'admin' });

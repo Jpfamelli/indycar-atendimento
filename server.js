@@ -315,6 +315,7 @@ Escreva APENAS a próxima mensagem do atendente, pronta para enviar. Sem aspas, 
     const msg = await client.messages.create({
       model: modelo,
       max_tokens: 1500,
+      ...(/sonnet-5-5/.test(String(modelo)) ? { thinking: { type: 'between_tools' } } : {}), 
       system: [{ type: 'text', text: PERSONA, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: prompt }],
     }, { timeout: 60_000 });
@@ -1462,6 +1463,7 @@ Em qual etapa esta conversa está AGORA? Responda só o JSON.`;
     const msg = await client.messages.create({
       model: modelo,
       max_tokens: 600,
+      ...(/sonnet-5-5/.test(String(modelo)) ? { thinking: { type: 'between_tools' } } : {}), 
       system: PERSONA_FUNIL,
       messages: [{ role: 'user', content: prompt }],
     }, { timeout: 45_000 });
