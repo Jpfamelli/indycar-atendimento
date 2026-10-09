@@ -333,3 +333,7 @@ Arquivos: `public/app.js`, `public/styles.css`, `public/index.html` (menos as du
 
 ## Coordenador
 1. Título do copiloto não quebra mais em coluna estreita (cabe numa linha, com reticências).
+
+## Coordenador (fim da rodada 2)
+2. Gatilho `at_origem_pelo_site`: cliente que chega pelo botão do site ("(site/<serviço>)" no texto) tem o lead marcado com UTM do site e o serviço — o CRM e o Tráfego pago passam a enxergar o site como canal.
+3. Resumo do dia volta a funcionar nos modelos 5.5 (ferramenta em modo auto) e o Sonnet não gasta o teto pensando nas chamadas curtas.
