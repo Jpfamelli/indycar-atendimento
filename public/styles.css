@@ -1208,3 +1208,366 @@ mark.var-vazia{background:rgba(245,158,11,.25);color:var(--amarelo-txt);border-r
 /* ---------- Relatórios: bloco do Comunicar ---------- */
 .kpis-mini{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
 .kpis-mini .kpi b{font-size:1.7rem}
+
+/* ============================================================
+   RODADA 2 (09/10/2026) — a tela do dia a dia
+   Só tokens var(--…): os dois temas acompanham sozinhos.
+   ============================================================ */
+/* tokens que partes antigas usavam sem existir (a lista da equipe ficava sem borda) */
+:root{--borda:var(--linha);--texto-fraco:var(--cinza);
+  --espera-ok:#22c55e;--espera-medio:#f59e0b;--espera-alto:#ef4444}
+:root[data-tema="claro"]{--espera-ok:#15803d;--espera-medio:#b45309;--espera-alto:#c81e1e}
+
+/* pular para o conteúdo (teclado / leitor de tela) */
+.pular{position:fixed;left:12px;top:-60px;z-index:400;padding:10px 16px;border-radius:10px;
+  background:var(--vermelho);color:#fff;font-weight:700;text-decoration:none;transition:top .2s}
+.pular:focus{top:12px}
+
+/* foco visível em tudo que é clicável e não tinha */
+:where(.conversa,.plaquinha,.dono,.btn-icone,.seg,.atalho-op,.atalho-cartao,.funil-cartao,.inline-valor,
+  .msg-copiar,.msg-reenviar,.atalho-fav,.ficha-links a,.ficha-links button,.chip,.msg-link,.fc-mover,
+  .mini-select,.horario):focus-visible{outline:2px solid var(--vermelho);outline-offset:2px}
+
+/* ---------- Botão só de ícone ---------- */
+.btn-icone{display:inline-grid;place-items:center;width:34px;height:34px;flex:none;border-radius:9px;
+  border:1px solid var(--linha);color:var(--cinza);font-size:.95rem;line-height:1;
+  transition:border-color .18s,color .18s,background-color .18s}
+.btn-icone:hover{border-color:var(--vermelho);color:var(--texto-forte)}
+.btn-icone[aria-pressed="true"]{background:rgba(229,9,20,.14);border-color:var(--vermelho);color:var(--vermelho-txt)}
+.btn-copiloto{border-color:rgba(229,9,20,.45);background:rgba(229,9,20,.08)}
+
+/* ---------- Lista: filtros, dono, ordem ---------- */
+.lista-topo .btn-nova{z-index:5}
+.filtros-status .chip{white-space:nowrap}
+.chip-num-azul{background:rgba(14,165,233,.3)}
+.chip.ativo .chip-num{background:rgba(255,255,255,.28)}
+.chip.chip-quente.ativo{background:#ea580c;border-color:#ea580c}
+.lista-ferramentas{display:flex;align-items:center;gap:6px;margin-top:9px}
+.segmento{display:inline-flex;padding:2px;border-radius:10px;border:1px solid var(--linha);background:var(--superficie);flex:none}
+.seg{padding:4px 9px;border-radius:8px;font-family:var(--fonte-cond);font-weight:600;font-size:.8rem;
+  color:var(--cinza);white-space:nowrap;transition:background-color .18s,color .18s}
+.seg:hover{color:var(--texto)}
+.seg.ativo{background:linear-gradient(135deg,var(--vermelho),var(--vermelho-esc));color:#fff}
+.seg-num{display:inline-block;min-width:16px;padding:0 4px;margin-left:3px;border-radius:8px;font-size:.66rem;
+  background:var(--superficie-2);color:inherit;text-align:center}
+.seg.ativo .seg-num{background:rgba(255,255,255,.25)}
+.lista-ferramentas .mini-select{flex:1;min-width:0;padding:6px 8px;font-size:.8rem}
+.lista-ferramentas .btn-icone{width:31px;height:31px}
+
+.lista-rodape{flex:none;padding:6px 14px;border-top:1px solid var(--linha-2);font-size:.72rem;color:var(--cinza-2);
+  min-height:27px}
+.lista-rodape:empty{display:none}
+.lista-mais{padding:12px;text-align:center}
+.lista-conversas:focus{outline:none}
+
+/* linhas: o navegador pula o desenho do que está fora da tela (lista longa leve) */
+.conversa{content-visibility:auto;contain-intrinsic-size:auto 96px}
+.conversa:focus-visible{outline-offset:-2px}
+.conversa.tem-nao-lida .conversa-nome{color:var(--texto-forte)}
+.conversa.tem-nao-lida .conversa-previa{color:var(--texto-suave);font-weight:500}
+.conversa.do-banco{background:var(--superficie)}
+.conversa-tags{flex-wrap:wrap;row-gap:4px}
+.tag.do-banco{background:rgba(14,165,233,.16);color:var(--azul-txt)}
+
+/* selo de espera colorido: verde < 15 min, âmbar < 1 h, vermelho depois */
+.selo-espera{flex:none;font-size:.7rem;font-weight:700;padding:1px 7px;border-radius:999px;white-space:nowrap;
+  color:var(--espera-ok);background:color-mix(in srgb,var(--espera-ok) 15%,transparent)}
+.selo-espera.espera-medio{color:var(--espera-medio);background:color-mix(in srgb,var(--espera-medio) 16%,transparent)}
+.selo-espera.espera-alto{color:var(--espera-alto);background:color-mix(in srgb,var(--espera-alto) 16%,transparent);
+  animation:selo-pulsa 2.4s ease-in-out infinite}
+@keyframes selo-pulsa{50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--espera-alto) 22%,transparent)}}
+
+/* ★ Pegar: um clique e o cliente é seu */
+.dono.pegar{border-style:dashed;border-color:var(--vermelho);background:transparent;color:var(--vermelho-txt);
+  text-transform:none;letter-spacing:0}
+.dono.pegar:hover{background:rgba(229,9,20,.12)}
+
+/* estado vazio com cara de tela, não de erro */
+.estado-vazio{display:flex;flex-direction:column;align-items:center;gap:10px}
+.estado-vazio p{max-width:280px;line-height:1.5}
+.vazio-ico{font-size:2rem;opacity:.7}
+
+/* ---------- Topo do chat ---------- */
+.chat-linha-tags{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:5px}
+.chat-linha-tags .chat-etapa{margin-top:0}
+.chat-dono:empty{display:none}
+#chatTelefone{cursor:copy}
+#chatTelefone:hover{color:var(--texto)}
+
+/* busca dentro da conversa */
+.busca-msg{display:flex;align-items:center;gap:6px;padding:8px 18px;border-bottom:1px solid var(--linha);
+  background:var(--grafite);flex:none}
+.busca-msg input{flex:1;min-width:0;padding:8px 12px;border-radius:9px;background:var(--campo-fundo);
+  border:1px solid var(--linha);color:var(--texto-forte);font-size:.9rem}
+.busca-msg input:focus{outline:none;border-color:var(--vermelho)}
+.busca-msg-conta{font-size:.78rem;color:var(--cinza);min-width:74px;text-align:right;white-space:nowrap}
+.busca-msg .btn-icone{width:30px;height:30px}
+mark.achado{background:rgba(245,158,11,.35);color:inherit;border-radius:3px;padding:0 1px}
+mark.achado.atual{background:#f59e0b;color:#111;box-shadow:0 0 0 2px rgba(245,158,11,.45)}
+
+/* ---------- Mensagens ---------- */
+.msg-texto{white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.seguida{margin-top:-6px}
+.msg.entrada.seguida{border-top-left-radius:6px}
+.msg.saida.seguida{border-top-right-radius:6px}
+.msg-link{color:inherit;text-decoration:underline;text-underline-offset:2px;word-break:break-all}
+.msg.entrada .msg-link{color:var(--azul-txt)}
+.msg-hora{display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap}
+.msg-st{font-size:.72rem;font-weight:700;opacity:.95}
+.st-ok{color:#bbf7d0}
+.st-sem{opacity:.6}
+.st-fila{color:#fde68a}
+.st-falhou{color:#fecaca}
+.msg.falhou{background:linear-gradient(135deg,#7f1d1d,#5b1414);outline:1px dashed #fca5a5;outline-offset:2px}
+.msg.local{opacity:.88}
+.msg-reenviar{padding:2px 9px;border-radius:999px;background:#fff;color:#7f1d1d;font-size:.7rem;font-weight:800}
+.msg-reenviar:hover{background:#fee2e2}
+.msg-copiar{position:absolute;top:6px;right:-34px;width:26px;height:26px;border-radius:7px;font-size:.8rem;
+  color:var(--cinza);background:var(--carta);border:1px solid var(--linha);opacity:0;transition:opacity .15s}
+.msg.saida .msg-copiar{right:auto;left:-34px}
+.msg:hover .msg-copiar,.msg-copiar:focus-visible{opacity:1}
+.msg-sk{min-width:140px;background:var(--carta) !important;border:1px solid var(--linha);box-shadow:none}
+.msgs-anteriores{align-self:center}
+.naolidas-sep{align-self:stretch;display:flex;align-items:center;gap:10px;color:var(--vermelho-txt);
+  font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin:4px 0}
+.naolidas-sep::before,.naolidas-sep::after{content:'';flex:1;height:1px;background:rgba(229,9,20,.45)}
+
+/* arrastar arquivo para o chat */
+.soltar-aqui{position:absolute;inset:10px;z-index:20;display:grid;place-items:center;border-radius:16px;
+  border:2px dashed var(--vermelho);background:color-mix(in srgb,var(--preto) 82%,transparent);
+  pointer-events:none;font-family:var(--fonte-cond);font-weight:700;font-size:1.4rem;color:var(--texto-forte)}
+
+/* ---------- Ficha ---------- */
+@media (min-width:1181px){.col-ficha{position:relative}}   /* no celular/tablet ela é gaveta fixa */
+.ficha-fechar{display:none;position:absolute;top:10px;right:10px;width:32px;height:32px;border-radius:50%;
+  background:var(--superficie-2);color:var(--cinza);font-size:1.2rem;z-index:2}
+#copilotoSlot:not(:empty){margin-bottom:16px}
+#copilotoSlot:focus{outline:none}
+.ficha-links{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:12px}
+.ficha-links a,.ficha-links button{padding:4px 10px;border-radius:999px;border:1px solid var(--linha);
+  font-size:.76rem;font-weight:600;color:var(--texto-suave);text-decoration:none;background:var(--superficie)}
+.ficha-links a:hover,.ficha-links button:hover{border-color:var(--vermelho);color:var(--texto-forte)}
+.inline-valor{display:inline-flex;align-items:center;gap:6px;max-width:62%;padding:1px 4px;border-radius:6px;
+  font-weight:700;text-align:right;color:var(--texto);overflow:hidden;text-overflow:ellipsis}
+.inline-valor i{font-style:normal;font-size:.75rem;color:var(--cinza-2);opacity:0;transition:opacity .15s}
+.inline-valor:hover{background:var(--superficie-2)}
+.inline-valor:hover i,.inline-valor:focus-visible i{opacity:1}
+.inline-input{width:62%;padding:4px 8px;border-radius:7px;border:1px solid var(--vermelho);
+  background:var(--campo-fundo);color:var(--texto-forte);font-size:.87rem;text-align:right}
+.inline-input:focus{outline:none;box-shadow:0 0 0 3px rgba(229,9,20,.14)}
+
+/* ---------- Agendar: horários livres ---------- */
+.horarios-sugeridos{margin-bottom:12px}
+.horarios-titulo{display:block;font-family:var(--fonte-cond);font-weight:700;font-size:.78rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--cinza-2);margin-bottom:6px}
+.horarios-lista{display:flex;flex-wrap:wrap;gap:6px}
+.chip.horario.sugerido{border-color:rgba(229,9,20,.5);color:var(--vermelho-txt)}
+.chip.horario.ativo{color:#fff}
+.aviso-agenda{color:var(--amarelo-txt)}
+
+/* ---------- Prévia do anexo ---------- */
+.modal-anexo{max-width:460px}
+.anexo-previa{margin-bottom:14px;text-align:center}
+.anexo-previa img{display:block;max-width:100%;max-height:300px;margin:0 auto 6px;border-radius:12px;
+  border:1px solid var(--linha);object-fit:contain;background:var(--superficie)}
+.anexo-previa small{color:var(--cinza-2);font-size:.78rem}
+.anexo-doc{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;border:1px solid var(--linha);
+  background:var(--superficie);text-align:left}
+.anexo-doc span{font-size:2rem}
+.anexo-doc b{display:block;overflow-wrap:anywhere}
+.anexo-doc small{display:block}
+
+/* ---------- Atalhos de teclado ---------- */
+.modal-ajuda{max-width:560px;max-height:86vh;overflow-y:auto}
+.teclas{display:grid;grid-template-columns:auto 1fr;gap:9px 16px;align-items:center;font-size:.9rem}
+.teclas dt{white-space:nowrap}
+.teclas dd{color:var(--texto-suave)}
+kbd{display:inline-block;padding:2px 7px;border-radius:6px;border:1px solid var(--linha);border-bottom-width:2px;
+  background:var(--superficie);font-family:ui-monospace,monospace;font-size:.78rem;color:var(--texto-forte)}
+
+/* ---------- Respostas rápidas ---------- */
+.atalho-op{align-items:center}
+.atalho-fav{flex:none;width:28px;height:28px;border-radius:7px;color:var(--cinza-2);font-size:1rem}
+.atalho-fav:hover{background:var(--superficie-2)}
+.atalho-fav.ligado{color:#f59e0b}
+.atalho-usos{font-weight:500;color:var(--cinza-2);font-size:.7rem}
+.ac-topo{align-items:center}
+.ac-topo .atalho-fav{margin-left:auto}
+.ac-top{color:var(--amarelo-txt);font-weight:700}
+.atalho-cartao:focus-visible{outline-offset:2px}
+
+/* ---------- Funil ---------- */
+.funil-ferramentas{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.funil-ferramentas input[type=search]{padding:8px 12px;border-radius:9px;background:var(--campo-fundo);
+  border:1px solid var(--linha);color:var(--texto-forte);min-width:220px}
+.funil-ferramentas input[type=search]:focus{outline:none;border-color:var(--vermelho)}
+.fc-dono{flex:none;font-size:.66rem;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:auto;
+  color:var(--dn-cor);border:1px solid var(--dn-cor);text-transform:uppercase;font-family:var(--fonte-cond)}
+.funil-cartao{touch-action:pan-x pan-y;-webkit-user-select:none;user-select:none}
+.fantasma-toque{position:fixed;z-index:300;pointer-events:none;opacity:.92;transform:rotate(2deg) scale(1.03);
+  box-shadow:var(--sombra-pop);background:var(--carta)}
+.sk-coluna{min-height:240px}
+.sk-cartao{pointer-events:none;min-height:70px}
+.funil-coluna.sobre{outline:2px dashed var(--col-cor,var(--vermelho));outline-offset:-4px}
+
+/* ---------- Relatórios ---------- */
+.sk-kpi{min-height:112px}
+.sk-linha.grossa{height:26px;margin:10px 0}
+.sk-bloco{min-height:240px;margin-top:18px}
+.sk-grafico{height:170px;margin-top:16px;border-radius:12px;background:var(--superficie-2);animation:sk-pulsa 1.3s ease-in-out infinite}
+.kpi .delta{font-weight:700;font-size:.74rem;margin-top:6px}
+.kpi .delta.bom{color:var(--verde-txt)}
+.kpi .delta.ruim{color:var(--vermelho-txt)}
+.kpi .delta.neutro{color:var(--cinza-2)}
+
+/* ---------- Equipe ---------- */
+.equipe-carga{display:block;font-size:.76rem;color:var(--cinza);margin-top:2px}
+.equipe-carga:empty{display:none}
+.equipe-carga b{color:var(--texto-forte)}
+.equipe-carga .carga-alerta{color:var(--amarelo-txt)}
+.carga-zero{color:var(--cinza-2)}
+
+/* ---------- Sem internet ---------- */
+.faixa-offline{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:150;display:flex;
+  align-items:center;gap:9px;max-width:min(92vw,560px);padding:10px 16px;border-radius:12px;
+  background:#1f2937;color:#f9fafb;border:1px solid #374151;box-shadow:var(--sombra-pop);font-size:.86rem}
+.faixa-offline.na-fila{background:#14532d;border-color:#166534}
+
+/* ---------- Modo foco ---------- */
+@media (min-width:901px){
+  .app.modo-foco .sidebar{display:none}
+  .app.modo-foco .conversas-layout{grid-template-columns:0 minmax(0,1fr) 300px}
+  .app.modo-foco .conversas-layout.ficha-fechada{grid-template-columns:0 minmax(0,1fr)}
+  .app.modo-foco .col-lista{visibility:hidden;border:none;overflow:hidden}
+}
+
+/* ---------- Gaveta da ficha (celular/tablet) ---------- */
+@media (max-width:1180px){
+  .col-ficha .ficha-fechar{display:grid;place-items:center}
+  .col-ficha{width:min(340px,92vw);padding-top:50px}
+  .col-ficha.aberta{box-shadow:-14px 0 40px rgba(0,0,0,.45),0 0 0 100vmax rgba(0,0,0,.35)}
+}
+
+/* ---------- Celular ---------- */
+@media (max-width:900px){
+  /* chips numa linha só, rolando para o lado (antes empilhavam 4 linhas) */
+  #aba-conversas .filtros-status{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin-right:-14px;
+    padding-right:14px;scrollbar-width:none}
+  #aba-conversas .filtros-status::-webkit-scrollbar{display:none}
+  .lista-topo{padding:12px 12px 10px}
+  .busca input{padding-right:84px}
+  /* topo do chat enxuto: o resto vai para o "⋯" */
+  .chat-topo{padding:9px 10px;gap:6px}
+  .chat-acoes{gap:5px;flex:1 1 100%;justify-content:flex-start}
+  .chat-acoes .btn.sm{padding:7px 10px;font-size:.82rem}
+  .btn-icone{width:36px;height:36px}
+  #btnFoco{display:none}
+  .chat-envio{padding:9px 10px;gap:6px}
+  .chat-envio .btn.sm{padding:8px 10px}
+  .rotulo-sugerir{display:none}
+  .mensagens{padding:14px 12px}
+  .msg{max-width:88%}
+  .msg-copiar{display:none}
+  .busca-msg{padding:7px 10px}
+  .funil-ferramentas{width:100%}
+  .funil-ferramentas input[type=search]{flex:1;min-width:0}
+  .teclas{grid-template-columns:1fr;gap:2px 0}
+  .teclas dd{margin-bottom:8px}
+}
+@media (max-width:420px){
+  .lista-ferramentas{flex-wrap:wrap}
+  .lista-ferramentas .mini-select{flex:1 1 120px}
+  .seg{padding:4px 7px}
+}
+@media (hover:none){
+  .inline-valor i{opacity:.7}
+}
+@media (prefers-reduced-motion:reduce){
+  .selo-espera.espera-alto{animation:none}
+}
+
+/* O aviso (toast) nascia em cima do campo de mensagem e dos botões ⚡ 📎 Enviar:
+   quem ia clicar logo depois de uma ação acertava o aviso. Agora fica acima
+   da barra de envio e deixa os cliques passarem. */
+.toast{bottom:96px;pointer-events:none}
+.toast.erro{border-left-color:#ef4444}
+.toast.ok{border-left-color:#22c55e}
+@media (max-width:900px){.toast{bottom:84px}}
+
+/* ---------- "⋯ Mais ações" do topo do chat ---------- */
+.mais-acoes{position:relative}
+.menu-mais{position:absolute;right:0;top:calc(100% + 6px);z-index:45;min-width:236px;display:flex;flex-direction:column;
+  gap:6px;padding:10px;border-radius:13px;border:1px solid var(--linha);
+  background:linear-gradient(165deg,var(--pop-1),var(--pop-2));box-shadow:var(--sombra-pop)}
+.menu-mais .btn{justify-content:flex-start;width:100%;text-transform:none;letter-spacing:.01em}
+.menu-mais-campo{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:.84rem;
+  color:var(--cinza);padding:2px 4px}
+.menu-mais-campo .mini-select{flex:1}
+
+/* ---------- Chips da lista: UMA linha que rola para o lado ----------
+   Com 12 filtros, a quebra em linhas comia metade da coluna. A roda do mouse
+   rola os chips para o lado e o chip ativo sempre aparece. */
+#aba-conversas .filtros-status{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent);
+  padding-right:24px;padding-bottom:2px}
+#aba-conversas .filtros-status::-webkit-scrollbar{display:none}
+
+/* ficha mais larga em tela grande: o copiloto mora no topo dela */
+@media (min-width:1400px){
+  .conversas-layout{grid-template-columns:300px minmax(0,1fr) 330px}
+  .conversas-layout.ficha-fechada{grid-template-columns:300px minmax(0,1fr)}
+}
+
+/* ---------- Celular: topo do chat e barra de envio enxutos ---------- */
+@media (max-width:900px){
+  /* ✨ abre a mesma gaveta (copiloto no topo, ficha embaixo): o "Ficha" sai daqui */
+  #btnPainelCliente,#btnCopiarLink{display:none}
+  .chat-acoes .btn.sm{padding:7px 9px;font-size:.78rem;letter-spacing:.02em}
+  .chat-avisos{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .chat-avisos::-webkit-scrollbar{display:none}
+  .chat-avisos .tag{white-space:nowrap}
+  .chat-quem .avatar{display:none}
+  .mais-acoes{margin-left:auto}
+}
+@media (max-width:600px){
+  /* campo + Enviar na primeira linha; IA, respostas, clipe e microfone embaixo, pequenos */
+  .chat-envio{display:grid;grid-template-columns:auto auto auto auto 1fr auto;
+    grid-template-areas:"campo campo campo campo campo enviar" "sugerir respostas anexo audio status status";
+    gap:6px 6px;align-items:end}
+  #campoMensagem{grid-area:campo;min-width:0}
+  #btnEnviar{grid-area:enviar;align-self:stretch}
+  #btnSugerir{grid-area:sugerir}
+  #btnRespostas{grid-area:respostas}
+  #btnAnexo{grid-area:anexo}
+  #btnAudio{grid-area:audio}
+  #audioStatus{grid-area:status;align-self:center;font-size:.75rem}
+  #btnSugerir,#btnRespostas,#btnAnexo,#btnAudio{padding:6px 10px;font-size:.9rem}
+  .contador{right:12px;bottom:46px}
+}
+@media (max-width:600px){.so-largo{display:none}}
+@media (max-width:1180px){.col-ficha{top:var(--topo-faixas,0px)}}
+
+/* Dono numa linha inteira; ordem e 🔔 na de baixo (cabe na coluna de 288–300 px) */
+.lista-ferramentas{flex-wrap:wrap}
+.lista-ferramentas .segmento{flex:1 1 100%}
+.lista-ferramentas .seg{flex:1}
+
+/* Barra de envio se ajusta à LARGURA DO CHAT (não da tela): com lista e ficha
+   abertas o chat fica estreito e o campo de texto era espremido. */
+.col-chat{container-type:inline-size}
+@container (max-width:760px){
+  .rotulo-sugerir{display:none}
+  .chat-envio .btn-ia{padding:8px 11px}
+}
+@container (max-width:560px){
+  .chat-envio{display:grid;grid-template-columns:auto auto auto auto 1fr auto;
+    grid-template-areas:"campo campo campo campo campo enviar" "sugerir respostas anexo audio status status";
+    gap:6px;align-items:end}
+  #campoMensagem{grid-area:campo;min-width:0}
+  #btnEnviar{grid-area:enviar;align-self:stretch}
+  #btnSugerir{grid-area:sugerir}
+  #btnRespostas{grid-area:respostas}
+  #btnAnexo{grid-area:anexo}
+  #btnAudio{grid-area:audio}
+  #audioStatus{grid-area:status;align-self:center;font-size:.75rem}
+}

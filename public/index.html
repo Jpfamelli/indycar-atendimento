@@ -12,6 +12,8 @@
     (function () {
       try {
         var t = localStorage.getItem('indycar_tema');
+        /* Sem escolha salva: segue o tema do sistema (celular no modo claro abre claro). */
+        if (!t && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) t = 'claro';
         if (t === 'claro') {
           document.documentElement.setAttribute('data-tema', 'claro');
           var m = document.querySelector('meta[name="theme-color"]');
@@ -37,6 +39,7 @@
   <meta name="apple-mobile-web-app-title" content="Atendimento" />
 </head>
 <body>
+<a class="pular" href="#listaConversas">Pular para as conversas</a>
 
 <!-- ============ LOGIN ============ -->
 <div id="telaLogin" class="login-wrap">
@@ -121,6 +124,12 @@
     <span class="faixa-desde" id="faixaDesde"></span>
     <button type="button" class="faixa-btn" id="faixaBtn" hidden>Abrir Integrações</button>
     <button type="button" class="faixa-x" id="faixaFechar" title="Dispensar por uma hora" aria-label="Dispensar por uma hora">×</button>
+  </div>
+
+  <!-- Sem internet no navegador: o que for escrito fica numa fila e sai sozinho ao voltar -->
+  <div class="faixa-offline" id="faixaOffline" hidden role="status" aria-live="polite">
+    <span aria-hidden="true">📡</span>
+    <span id="faixaOfflineTexto">Sem internet. O que você enviar fica na fila e sai sozinho quando a conexão voltar.</span>
   </div>
 
   <!-- Barra lateral -->
@@ -218,11 +227,11 @@
             <input id="buscaConversa" placeholder="Buscar nome, telefone ou placa…"
                    aria-label="Buscar conversa por nome, telefone ou placa" autocomplete="off" />
           </div>
-          <div class="filtros-status">
-            <button class="chip ativo" data-status="">Todas</button>
+          <div class="filtros-status" role="toolbar" aria-label="Filtrar conversas">
+            <button class="chip ativo" data-status="" aria-pressed="true">Todas</button>
             <!-- só quem tem mensagem sem ler: filtra na lista carregada -->
             <button class="chip chip-naolidas" data-status="nao_lidas"
-                    title="Só conversas com mensagem sem ler">✉ Não lidas</button>
+                    title="Só conversas com mensagem sem ler">✉ Não lidas <b class="chip-num chip-num-azul" id="cntNaoLidas" hidden>0</b></button>
             <!-- só quem chegou HOJE: o lead novinho que ninguém pode deixar esfriar -->
             <button class="chip chip-hoje" data-status="hoje"
                     title="Só os leads que chegaram hoje">🆕 Novos hoje <b class="chip-num" id="badgeHoje" hidden>0</b></button>
@@ -240,13 +249,35 @@
                  atendido de verdade. Se o cliente perguntar algo, volta sozinho -->
             <button class="chip chip-disparo" data-status="disparo"
                     title="Mensagens em massa (aniversário, promoções)">📢 Disparos <b class="chip-num" id="badgeDisparos" hidden>0</b></button>
-            <!-- separado dos de status de propósito: filtra por DONO, não por
-                 situação, e os dois se combinam -->
-            <button class="chip chip-minhas" id="btnSoMinhas"
-                    title="Ver só os clientes que são seus">★ Meus</button>
+            <!-- filtros que cruzam com a Agenda, o CRM e o Comunicar: buscam no
+                 banco os clientes certos e trazem as conversas deles -->
+            <button class="chip chip-quente" data-status="quentes"
+                    title="Orçamento na mesa com conversa nos últimos 3 dias, ou esperando consultor">🔥 Quentes</button>
+            <button class="chip" data-status="amanha" title="Clientes com horário marcado para amanhã">📅 Amanhã</button>
+            <button class="chip" data-status="revisao" title="Último serviço há mais de 6 meses e nada marcado">🔧 Revisão vencida</button>
+            <button class="chip" data-status="aniversario" title="Aniversário hoje ou nos próximos 7 dias">🎂 Aniversário</button>
+          </div>
+          <!-- dono e ordem: combinam com qualquer filtro de cima -->
+          <div class="lista-ferramentas">
+            <div class="segmento" role="group" aria-label="De quem é o cliente">
+              <button type="button" class="seg ativo" data-dono-filtro="" aria-pressed="true">Todos</button>
+              <button type="button" class="seg" data-dono-filtro="meus" aria-pressed="false"
+                      title="Só os clientes que são seus">★ Meus <b class="seg-num" id="cntMeus" hidden>0</b></button>
+              <button type="button" class="seg" data-dono-filtro="sem" aria-pressed="false"
+                      title="Ninguém responsável ainda">Sem dono <b class="seg-num" id="cntSemDono" hidden>0</b></button>
+            </div>
+            <select id="ordemLista" class="mini-select" aria-label="Ordenar conversas">
+              <option value="recentes">Mais recentes</option>
+              <option value="espera">Esperando há mais tempo</option>
+              <option value="naolidas">Não lidas primeiro</option>
+            </select>
+            <button type="button" class="btn-icone" id="btnNotificar" aria-pressed="false"
+                    title="Avisar mensagem nova (notificação e som quando a aba estiver em segundo plano)"
+                    aria-label="Avisos de mensagem nova">🔕</button>
           </div>
         </div>
-        <div class="lista-conversas" id="listaConversas"></div>
+        <div class="lista-conversas" id="listaConversas" role="list" aria-label="Conversas" tabindex="-1"></div>
+        <div class="lista-rodape" id="listaRodape" aria-live="polite"></div>
       </div>
 
       <!-- Chat -->
@@ -267,15 +298,22 @@
                 <small id="chatTelefone">—</small>
                 <!-- avisos vindos da ficha: aniversário, não quer mensagens automáticas, revisão -->
                 <div id="chatAvisos" class="chat-avisos" hidden></div>
-                <div id="chatEtapa" class="chat-etapa"></div>
+                <div class="chat-linha-tags">
+                  <div id="chatEtapa" class="chat-etapa"></div>
+                  <div id="chatDono" class="chat-dono"></div>
+                </div>
               </div>
             </div>
-            <div class="chat-acoes">
-              <button class="btn btn-ghost sm" id="btnNaoLida" title="Marcar como não lida e voltar para a lista">✉ Não lida</button>
-              <button class="btn btn-ia sm" id="btnClassificar"
-                title="Deixar a IA dizer em que etapa do funil esta conversa está">
-                <span class="ia-ico">✨</span> Classificar
-              </button>
+            <div class="chat-acoes" id="chatAcoes">
+              <!-- ícones do dia a dia: sempre à vista, inclusive no celular -->
+              <button type="button" class="btn-icone" id="btnBuscarNaConversa" title="Buscar nesta conversa (Alt+F)"
+                      aria-label="Buscar nesta conversa">🔍</button>
+              <button type="button" class="btn-icone" id="btnCopiarLink" title="Copiar o link desta conversa"
+                      aria-label="Copiar o link desta conversa">🔗</button>
+              <button type="button" class="btn-icone" id="btnFoco" title="Modo foco: só o chat e a ficha (Alt+Z)"
+                      aria-label="Modo foco" aria-pressed="false">⛶</button>
+              <button type="button" class="btn-icone btn-copiloto" id="btnCopiloto" title="Copiloto da IA (Alt+I)"
+                      aria-label="Abrir o copiloto da IA">✨</button>
               <button class="btn btn-assumir sm" id="btnAssumir"
                       title="Assumir este atendimento — o Carlos para de responder este cliente">
                 🙋 Assumir
@@ -283,20 +321,43 @@
               <button class="btn btn-agendar sm" id="btnAgendar" title="Agendar este cliente">
                 📅 Agendar
               </button>
-              <select id="chatStatus" class="mini-select" title="Situação da conversa">
-                <option value="aberta">Aberta</option>
-                <option value="pendente">Pendente</option>
-                <option value="resolvida">Resolvida</option>
-              </select>
-              <button class="btn btn-ghost sm" id="btnPainelCliente" title="Mostrar/ocultar ficha">Ficha</button>
-              <!-- Só admin enxerga: apaga histórico de cliente, sem desfazer -->
-              <!-- Só admin enxerga os dois: apagam histórico, sem desfazer -->
-              <button class="btn btn-ghost sm" id="btnSelecionarMsgs" hidden
-                      title="Escolher mensagens para apagar do painel">🗑 Mensagens</button>
-              <button class="btn btn-excluir sm" id="btnExcluirConversa" hidden
-                      title="Excluir esta conversa inteira do painel">🗑 Conversa</button>
+              <button class="btn btn-ghost sm" id="btnPainelCliente" title="Mostrar/ocultar ficha" aria-controls="colFicha">Ficha</button>
+              <!-- o que se usa de vez em quando mora no "⋯" (antes eram 3 linhas de botões) -->
+              <div class="mais-acoes">
+                <button type="button" class="btn-icone btn-mais" id="btnMaisAcoes" aria-expanded="false" aria-haspopup="true"
+                        aria-controls="menuMaisAcoes" title="Mais ações" aria-label="Mais ações">⋯</button>
+                <div class="menu-mais" id="menuMaisAcoes" hidden>
+                  <button class="btn btn-ghost sm" id="btnNaoLida" title="Marcar como não lida e voltar para a lista (Alt+U)">✉ Marcar como não lida</button>
+                  <button class="btn btn-ia sm" id="btnClassificar"
+                    title="Deixar a IA dizer em que etapa do funil esta conversa está">
+                    <span class="ia-ico">✨</span> Classificar etapa com IA
+                  </button>
+                  <label class="menu-mais-campo">Situação
+                    <select id="chatStatus" class="mini-select" title="Situação da conversa" aria-label="Situação da conversa">
+                      <option value="aberta">Aberta</option>
+                      <option value="pendente">Pendente</option>
+                      <option value="resolvida">Resolvida</option>
+                    </select>
+                  </label>
+                  <!-- Só admin enxerga os dois: apagam histórico, sem desfazer -->
+                  <button class="btn btn-ghost sm" id="btnSelecionarMsgs" hidden
+                          title="Escolher mensagens para apagar do painel">🗑 Apagar mensagens</button>
+                  <button class="btn btn-excluir sm" id="btnExcluirConversa" hidden
+                          title="Excluir esta conversa inteira do painel">🗑 Excluir conversa</button>
+                </div>
+              </div>
             </div>
           </header>
+
+          <!-- Busca dentro da conversa: marca os trechos e anda entre eles -->
+          <div class="busca-msg" id="buscaMsgBar" hidden role="search">
+            <input id="buscaMsgCampo" type="search" placeholder="Buscar nesta conversa…" autocomplete="off"
+                   aria-label="Buscar nesta conversa" />
+            <span class="busca-msg-conta" id="buscaMsgConta" aria-live="polite"></span>
+            <button type="button" class="btn-icone" id="buscaMsgAnt" title="Anterior (Shift+Enter)" aria-label="Resultado anterior">↑</button>
+            <button type="button" class="btn-icone" id="buscaMsgProx" title="Próximo (Enter)" aria-label="Próximo resultado">↓</button>
+            <button type="button" class="btn-icone" id="buscaMsgFechar" title="Fechar (Esc)" aria-label="Fechar a busca">×</button>
+          </div>
 
           <!-- Barra do modo "escolher mensagens". Fica entre o cabeçalho e o
                chat para não cobrir mensagem nenhuma. -->
@@ -308,8 +369,12 @@
             </div>
           </div>
 
-          <div class="mensagens-wrap">
-            <div class="mensagens" id="mensagens"></div>
+          <div class="mensagens-wrap" id="mensagensWrap">
+            <div class="mensagens" id="mensagens" role="log" aria-live="polite" aria-label="Mensagens da conversa" tabindex="0"></div>
+            <!-- arrastou um arquivo para cima do chat -->
+            <div class="soltar-aqui" id="soltarAqui" hidden aria-hidden="true">
+              <span>📎 Solte para enviar ao cliente</span>
+            </div>
             <!-- chegou mensagem enquanto o atendente lia lá em cima: não pula a tela -->
             <button type="button" class="pill-novas" id="pillNovas" hidden>↓ Novas mensagens</button>
           </div>
@@ -324,8 +389,11 @@
             </div>
 
             <button class="btn btn-ia sm" id="btnSugerir" title="Sugerir resposta com IA">
-              <span class="ia-ico">✨</span> Sugerir
+              <span class="ia-ico">✨</span> <span class="rotulo-sugerir">Sugerir</span>
             </button>
+            <!-- respostas rápidas sem precisar digitar "/" (favoritas e mais usadas no topo) -->
+            <button class="btn sm btn-anexo" id="btnRespostas" type="button"
+                    title="Respostas rápidas (ou digite / no campo)" aria-label="Respostas rápidas">⚡</button>
             <!-- documento/foto direto pelo WhatsApp da empresa (até 15 MB).
                  O texto do campo vira a legenda do arquivo. -->
             <input type="file" id="arquivoInput" hidden
@@ -338,7 +406,7 @@
                     title="Gravar e enviar áudio para o cliente" aria-label="Gravar áudio">🎤</button>
             <span class="audio-status" id="audioStatus" hidden></span>
             <textarea id="campoMensagem" rows="1" maxlength="4000" aria-label="Mensagem para o cliente"
-              placeholder="Escreva a resposta…  (digite / para usar um atalho)"></textarea>
+              placeholder="Escreva a resposta…  ( / atalhos)"></textarea>
             <!-- contador: só aparece quando a mensagem fica longa -->
             <span class="contador" id="contadorChars" hidden aria-live="polite"></span>
             <button class="btn btn-primary sm" id="btnEnviar" title="Enviar (Enter ou Ctrl+Enter)">Enviar</button>
@@ -347,7 +415,12 @@
       </div>
 
       <!-- Ficha do cliente: a integração com CRM + Agenda -->
-      <aside class="col-ficha" id="colFicha">
+      <aside class="col-ficha" id="colFicha" aria-label="Ficha do cliente">
+        <button type="button" class="ficha-fechar" id="btnFecharFicha" aria-label="Fechar a ficha">×</button>
+        <!-- Copiloto da IA: o public/copiloto.js desenha aqui dentro. Fica FORA
+             do #fichaConteudo de propósito — a ficha é redesenhada a cada carga
+             e o copiloto não pode ser apagado junto. -->
+        <section id="copilotoSlot" aria-label="Copiloto" hidden></section>
         <div class="ficha-vazia" id="fichaVazia"><p>Sem conversa selecionada.</p></div>
         <div id="fichaConteudo" hidden></div>
       </aside>
@@ -361,9 +434,14 @@
         <div>
           <h1>Funil de atendimento</h1>
           <p>Cada coluna é uma etapa. Arraste o cartão para mudar a etapa do cliente —
-             o CRM acompanha sozinho. No celular, toque no cartão para escolher a etapa.</p>
+             o CRM acompanha sozinho. No celular, segure o cartão e arraste; no teclado, ← →.</p>
         </div>
-        <button class="btn btn-ghost sm" id="btnRecarregarFunil">Atualizar</button>
+        <div class="funil-ferramentas">
+          <input id="funilBusca" type="search" placeholder="Filtrar por nome, telefone ou placa…"
+                 aria-label="Filtrar cartões do funil" autocomplete="off" />
+          <label class="switch mini"><input type="checkbox" id="funilSoMeus" /><span>Só meus</span></label>
+          <button class="btn btn-ghost sm" id="btnRecarregarFunil">Atualizar</button>
+        </div>
       </header>
 
       <div id="funilResumo" class="kpis"></div>
@@ -486,6 +564,9 @@
         </div>
         <div class="periodo">
           <div class="chips-periodo" id="relAtalhos">
+            <button class="chip" data-periodo="hoje">Hoje</button>
+            <button class="chip" data-periodo="mes">Este mês</button>
+            <button class="chip" data-periodo="mes-passado">Mês passado</button>
             <button class="chip" data-dias="7">7 dias</button>
             <button class="chip ativo" data-dias="30">30 dias</button>
             <button class="chip" data-dias="90">90 dias</button>
@@ -652,6 +733,20 @@
               </div>
               <p class="form-msg" id="senhaMsg" hidden></p>
             </form>
+          </div>
+
+          <div class="cartao">
+            <h3>Avisos de mensagem nova</h3>
+            <p class="cartao-sub">Só quando o painel está em segundo plano ou em outra conversa — enquanto você
+              atende, nada apita. Vale só para este navegador.</p>
+            <label class="switch"><input type="checkbox" id="cfgNotificacao" /><span>Notificação na tela do computador</span></label>
+            <label class="switch"><input type="checkbox" id="cfgSom" /><span>Som discreto</span></label>
+            <p class="aviso" id="cfgNotificacaoAviso" hidden></p>
+            <div class="int-acoes">
+              <button type="button" class="btn btn-ghost sm" id="btnTestarAviso">Testar aviso</button>
+              <div style="flex:1"></div>
+              <button type="button" class="btn btn-ghost sm" id="btnVerAtalhosTeclado">⌨ Atalhos de teclado</button>
+            </div>
           </div>
         </div>
       </div>
@@ -898,10 +993,16 @@
     <p class="cartao-sub" id="agendarQuem">—</p>
 
     <form id="formAgendar" class="form-vertical">
+      <!-- horários livres que o servidor sugerir (contexto do copiloto); some se não vier nada -->
+      <div class="horarios-sugeridos" id="agendarHorarios" hidden>
+        <span class="horarios-titulo">Horários livres</span>
+        <div class="horarios-lista" id="agendarHorariosLista"></div>
+      </div>
       <div class="linha-2">
         <label>Data<input type="date" name="data" required /></label>
-        <label>Hora<input type="time" name="hora" value="09:00" required /></label>
+        <label>Hora<input type="time" name="hora" value="09:00" min="08:00" max="17:00" step="1800" required /></label>
       </div>
+      <p class="aviso aviso-agenda" id="agendarAvisoData" hidden></p>
       <label>Serviço
         <select name="servico_id" id="agendarServico" required></select>
       </label>
@@ -973,6 +1074,34 @@
         <button type="submit" class="btn btn-primary sm">Salvar atalho</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Prévia do arquivo antes de mandar (clipe, colar imagem ou arrastar) -->
+<div class="modal-bg" id="modalAnexoBg">
+  <div class="modal modal-anexo">
+    <button class="modal-x" data-fechar="modalAnexoBg">×</button>
+    <h3>Enviar para o cliente</h3>
+    <div class="anexo-previa" id="anexoPrevia"></div>
+    <form id="formAnexo" class="form-vertical">
+      <label>Legenda <small>opcional — vai junto com o arquivo</small>
+        <textarea id="anexoLegenda" rows="2" maxlength="1000" placeholder="Ex.: Segue o orçamento, qualquer dúvida é só chamar."></textarea>
+      </label>
+      <div class="int-acoes">
+        <button type="button" class="btn btn-ghost sm" data-fechar="modalAnexoBg">Cancelar</button>
+        <div style="flex:1"></div>
+        <button type="submit" class="btn btn-primary sm" id="btnEnviarAnexo">Enviar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- "?" : atalhos de teclado -->
+<div class="modal-bg" id="modalAjudaBg">
+  <div class="modal modal-ajuda">
+    <button class="modal-x" data-fechar="modalAjudaBg">×</button>
+    <h3>Atalhos de teclado</h3>
+    <dl class="teclas" id="listaTeclas"></dl>
   </div>
 </div>
 

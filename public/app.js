@@ -30,12 +30,18 @@ const dataLonga = iso => !iso ? '' :
   new Date(iso).toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
 
 let toastT;
-function toast(msg) {
+function toast(msg, tipo = '') {
   const t = $('#toast');
-  t.textContent = msg;
+  const texto = String(msg ?? '');
+  t.textContent = texto;
+  // cor da borda pelo tipo (o copiloto manda 'erro'/'ok'); sem tipo, deduz do ⚠️/✅
+  const classe = tipo === 'erro' || /^⚠/.test(texto) ? 'erro' : tipo === 'ok' || /^✅/.test(texto) ? 'ok' : '';
+  t.classList.remove('erro', 'ok');
+  if (classe) t.classList.add(classe);
   t.classList.add('mostra');
   clearTimeout(toastT);
-  toastT = setTimeout(() => t.classList.remove('mostra'), 3600);
+  // texto longo fica mais tempo na tela (dá para ler até o fim)
+  toastT = setTimeout(() => t.classList.remove('mostra'), Math.min(9000, 3200 + texto.length * 35));
 }
 
 /* ---------------- Estado ---------------- */
@@ -244,8 +250,12 @@ async function entrarNoApp(user) {
   // as etapas vêm ANTES das conversas: são elas que desenham as plaquinhas
   await carregarEtapas();
   await carregarConfigFunil();
+  restaurarPreferenciasDaLista();     // filtro, dono e ordem da última vez (ou ?filtro= do link)
   await carregarConversas();
   ligarTempoReal();
+  abrirPeloEndereco();                // ?conversa=<uuid> ou ?tel=<telefone> (links da Agenda, CRM, Comunicar)
+  publicarApiIndyCar();
+  filaOfflineProcessar();
   carregarEquipe();
   carregarWhatsappConfig();
   await carregarApoio();      // serviços e consultores (usados no agendamento)
@@ -322,34 +332,69 @@ function esqueletoConversas(n = 7) {
     </div>`).join('');
 }
 
+/* Caixa de entrada com 2.400+ conversas: carrega de 150 em 150 (rolagem
+   infinita) em vez de cortar em 200 e esconder o resto. Cada carga leva um
+   número de "geração": se outra carga começou depois (filtro trocado no meio,
+   tempo real em rajada), a resposta velha é jogada fora em vez de pintar a
+   lista errada por cima da certa. */
+const PASSO_LISTA = 150;
+let limiteLista = PASSO_LISTA;
+let geracaoLista = 0;
+let temMaisConversas = false;
+let carregandoMais = false;
+
+/** Filtros comuns a toda consulta da lista (tipo, desfecho, dono, aba). */
+function aplicarFiltrosBase(q, { incluirDono = true } = {}) {
+  /* Disparo (aniversário, promoção) tem aba própria: fora dela, some da
+     lista. Sem isso, mandar parabéns para 30 pessoas empurrava para baixo
+     quem está pedindo orçamento. */
+  if (filtroStatus === 'disparo') q = q.eq('tipo', 'disparo');
+  else q = q.eq('tipo', 'atendimento');
+  /* Fechou / não fechou tem aba própria; a fila principal ("Todas") é só
+     quem está EM ANDAMENTO. Cliente encerrado que escrever de novo pedindo
+     algo volta sozinho (gatilho do banco). */
+  if (filtroStatus === 'aguardando') q = q.eq('aguardando_consultor', true);
+  else if (filtroStatus === 'fechou' || filtroStatus === 'nao_fechou') q = q.eq('desfecho', filtroStatus);
+  else if (filtroStatus !== 'disparo') q = q.is('desfecho', null);
+  // agora no banco (antes filtrava só as 200 carregadas e "sumia" gente)
+  if (filtroStatus === 'nao_lidas') q = q.gt('nao_lidas', 0);
+  if (filtroStatus === 'hoje') q = q.gte('created_at', new Date(hojeSP() + 'T00:00:00-03:00').toISOString());
+  if (incluirDono && filtroDono === 'meus' && perfil?.id) q = q.eq('atribuida_a', perfil.id);
+  if (incluirDono && filtroDono === 'sem') q = q.is('atribuida_a', null);
+  return q;
+}
+
 async function carregarConversas() {
+  const minha = ++geracaoLista;
   if (!jaCarregouConversas) $('#listaConversas').innerHTML = esqueletoConversas();
   try {
-    let q = sb.from('conversas')
-      .select('*')
-      .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
-      .limit(200);
-    /* Disparo (aniversário, promoção) tem aba própria: fora dela, some da
-       lista. Sem isso, mandar parabéns para 30 pessoas empurrava para baixo
-       quem está pedindo orçamento. */
-    if (filtroStatus === 'disparo') q = q.eq('tipo', 'disparo');
-    else q = q.eq('tipo', 'atendimento');
-    /* Fechou / não fechou tem aba própria; a fila principal ("Todas") é só
-       quem está EM ANDAMENTO. Cliente encerrado que escrever de novo pedindo
-       algo volta sozinho (gatilho do banco). */
-    if (filtroStatus === 'aguardando') {
-      // fila mais quente: quem a IA passou e ninguém respondeu ainda.
-      // Mais antigo primeiro — é quem está esperando há mais tempo.
-      q = q.eq('aguardando_consultor', true).order('aguardando_desde', { ascending: true });
-    }
-    else if (filtroStatus === 'fechou' || filtroStatus === 'nao_fechou') q = q.eq('desfecho', filtroStatus);
-    else if (filtroStatus !== 'disparo') q = q.is('desfecho', null);
-    // 'hoje', 'agendada' e 'nao_lidas' não são status do banco: filtram depois, na lista
-    if (filtroStatus && !['hoje', 'agendada', 'aguardando', 'disparo', 'fechou', 'nao_fechou', 'nao_lidas'].includes(filtroStatus)) q = q.eq('status', filtroStatus);
+    let q = sb.from('conversas').select('*');
+    // fila de espera: mais antigo primeiro — é quem está esperando há mais tempo
+    if (filtroStatus === 'aguardando') q = q.order('aguardando_desde', { ascending: true });
+    q = aplicarFiltrosBase(q.order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
+      .limit(limiteLista));
 
-    const { data, error } = await q;
+    let data, error;
+    if (FILTROS_ESPECIAIS[filtroStatus]) {
+      // Quentes, Amanhã, Revisão, Aniversário: o banco diz QUEM, a lista traz as conversas
+      ({ data, error } = await FILTROS_ESPECIAIS[filtroStatus](q));
+    } else {
+      ({ data, error } = await q);
+      // "esperando há mais tempo": garante que quem espera entre, mesmo fora da página
+      if (!error && ordemLista === 'espera') {
+        const r2 = await aplicarFiltrosBase(sb.from('conversas').select('*'))
+          .or('nao_lidas.gt.0,aguardando_consultor.eq.true')
+          .order('ultima_mensagem_em', { ascending: true }).limit(200);
+        if (!r2.error) {
+          const ids = new Set((data || []).map(c => c.id));
+          data = [...(data || []), ...(r2.data || []).filter(c => !ids.has(c.id))];
+        }
+      }
+    }
+    if (minha !== geracaoLista) return;      // chegou depois de uma carga mais nova: descarta
     if (error) throw error;
     CONVERSAS = data || [];
+    temMaisConversas = !FILTROS_ESPECIAIS[filtroStatus] && CONVERSAS.length >= limiteLista;
     jaCarregouConversas = true;
     // placa/carro chegam depois e só redesenham se trouxeram algo novo
     carregarInfoClientes().then(trouxe => { if (trouxe) renderConversas(); });
@@ -364,8 +409,17 @@ async function carregarConversas() {
     renderConversas();
     atualizarBadge();
     renderEtapaDoChat();
+    if (conversaAtual) { renderDonoDoChat(); renderBotaoAssumir(); }
   } catch (err) {
-    toast('⚠️ ' + err.message);
+    if (minha !== geracaoLista) return;
+    // primeira carga falhou: em vez do esqueleto eterno, diz o que houve e oferece tentar de novo
+    if (!jaCarregouConversas || !CONVERSAS.length) {
+      $('#listaConversas').innerHTML = `<div class="vazio">⚠️ Não consegui carregar as conversas.<br>
+        <small>${esc(err.message || 'sem resposta do banco')}</small><br><br>
+        <button type="button" class="btn btn-ghost sm" data-acao="recarregar-lista">Tentar de novo</button></div>`;
+    } else toast('⚠️ ' + err.message);
+  } finally {
+    if (minha === geracaoLista) carregandoMais = false;
   }
 }
 
@@ -382,12 +436,14 @@ function conversasFiltradas() {
   if (filtroStatus === 'hoje') base = base.filter(c => chegouHoje(c.created_at));
   // aba "Agendadas" mostra só elas; a fila principal as esconde
   if (filtroStatus === 'agendada') base = base.filter(estaAgendada);
-  else if (!['disparo', 'fechou', 'nao_fechou', 'aguardando', 'nao_lidas'].includes(filtroStatus))
+  else if (!['disparo', 'fechou', 'nao_fechou', 'aguardando', 'nao_lidas', ...Object.keys(FILTROS_ESPECIAIS)].includes(filtroStatus))
     base = base.filter(c => !estaAgendada(c));
   // aba "Não lidas": só quem tem mensagem sem ler, de qualquer etapa
   if (filtroStatus === 'nao_lidas') base = base.filter(c => (c.nao_lidas || 0) > 0);
-  // "só as minhas": o atendente trabalha a fila dele sem o ruído da do outro
-  if (soMinhas && perfil?.id) base = base.filter(c => c.atribuida_a === perfil.id);
+  // dono: "meus" trabalha a própria fila; "sem dono" é quem ninguém pegou ainda
+  if (filtroDono === 'meus' && perfil?.id) base = base.filter(c => c.atribuida_a === perfil.id);
+  if (filtroDono === 'sem') base = base.filter(c => !c.atribuida_a);
+  base = ordenarLista(base);
 
   const t = semAcentoBusca(termoBusca);
   if (!t) return base;
@@ -396,7 +452,7 @@ function conversasFiltradas() {
      "abc-1d23" acha "ABC1D23". */
   const digitos = normalizarDigitos(t);
   const placaBusca = t.replace(/[\s-]/g, '');
-  return base.filter(c => {
+  const locais = base.filter(c => {
     if (semAcentoBusca(c.nome).includes(t)) return true;
     if (digitos.length >= 3) {
       const tel = normalizarDigitos(c.telefone_e164 || c.telefone);
@@ -410,6 +466,13 @@ function conversasFiltradas() {
     if (placaBusca.length >= 3 && placa && placa.includes(placaBusca)) return true;
     return !!info.carro_modelo && semAcentoBusca(info.carro_modelo).includes(t);
   });
+  /* O que a busca no BANCO achou fora das conversas carregadas entra no fim
+     (marcado), para ninguém concluir "não existe" só porque não estava na página. */
+  if (BUSCA_REMOTA.termo === t && BUSCA_REMOTA.lista.length) {
+    const ja = new Set(locais.map(c => c.id));
+    return [...locais, ...BUSCA_REMOTA.lista.filter(c => !ja.has(c.id)).map(c => ({ ...c, _doBanco: true }))];
+  }
+  return locais;
 }
 
 /** Busca sem acento e sem caixa: "jose" acha "José". */
@@ -469,21 +532,69 @@ function telefoneBonito(t) {
 }
 const tituloDaConversa = (c) => c.nome || telefoneBonito(c.telefone);
 
+/** Há quanto tempo o cliente espera resposta — e de que cor pintar o selo.
+    Conta quem a IA passou para consultor (aguardando_desde) e quem mandou
+    mensagem que ninguém leu ainda (nao_lidas). Verde até 15 min, âmbar até
+    1 hora, vermelho depois disso. */
+function esperaDe(c) {
+  if (!c || c.tipo === 'disparo' || c.desfecho) return null;
+  const desde = c.aguardando_consultor ? (c.aguardando_desde || c.ultima_mensagem_em)
+    : (c.nao_lidas > 0 ? c.ultima_mensagem_em : null);
+  if (!desde) return null;
+  const min = Math.max(0, Math.floor((Date.now() - new Date(desde).getTime()) / 60000));
+  if (!Number.isFinite(min)) return null;
+  return { min, desde, nivel: min < 15 ? 'ok' : min < 60 ? 'medio' : 'alto', texto: tempoDeEspera(desde) };
+}
+
+/** Ordem escolhida no seletor (guardada neste navegador). */
+function ordenarLista(lista) {
+  if (ordemLista === 'espera') {
+    return [...lista].sort((a, b) => {
+      const ea = esperaDe(a), eb = esperaDe(b);
+      if (ea && !eb) return -1;
+      if (!ea && eb) return 1;
+      if (ea && eb) return eb.min - ea.min;            // quem espera há mais tempo primeiro
+      return String(b.ultima_mensagem_em || '').localeCompare(String(a.ultima_mensagem_em || ''));
+    });
+  }
+  if (ordemLista === 'naolidas') {
+    return [...lista].sort((a, b) => ((b.nao_lidas > 0) - (a.nao_lidas > 0))
+      || String(b.ultima_mensagem_em || '').localeCompare(String(a.ultima_mensagem_em || '')));
+  }
+  return lista;
+}
+
+const TEXTO_VAZIO_FILTRO = {
+  hoje: 'Nenhum lead novo chegou hoje ainda. 🆕',
+  disparo: 'Nenhuma mensagem em massa por aqui. 📢',
+  aguardando: 'Ninguém esperando resposta de consultor. 👏',
+  agendada: 'Ninguém com horário marcado agora. Quando o Carlos (ou vocês) agendar, o cliente vem para cá sozinho. 📅',
+  fechou: 'Nenhum fechado ainda. Marque <b>Concluído</b> na agenda (ou a plaquinha "Serviço concluído") que o cliente vem para cá sozinho. ✅',
+  nao_fechou: 'Ninguém marcado como "não fechou". ❌',
+  nao_lidas: 'Tudo lido por aqui. ✉',
+  quentes: 'Nenhum orçamento quente agora. Quando alguém pedir preço e conversar nos últimos 3 dias, aparece aqui. 🔥',
+  amanha: 'Ninguém com horário marcado para amanhã. 📅',
+  revisao: 'Nenhum cliente com revisão vencida e sem horário. 🔧',
+  aniversario: 'Nenhum aniversário nos próximos 7 dias. 🎂',
+};
+
+let ultimoHtmlLista = '';
 function renderConversas() {
   const lista = conversasFiltradas();
   const el = $('#listaConversas');
+  atualizarRodapeLista(lista.length);
 
   if (!lista.length) {
-    el.innerHTML = `<div class="vazio">
-      ${filtroStatus === 'hoje' ? 'Nenhum lead novo chegou hoje ainda. 🆕'
-        : filtroStatus === 'disparo' ? 'Nenhuma mensagem em massa por aqui. 📢'
-        : filtroStatus === 'aguardando' ? 'Ninguém esperando resposta de consultor. 👏'
-        : filtroStatus === 'agendada' ? 'Ninguém com horário marcado agora. Quando o Carlos (ou vocês) agendar, o cliente vem para cá sozinho. 📅'
-        : filtroStatus === 'fechou' ? 'Nenhum fechado ainda. Marque <b>Concluído</b> na agenda (ou a plaquinha "Serviço concluído") que o cliente vem para cá sozinho. ✅'
-        : filtroStatus === 'nao_fechou' ? 'Ninguém marcado como "não fechou". ❌'
-        : CONVERSAS.length ? 'Nenhuma conversa com esse filtro.' : 'Nenhuma conversa ainda.'}
-      <br><br><button class="btn btn-ghost sm" id="btnNovaVazio">+ Nova conversa</button></div>`;
-    $('#btnNovaVazio')?.addEventListener('click', abrirModalNova);
+    const html = `<div class="vazio estado-vazio">
+      <span class="vazio-ico" aria-hidden="true">💬</span>
+      <p>${termoBusca.trim()
+        ? (BUSCA_REMOTA.buscando ? 'Procurando no banco inteiro…' : `Nada encontrado para “${esc(termoBusca.trim())}”.`)
+        : filtroDono === 'meus' && !TEXTO_VAZIO_FILTRO[filtroStatus] ? 'Nenhum cliente seu nesta fila. ★'
+        : filtroDono === 'sem' && !TEXTO_VAZIO_FILTRO[filtroStatus] ? 'Todo mundo tem dono. 👏'
+        : TEXTO_VAZIO_FILTRO[filtroStatus]
+          || (CONVERSAS.length ? 'Nenhuma conversa com esse filtro.' : 'Nenhuma conversa ainda.')}</p>
+      <button type="button" class="btn btn-ghost sm" data-acao="nova-conversa">+ Nova conversa</button></div>`;
+    if (html !== ultimoHtmlLista) { el.innerHTML = html; ultimoHtmlLista = html; }
     return;
   }
 
@@ -497,65 +608,78 @@ function renderConversas() {
        nada. Assim que a pessoa perguntar alguma coisa, ela volta sozinha para a fila de atendimento.</div>`
     : '';
 
-  el.innerHTML = aviso + lista.map(c => {
+  /* Foco "itinerante": só UMA linha entra no Tab (a aberta ou a primeira); as
+     setas andam entre elas. Sem isto, 150 conversas = 150 paradas de Tab. */
+  const idFoco = lista.some(c => c.id === conversaAtual?.id) ? conversaAtual.id : lista[0].id;
+  const html = aviso + lista.map(c => {
     const info = CLIENTES_INFO.get(c.cliente_id) || {};
     const carro = [info.carro_modelo, info.placa].filter(Boolean).join(' · ');
     const rascunho = lerRascunho(c.id);
     const dias = diasParaAniversario(info.nascimento);
+    const espera = esperaDe(c);
+    const ativa = conversaAtual?.id === c.id;
+    const titulo = tituloDaConversa(c);
+    const rotuloA11y = `${titulo}${c.nao_lidas > 0 ? `, ${c.nao_lidas} não lida${c.nao_lidas > 1 ? 's' : ''}` : ''}${
+      espera ? `, esperando há ${espera.texto}` : ''}`;
     return `
-    <div class="conversa ${conversaAtual?.id === c.id ? 'ativa' : ''}" data-id="${esc(c.id)}">
-      <span class="avatar">${esc(iniciais(c.nome) || "#")}</span>
+    <div class="conversa${ativa ? ' ativa' : ''}${c.nao_lidas > 0 ? ' tem-nao-lida' : ''}${c._doBanco ? ' do-banco' : ''}"
+         data-id="${esc(c.id)}" role="listitem" tabindex="${c.id === idFoco ? 0 : -1}"
+         ${ativa ? 'aria-current="true"' : ''} aria-label="${esc(rotuloA11y)}">
+      <span class="avatar" aria-hidden="true">${esc(iniciais(c.nome) || "#")}</span>
       <div class="conversa-txt">
         <div class="conversa-topo">
-          <span class="conversa-nome">${esc(tituloDaConversa(c))}</span>
-          <span class="conversa-hora">${esc(horaCurta(c.ultima_mensagem_em))}</span>
+          <span class="conversa-nome">${esc(titulo)}</span>
+          ${espera ? `<span class="selo-espera espera-${espera.nivel}" title="Esperando resposta desde ${esc(
+            new Date(espera.desde).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}">⏱ ${esc(espera.texto)}</span>`
+            : `<span class="conversa-hora">${esc(horaCurta(c.ultima_mensagem_em))}</span>`}
         </div>
         <div class="conversa-previa">${rascunho
           ? `<span class="previa-rascunho">✎ ${esc(rascunho.slice(0, 60))}</span>`
           : esc(c.ultima_previa || 'sem mensagens')}</div>
         ${carro ? `<div class="conversa-carro">🚗 ${esc(carro)}</div>` : ''}
         <div class="conversa-tags">
-          ${dias === 0 ? '<span class="tag niver" title="Aniversário hoje">🎂 hoje</span>' : ''}
+          ${c._doBanco ? '<span class="tag do-banco" title="Achado no banco, fora da lista carregada">🔎 no banco</span>' : ''}
+          ${dias === 0 ? '<span class="tag niver" title="Aniversário hoje">🎂 hoje</span>'
+            : dias !== null && dias <= 7 && filtroStatus === 'aniversario' ? `<span class="tag niver">🎂 em ${dias}d</span>` : ''}
           ${info.aceita_mensagens === false ? '<span class="tag mudo" title="Não quer mensagens automáticas">🔕</span>' : ''}
-          ${c.aguardando_consultor
-            ? `<span class="tag esperando">⏳ espera ${esc(tempoDeEspera(c.aguardando_desde))}</span>` : ''}
+          ${c.aguardando_consultor ? '<span class="tag esperando">⏳ consultor</span>' : ''}
           ${c.tipo === 'disparo' && c.respondeu_disparo_em
             ? '<span class="tag respondeu">💬 respondeu</span>' : ''}
           ${chegouHoje(c.created_at) && c.tipo !== 'disparo' ? '<span class="tag novo-hoje">🆕 novo</span>' : ''}
-          ${donoHtml(c)}
+          ${c.atribuida_a ? donoHtml(c)
+            : `<button type="button" class="dono pegar" data-pegar="${esc(c.id)}"
+                 title="Ninguém responsável — um clique e o cliente é seu">★ Pegar</button>`}
           ${plaquinhaHtml(c)}
-          <span class="tag ${c.status}">${c.status}</span>
+          <span class="tag ${esc(c.status)}">${esc(c.status)}</span>
           ${c.ia_ativa ? '<span class="tag ia">✨ IA</span>' : ''}
-          ${c.nao_lidas > 0 ? `<span class="nao-lidas">${c.nao_lidas}</span>` : ''}
+          ${c.nao_lidas > 0 ? `<span class="nao-lidas" aria-hidden="true">${esc(String(c.nao_lidas))}</span>` : ''}
         </div>
       </div>
-    </div>`; }).join('');
+    </div>`; }).join('')
+    + (temMaisConversas && !termoBusca.trim()
+      ? `<div class="lista-mais" id="listaMais"><button type="button" class="btn btn-ghost sm" data-acao="carregar-mais">
+           ${carregandoMais ? '<span class="girando"></span>Carregando…' : 'Carregar mais conversas'}</button></div>` : '');
 
-  $$('.conversa', el).forEach(d =>
-    d.addEventListener('click', () => abrirConversa(d.dataset.id)));
-
-  /* A plaquinha de dono abre o menu de quem responde — sem abrir a conversa */
-  $$('[data-dono]', el).forEach(b => b.addEventListener('click', ev => {
-    ev.stopPropagation();
-    const conv = CONVERSAS.find(c => c.id === b.dataset.dono);
-    if (conv) abrirMenuDono(b, conv);
-  }));
-
-  /* A plaquinha abre o menu de etapas — e NÃO abre a conversa junto */
-  $$('.plaquinha', el).forEach(p => p.addEventListener('click', ev => {
-    ev.stopPropagation();
-    const id = p.closest('.conversa')?.dataset.id;
-    const conv = CONVERSAS.find(c => c.id === id);
-    if (conv) abrirMenuEtapas(p, conv);
-  }));
+  /* Mesma lista, mesmo HTML: não mexe no DOM (não perde foco, rolagem nem hover). */
+  if (html === ultimoHtmlLista) return;
+  const focoEra = document.activeElement?.closest?.('.conversa')?.dataset.id;
+  el.innerHTML = html;
+  ultimoHtmlLista = html;
+  if (focoEra) el.querySelector(`.conversa[data-id="${CSS.escape(focoEra)}"]`)?.focus({ preventScroll: true });
+  vigiarFimDaLista();
 }
 
 function atualizarBadge() {
-  const total = CONVERSAS.reduce((s, c) => s + (c.nao_lidas || 0), 0);
-  const b = $('#badgeNaoLidas');
-  b.textContent = total;
-  b.hidden = total === 0;
-  atualizarBadgeHoje();
+  /* Enquanto a contagem do banco não chega, mostra a soma do que está na tela;
+     depois quem manda é o banco (conversas com mensagem sem ler, todas). */
+  if (naoLidasBanco === null) {
+    const total = CONVERSAS.filter(c => c.nao_lidas > 0).length;
+    const b = $('#badgeNaoLidas');
+    b.textContent = total;
+    b.hidden = total === 0;
+    atualizarTituloDaAba(total);
+  }
+  agendarContadores();
 }
 
 /* Contador da aba "Novos hoje" — conta no BANCO, não na lista carregada:
@@ -615,42 +739,98 @@ async function atualizarBadgeDisparos() {
   } catch { /* sem contador não é motivo de erro na tela */ }
 }
 
+/* Busca: a lista local responde na hora (com um respiro de 120 ms para não
+   redesenhar a cada tecla) e, se o termo tiver 3+ letras, o BANCO inteiro é
+   consultado em seguida — quem não estava entre as carregadas aparece
+   marcado "🔎 no banco". Resposta velha (o atendente continuou digitando) é
+   descartada. */
+const BUSCA_REMOTA = { termo: '', lista: [], buscando: false, geracao: 0 };
+let buscaTimer = null, buscaRemotaTimer = null;
 $('#buscaConversa').addEventListener('input', e => {
   termoBusca = e.target.value;
-  renderConversas();
+  clearTimeout(buscaTimer);
+  buscaTimer = setTimeout(renderConversas, 120);
+  clearTimeout(buscaRemotaTimer);
+  const t = semAcentoBusca(termoBusca);
+  if (t.length < 3) { BUSCA_REMOTA.termo = ''; BUSCA_REMOTA.lista = []; BUSCA_REMOTA.buscando = false; return; }
+  BUSCA_REMOTA.buscando = true;
+  buscaRemotaTimer = setTimeout(() => buscarNoBanco(t), 400);
 });
 
+async function buscarNoBanco(t) {
+  const minha = ++BUSCA_REMOTA.geracao;
+  try {
+    const digitos = normalizarDigitos(t);
+    const termo = termoBusca.trim().replace(/[%,()*]/g, ' ').slice(0, 60);
+    const ors = [`nome.ilike.%${termo}%`];
+    if (digitos.length >= 4) ors.push(`telefone_e164.ilike.%${digitos}%`, `telefone.ilike.%${digitos}%`);
+    const { data } = await sb.from('conversas').select('*').or(ors.join(','))
+      .order('ultima_mensagem_em', { ascending: false, nullsFirst: false }).limit(30);
+    let achadas = data || [];
+    // placa/carro moram em clientes: acha o cliente e traz a conversa dele
+    const placa = termo.replace(/[\s-]/g, '').toUpperCase();
+    if (placa.length >= 3) {
+      const { data: cli } = await sb.from('clientes').select('id')
+        .or(`placa.ilike.%${placa}%,carro_modelo.ilike.%${termo}%`).limit(30);
+      const ids = (cli || []).map(c => c.id);
+      if (ids.length) {
+        const { data: porCliente } = await sb.from('conversas').select('*').in('cliente_id', ids).limit(30);
+        const ja = new Set(achadas.map(c => c.id));
+        achadas = [...achadas, ...(porCliente || []).filter(c => !ja.has(c.id))];
+      }
+    }
+    if (minha !== BUSCA_REMOTA.geracao || semAcentoBusca(termoBusca) !== t) return;
+    BUSCA_REMOTA.termo = t;
+    BUSCA_REMOTA.lista = achadas;
+  } catch { /* busca extra: se falhar, a local continua valendo */ }
+  finally {
+    if (minha === BUSCA_REMOTA.geracao) { BUSCA_REMOTA.buscando = false; renderConversas(); }
+  }
+}
+
 /* Escopo preso à aba de conversas: os chips das outras abas (categorias
-   dos atalhos, período dos relatórios) não podem mexer neste filtro.
-   O "★ Meus" fica DE FORA: ele é um filtro de dono que se COMBINA com estes —
-   antes ele entrava aqui junto e zerava o filtro de status sem querer. */
-$$('#aba-conversas .filtros-status .chip:not(.chip-minhas)').forEach(c => c.addEventListener('click', () => {
-  $$('#aba-conversas .filtros-status .chip:not(.chip-minhas)').forEach(x => x.classList.toggle('ativo', x === c));
-  filtroStatus = c.dataset.status;
-  carregarConversas();
+   dos atalhos, período dos relatórios) não podem mexer neste filtro. */
+$$('#aba-conversas .filtros-status .chip').forEach(c => c.addEventListener('click', () => {
+  trocarFiltroStatus(c.dataset.status);
 }));
+function trocarFiltroStatus(status) {
+  filtroStatus = status || '';
+  $$('#aba-conversas .filtros-status .chip').forEach(x => {
+    const ativo = (x.dataset.status || '') === filtroStatus;
+    x.classList.toggle('ativo', ativo);
+    x.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+  });
+  limiteLista = PASSO_LISTA;               // filtro novo começa da primeira página
+  $('#listaConversas').scrollTop = 0;
+  carregarConversas();
+}
 
 /* ---------------- Abrir uma conversa ---------------- */
-async function abrirConversa(id) {
-  let conv = CONVERSAS.find(c => c.id === id);
-  // Veio do funil? A lista pode estar filtrada por status ou cortada em 200 —
-  // nesse caso buscamos a conversa direto, em vez de o clique não fazer nada.
+async function abrirConversa(id, { focarCampo = false } = {}) {
+  if (!id) return;
+  let conv = CONVERSAS.find(c => c.id === id) || BUSCA_REMOTA.lista.find(c => c.id === id);
+  // Veio do funil, de um link ou da busca no banco? A lista pode estar filtrada
+  // ou paginada — nesse caso buscamos a conversa direto, em vez de o clique não fazer nada.
   if (!conv) {
     const { data } = await sb.from('conversas').select('*').eq('id', id).maybeSingle();
     if (!data) return toast('⚠️ Não encontrei essa conversa.');
     conv = data;
-    CONVERSAS = [conv, ...CONVERSAS];
   }
+  if (!CONVERSAS.includes(conv)) CONVERSAS = [conv, ...CONVERSAS.filter(c => c.id !== conv.id)];
+  const trocou = conversaAtual?.id !== conv.id;
   conversaAtual = conv;
 
   $('#chatVazio').hidden = true;
   $('#chat').hidden = false;
   $('#chatNome').textContent = tituloDaConversa(conv);
-  $('#chatTelefone').textContent = conv.telefone;
+  $('#chatTelefone').textContent = telefoneBonito(conv.telefone);
+  $('#chatTelefone').title = 'Clique para copiar o telefone';
   $('#chatAvatar').textContent = iniciais(conv.nome) || '#';
   $('#chatStatus').value = conv.status;
   renderEtapaDoChat();
+  renderDonoDoChat();
   renderBotaoAssumir();
+  $('#copilotoSlot').hidden = false;          // contrato com o copiloto: sempre presente com conversa aberta
 
   // No celular, abrir a conversa troca a lista pelo chat
   $('.conversas-layout').classList.add('vendo-chat');
@@ -661,33 +841,41 @@ async function abrirConversa(id) {
     campo.dataset.conversa = conv.id;
     campo.dispatchEvent(new Event('input'));
   }
-  conversaRenderizada = null;          // conversa nova: a rolagem vai para o fim
+  if (trocou) {
+    conversaRenderizada = null;          // conversa nova: a rolagem vai para o fim
+    fecharBuscaNaConversa();
+    MENSAGENS = [];
+    $('#mensagens').innerHTML = esqueletoMensagens();
+    avisarConversaAberta(conv);           // evento indycar:conversa + endereço da página
+  }
   $('#pillNovas').hidden = true;
   $('#chatAvisos').hidden = true;
 
   renderConversas();
+  if (focarCampo) campo.focus();
   await Promise.all([carregarMensagens(), carregarFicha(conv)]);
 
-  // abriu = leu
-  if (conv.nao_lidas > 0) {
-    await sb.from('conversas').update({ nao_lidas: 0 }).eq('id', conv.id);
+  // abriu = leu (pinta na hora; o banco vem atrás)
+  if (conv.nao_lidas > 0 && conversaAtual?.id === conv.id) {
     conv.nao_lidas = 0;
+    ajustarNaoLidas(-1);
     renderConversas();
     atualizarBadge();
+    await sb.from('conversas').update({ nao_lidas: 0 }).eq('id', conv.id);
   }
 
   /* As respostas do Carlos não passam pelo webhook — elas ficam no aparelho.
      Puxa o que falta ao abrir o chat, senão o atendente vê as perguntas do
      cliente e nenhuma resposta, e acha que a IA está muda.
      Sem await de propósito: a conversa já abriu, isto completa depois. */
-    sincronizarConversaAberta(conv.id);
+  sincronizarConversaAberta(conv.id);
 
   /* Enquanto ESTA conversa estiver aberta, busca o que chegou a cada 15s —
      é o que deixa a resposta aparecer quase na hora, sem esperar o relógio
      geral. Aba escondida não busca (economiza chamada à toa). */
   clearInterval(syncAbertaTimer);
   syncAbertaTimer = setInterval(() => {
-    if (!document.hidden && conversaAtual?.id === conv.id) sincronizarConversaAberta(conv.id);
+    if (!document.hidden && navigator.onLine !== false && conversaAtual?.id === conv.id) sincronizarConversaAberta(conv.id);
   }, 15_000);
 }
 
@@ -707,16 +895,123 @@ async function sincronizarConversaAberta(id) {
   } catch { /* sem rede: a sincronização periódica pega depois */ }
 }
 
-async function carregarMensagens() {
+/* Mensagens: as MAIS NOVAS primeiro do banco (300), viradas para a ordem do
+   chat. Antes vinham as 500 mais ANTIGAS — numa conversa longa o fim (o que
+   o cliente acabou de dizer) simplesmente não aparecia. "Carregar anteriores"
+   busca mais 300 para trás sem pular a leitura. */
+const PAGINA_MSGS = 300;
+let limiteMsgs = PAGINA_MSGS;
+let temMsgsAnteriores = false;
+let geracaoMsgs = 0;
+let marcaNaoLidas = { conv: null, n: 0 };     // "— 3 não lidas —" ao abrir
+
+async function carregarMensagens({ anteriores = false } = {}) {
   if (!conversaAtual) return;
+  const convId = conversaAtual.id, minha = ++geracaoMsgs;
+  if (anteriores) limiteMsgs += PAGINA_MSGS;
+  else if (conversaRenderizada !== convId) limiteMsgs = PAGINA_MSGS;
   try {
     const { data, error } = await sb.from('whatsapp_mensagens')
-      .select('*').eq('conversa_id', conversaAtual.id)
-      .order('created_at', { ascending: true }).limit(500);
+      .select('*').eq('conversa_id', convId)
+      .order('created_at', { ascending: false }).limit(limiteMsgs);
     if (error) throw error;
-    MENSAGENS = data || [];
-    renderMensagens();
-  } catch (err) { toast('⚠️ ' + err.message); }
+    if (minha !== geracaoMsgs || conversaAtual?.id !== convId) return;   // trocou de conversa no meio
+    temMsgsAnteriores = (data || []).length >= limiteMsgs;
+    MENSAGENS = (data || []).slice().reverse();
+    renderMensagens({ manterTopo: anteriores });
+  } catch (err) {
+    if (minha !== geracaoMsgs) return;
+    if (!MENSAGENS.length) {
+      $('#mensagens').innerHTML = `<div class="vazio">⚠️ Não consegui carregar as mensagens.<br>
+        <small>${esc(err.message || '')}</small><br><br>
+        <button type="button" class="btn btn-ghost sm" data-acao="recarregar-msgs">Tentar de novo</button></div>`;
+    } else toast('⚠️ ' + err.message);
+  }
+}
+
+/** Esqueleto do chat enquanto as mensagens não chegam. */
+function esqueletoMensagens() {
+  return ['entrada', 'saida', 'entrada', 'saida'].map((d, i) =>
+    `<div class="msg ${d} msg-sk" aria-hidden="true"><div class="sk-linha" style="width:${[180, 240, 130, 200][i]}px"></div>
+      <div class="sk-linha fina" style="width:${[120, 160, 90, 140][i]}px"></div></div>`).join('');
+}
+
+/** "Hoje", "Ontem", "Terça-feira" (esta semana), "12/09" ou "12/09/2025". */
+function rotuloDoDia(iso, agora = new Date()) {
+  const d = new Date(iso);
+  const zero = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dias = Math.round((zero(agora) - zero(d)) / 86400000);
+  if (dias === 0) return 'Hoje';
+  if (dias === 1) return 'Ontem';
+  if (dias > 1 && dias < 7) {
+    const s = d.toLocaleDateString('pt-BR', { weekday: 'long' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  return d.getFullYear() === agora.getFullYear()
+    ? d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+    : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+/* Link clicável COM SEGURANÇA: só http/https, abre em outra aba sem dar acesso
+   à nossa janela (noopener) nem dizer de onde veio (noreferrer). O texto em volta
+   continua escapado; "javascript:" e afins viram texto puro. */
+const RE_LINK = /\b((?:https?:\/\/|www\.)[^\s<>"']+)/gi;
+function linkSeguro(bruto) {
+  let url = bruto, sobra = '';
+  // pontuação colada no fim ("veja www.x.com.") não faz parte do link
+  const m = /[).,;:!?]+$/.exec(url);
+  if (m) { sobra = m[0]; url = url.slice(0, -sobra.length); }
+  try {
+    const u = new URL(/^www\./i.test(url) ? 'https://' + url : url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('protocolo');
+    return `<a href="${esc(u.href)}" target="_blank" rel="noopener noreferrer nofollow" class="msg-link">${esc(url)}</a>${esc(sobra)}`;
+  } catch { return esc(bruto); }
+}
+/** Texto da mensagem → HTML: escapa tudo, liga os links e marca a busca. */
+function corpoHtml(texto, termo = '') {
+  const s = String(texto ?? '');
+  let html = '', i = 0;
+  const marcar = trecho => {
+    const e = esc(trecho);
+    if (!termo) return e;
+    const t = esc(termo).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return e.replace(new RegExp(t, 'gi'), x => `<mark class="achado">${x}</mark>`);
+  };
+  s.replace(RE_LINK, (link, _g, pos) => {
+    html += marcar(s.slice(i, pos)) + linkSeguro(link);
+    i = pos + link.length;
+    return link;
+  });
+  return html + marcar(s.slice(i));
+}
+
+/** Situação de uma mensagem de saída, do jeito que o atendente entende. */
+function statusDaMensagem(m) {
+  if (m.direcao === 'entrada') return '';
+  const st = m._local || m.status;
+  if (st === 'enviando') return '<span class="msg-st st-enviando" title="Enviando…">⏳</span>';
+  if (st === 'na_fila') return '<span class="msg-st st-fila" title="Sem internet — sai sozinha quando a conexão voltar">🕓 na fila</span>';
+  if (st === 'enviado') return '<span class="msg-st st-ok" title="Entregue ao WhatsApp">✓</span>';
+  if (st === 'falhou') {
+    return `<span class="msg-st st-falhou" title="${esc(m.erro || 'Não saiu no WhatsApp')}">⚠ não saiu</span>
+      <button type="button" class="msg-reenviar" data-reenviar="${esc(m.id || m._idLocal)}">Tentar de novo</button>`;
+  }
+  // 'pendente': recém-enviada ainda está a caminho; antiga ficou sem confirmação
+  const idade = Date.now() - new Date(m.created_at).getTime();
+  return idade < 120_000 ? '<span class="msg-st st-enviando" title="Enviando…">⏳</span>'
+    : '<span class="msg-st st-sem" title="Registrada aqui, sem confirmação de entrega">•</span>';
+}
+
+/* URLs assinadas dos anexos ficam guardadas por 50 min: redesenhar o chat
+   (toda mensagem nova redesenha) não pede um link novo por foto. */
+const URL_ASSINADA = new Map();
+async function urlAssinada(caminho) {
+  const c = URL_ASSINADA.get(caminho);
+  if (c && c.ate > Date.now()) return c.url;
+  const { data, error } = await sb.storage.from('anexos').createSignedUrl(caminho, 3600);
+  if (error) throw error;
+  if (data?.signedUrl) URL_ASSINADA.set(caminho, { url: data.signedUrl, ate: Date.now() + 50 * 60_000 });
+  return data?.signedUrl || '';
 }
 
 /* Rolagem: só vai para o fim quando a conversa acabou de abrir, quando o
@@ -727,27 +1022,53 @@ let conversaRenderizada = null;
 const PERTO_DO_FIM = 90;   // px
 function pertoDoFim(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < PERTO_DO_FIM; }
 
-function renderMensagens({ forcarFim = false } = {}) {
+/** O que aparece no chat: as do banco + as que ainda estão saindo daqui. */
+function mensagensParaMostrar() {
+  const locais = (ENVIOS_LOCAIS.get(conversaAtual?.id) || []);
+  return locais.length ? [...MENSAGENS, ...locais] : MENSAGENS;
+}
+
+function renderMensagens({ forcarFim = false, manterTopo = false } = {}) {
   const el = $('#mensagens');
   const trocouConversa = conversaRenderizada !== conversaAtual?.id;
-  const estavaNoFim = trocouConversa || forcarFim || pertoDoFim(el);
+  const estavaNoFim = !manterTopo && (trocouConversa || forcarFim || pertoDoFim(el));
   const alturaAntes = el.scrollHeight, topoAntes = el.scrollTop;
   conversaRenderizada = conversaAtual?.id || null;
-  if (!MENSAGENS.length) {
-    el.innerHTML = '<div class="vazio">Nenhuma mensagem ainda. Escreva abaixo para começar.</div>';
+  const todas = mensagensParaMostrar();
+  if (!todas.length) {
+    el.innerHTML = `<div class="vazio estado-vazio"><span class="vazio-ico" aria-hidden="true">👋</span>
+      <p>Nenhuma mensagem ainda. Escreva abaixo para começar.</p></div>`;
     $('#pillNovas').hidden = true;
     return;
   }
-  let ultimoDia = '';
-  el.innerHTML = MENSAGENS.map(m => {
+  const termo = BUSCA_MSG.termo;
+  // onde entra a marca "não lidas": antes da N-ésima mensagem do cliente, contando do fim
+  let idNaoLida = null;
+  if (marcaNaoLidas.conv === conversaAtual?.id && marcaNaoLidas.n > 0) {
+    const entradas = todas.filter(m => m.direcao === 'entrada');
+    idNaoLida = entradas[Math.max(0, entradas.length - marcaNaoLidas.n)]?.id || null;
+  }
+  let ultimoDia = '', anterior = null;
+  const partes = [];
+  if (temMsgsAnteriores) {
+    partes.push('<div class="msgs-anteriores"><button type="button" class="btn btn-ghost sm" data-acao="msgs-anteriores">↑ Carregar mensagens anteriores</button></div>');
+  }
+  for (const m of todas) {
     const dia = new Date(m.created_at).toDateString();
-    let sep = '';
     if (dia !== ultimoDia) {
       ultimoDia = dia;
-      sep = `<div class="dia-sep">${esc(dataLonga(m.created_at))}</div>`;
+      anterior = null;
+      partes.push(`<div class="dia-sep" role="separator">${esc(rotuloDoDia(m.created_at))}</div>`);
     }
-    const hora = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+    if (idNaoLida && m.id === idNaoLida) {
+      partes.push(`<div class="naolidas-sep" role="separator">${esc(String(marcaNaoLidas.n))} não lida${marcaNaoLidas.n > 1 ? 's' : ''}</div>`);
+    }
+    const hora = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const marcada = selecionadas.has(m.id);
+    // mesma pessoa, menos de 5 min depois: cola na anterior (lê como um bloco só)
+    const seguida = anterior && anterior.direcao === m.direcao
+      && (new Date(m.created_at) - new Date(anterior.created_at)) < 5 * 60_000;
+    anterior = m;
     /* Documento/foto enviado tem cópia guardada: vira cartão que ABRE.
        Foto ganha miniatura (carregada depois, com link assinado). */
     let anexoHtml = '';
@@ -757,26 +1078,31 @@ function renderMensagens({ forcarFim = false } = {}) {
       anexoHtml = /^audio\//i.test(m.anexo_mime || '')
         ? `<audio class="msg-audio" controls preload="none" data-anexo-audio="${esc(m.anexo)}"></audio>`
         : /^image\//i.test(m.anexo_mime || '')
-        ? `<img class="msg-imagem" data-anexo-img="${esc(m.anexo)}" alt="${esc(nomeArq)}"
-               title="Abrir a foto">`
+        ? `<img class="msg-imagem" data-anexo-img="${esc(m.anexo)}" alt="${esc(nomeArq)}" title="Abrir a foto" loading="lazy">`
         : `<button type="button" class="msg-anexo" data-anexo="${esc(m.anexo)}"
                title="Abrir o documento">📄 <span>${esc(nomeArq)}</span> ⤢</button>`;
     }
-    return sep + `<div class="msg ${m.direcao === 'entrada' ? 'entrada' : 'saida'}${m.gerada_por_ia ? ' ia-tag' : ''}${
-        modoSelecao ? ' selecionavel' : ''}${marcada ? ' marcada' : ''}" data-msg="${esc(m.id)}">
-      ${modoSelecao ? `<span class="msg-marca">${marcada ? '✓' : ''}</span>` : ''}
-      ${anexoHtml}${esc(m.corpo)}<span class="msg-hora">${esc(hora)}</span></div>`;
-  }).join('');
+    const idMsg = m.id || m._idLocal;
+    const st = m._local || m.status;
+    partes.push(`<div class="msg ${m.direcao === 'entrada' ? 'entrada' : 'saida'}${m.gerada_por_ia ? ' ia-tag' : ''}${
+        seguida ? ' seguida' : ''}${st === 'falhou' ? ' falhou' : ''}${m._local ? ' local' : ''}${
+        modoSelecao && m.id ? ' selecionavel' : ''}${marcada ? ' marcada' : ''}" data-msg="${esc(idMsg)}">
+      ${modoSelecao && m.id ? `<span class="msg-marca">${marcada ? '✓' : ''}</span>` : ''}
+      ${anexoHtml}<span class="msg-texto">${corpoHtml(m.corpo, termo)}</span>
+      <span class="msg-hora">${esc(hora)} ${statusDaMensagem(m)}</span>
+      ${!modoSelecao && m.corpo ? `<button type="button" class="msg-copiar" data-copiar="${esc(idMsg)}" title="Copiar o texto" aria-label="Copiar o texto da mensagem">⧉</button>` : ''}
+    </div>`);
+  }
+  el.innerHTML = partes.join('');
 
   if (modoSelecao) {
-    $$('#mensagens [data-msg]').forEach(d => d.addEventListener('click', () => {
-      const id = d.dataset.msg;
-      selecionadas.has(id) ? selecionadas.delete(id) : selecionadas.add(id);
-      renderMensagens();
-      atualizarBarraSelecao();
-    }));
+    // no modo de seleção a rolagem fica onde está, senão pula a cada clique
+    el.scrollTop = topoAntes;
+  } else if (manterTopo) {
+    // carregou as anteriores: o que estava na tela continua no mesmo lugar
+    el.scrollTop = el.scrollHeight - alturaAntes + topoAntes;
   } else if (estavaNoFim) {
-    el.scrollTop = el.scrollHeight;   // só rola no modo normal, senão pula a cada clique
+    el.scrollTop = el.scrollHeight;
     $('#pillNovas').hidden = true;
   } else {
     // mantém a posição de leitura (o que mudou está abaixo) e avisa que chegou coisa nova
@@ -784,33 +1110,52 @@ function renderMensagens({ forcarFim = false } = {}) {
     if (el.scrollHeight > alturaAntes) $('#pillNovas').hidden = false;
   }
 
-  /* link assinado (1h) — só quem está logado consegue gerar e abrir */
-  const abrirAnexo = async (caminho) => {
-    try {
-      const { data, error } = await sb.storage.from('anexos').createSignedUrl(caminho, 3600);
-      if (error) throw error;
-      window.open(data.signedUrl, '_blank', 'noopener');
-    } catch (e) { toast('⚠️ Não consegui abrir o anexo: ' + (e.message || e)); }
-  };
-  $$('#mensagens [data-anexo]').forEach(b => b.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    abrirAnexo(b.dataset.anexo);
-  }));
+  /* miniaturas e áudios: link assinado (1h, guardado) — só quem está logado consegue gerar */
   $$('#mensagens [data-anexo-audio]').forEach(async (au) => {
-    au.addEventListener('click', ev => ev.stopPropagation());   // não seleciona a mensagem
-    try {
-      const { data } = await sb.storage.from('anexos').createSignedUrl(au.dataset.anexoAudio, 3600);
-      if (data?.signedUrl) au.src = data.signedUrl;
-    } catch { /* sem link: o player fica vazio, mas nada quebra */ }
+    try { const u = await urlAssinada(au.dataset.anexoAudio); if (u && au.src !== u) au.src = u; }
+    catch { /* sem link: o player fica vazio, mas nada quebra */ }
   });
   $$('#mensagens [data-anexo-img]').forEach(async (img) => {
-    img.addEventListener('click', (ev) => { ev.stopPropagation(); abrirAnexo(img.dataset.anexoImg); });
-    try {
-      const { data } = await sb.storage.from('anexos').createSignedUrl(img.dataset.anexoImg, 3600);
-      if (data?.signedUrl) img.src = data.signedUrl;
-    } catch { /* fica sem miniatura; o clique ainda tenta abrir */ }
+    try { const u = await urlAssinada(img.dataset.anexoImg); if (u && img.src !== u) img.src = u; }
+    catch { /* fica sem miniatura; o clique ainda tenta abrir */ }
   });
+  if (BUSCA_MSG.termo) atualizarResultadosBusca({ manterIndice: true });
 }
+
+/* Cliques dentro do chat: UM ouvinte só, ligado uma vez (antes eram vários
+   por mensagem, recriados a cada mensagem nova). */
+async function abrirAnexo(caminho) {
+  try { window.open(await urlAssinada(caminho), '_blank', 'noopener'); }
+  catch (e) { toast('⚠️ Não consegui abrir o anexo: ' + (e.message || e)); }
+}
+$('#mensagens').addEventListener('click', (ev) => {
+  const alvo = ev.target;
+  const anexo = alvo.closest('[data-anexo]');
+  if (anexo) { ev.stopPropagation(); return abrirAnexo(anexo.dataset.anexo); }
+  const img = alvo.closest('[data-anexo-img]');
+  if (img) { ev.stopPropagation(); return abrirAnexo(img.dataset.anexoImg); }
+  if (alvo.closest('audio')) return;
+  const copiar = alvo.closest('[data-copiar]');
+  if (copiar) {
+    const m = mensagensParaMostrar().find(x => (x.id || x._idLocal) === copiar.dataset.copiar);
+    if (m) copiarTexto(m.corpo, '📋 Texto copiado');
+    return;
+  }
+  const reenviar = alvo.closest('[data-reenviar]');
+  if (reenviar) return tentarDeNovo(reenviar.dataset.reenviar);
+  const acao = alvo.closest('[data-acao]')?.dataset.acao;
+  if (acao === 'msgs-anteriores') return carregarMensagens({ anteriores: true });
+  if (acao === 'recarregar-msgs') return carregarMensagens();
+  if (alvo.closest('a')) return;
+  if (modoSelecao) {
+    const d = alvo.closest('[data-msg]');
+    const id = d?.dataset.msg;
+    if (!id || !MENSAGENS.some(m => m.id === id)) return;
+    selecionadas.has(id) ? selecionadas.delete(id) : selecionadas.add(id);
+    renderMensagens();
+    atualizarBarraSelecao();
+  }
+});
 
 /* ============================================================
    APAGAR MENSAGENS
@@ -909,12 +1254,9 @@ $('#btnNaoLida').addEventListener('click', async () => {
   try {
     const { error } = await sb.from('conversas').update({ nao_lidas: Math.max(1, conv.nao_lidas || 0) }).eq('id', conv.id);
     if (error) throw error;
+    if (!(conv.nao_lidas > 0)) ajustarNaoLidas(+1);
     conv.nao_lidas = Math.max(1, conv.nao_lidas || 0);
-    conversaAtual = null;
-    clearInterval(syncAbertaTimer);
-    $('#chat').hidden = true;
-    $('#chatVazio').hidden = false;
-    $('.conversas-layout').classList.remove('vendo-chat');
+    fecharConversa();
     renderConversas();
     atualizarBadge();
     toast('✉ Marcada como não lida');
@@ -1035,15 +1377,45 @@ $('#btnAudio').addEventListener('click', async () => {
   }
 });
 
-$('#arquivoInput').addEventListener('change', async (e) => {
+$('#arquivoInput').addEventListener('change', (e) => {
   const f = e.target.files?.[0];
   e.target.value = '';                       // permite reescolher o mesmo arquivo
-  if (!f || !conversaAtual) return;
-  if (f.size > 15 * 1024 * 1024) return toast('⚠️ Arquivo grande demais (máximo 15 MB).');
+  if (f) prepararAnexo(f);
+});
 
-  const legenda = campo.value.trim();
-  const btn = $('#btnAnexo');
-  btn.disabled = true; btn.textContent = '⏳';
+/* ---------------- Prévia antes de mandar ----------------
+   Clipe, colar imagem (Ctrl+V) ou arrastar para o chat caem todos aqui:
+   mostra a miniatura (ou o nome e o tamanho), deixa escrever a legenda e
+   só então manda. O texto que já estava no campo vira a legenda. */
+const MAX_ANEXO = 15 * 1024 * 1024;
+const TIPOS_ANEXO = /^(image\/|audio\/|application\/pdf|application\/msword|application\/vnd\.openxmlformats|application\/vnd\.ms-excel|text\/plain|text\/csv|application\/zip)/i;
+let anexoPendente = null;
+const tamanhoLegivel = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1).replace('.', ',')} MB`;
+
+function prepararAnexo(f) {
+  if (!conversaAtual) return toast('Abra uma conversa primeiro.');
+  if (f.size > MAX_ANEXO) return toast(`⚠️ ${f.name} tem ${tamanhoLegivel(f.size)} — o máximo é 15 MB.`);
+  if (!f.size) return toast('⚠️ Esse arquivo está vazio.');
+  if (f.type && !TIPOS_ANEXO.test(f.type) && !/\.(pdf|docx?|xlsx?|txt|csv|zip)$/i.test(f.name)) {
+    return toast('⚠️ Esse tipo de arquivo não vai pelo WhatsApp. Mande foto, PDF, Word, Excel, texto ou zip.');
+  }
+  if (anexoPendente?.url) URL.revokeObjectURL(anexoPendente.url);
+  const ehImagem = /^image\//i.test(f.type);
+  anexoPendente = { arquivo: f, conv: conversaAtual, url: ehImagem ? URL.createObjectURL(f) : null };
+  $('#anexoPrevia').innerHTML = ehImagem
+    ? `<img src="${esc(anexoPendente.url)}" alt="Prévia de ${esc(f.name)}"><small>${esc(f.name)} · ${esc(tamanhoLegivel(f.size))}</small>`
+    : `<div class="anexo-doc"><span aria-hidden="true">📄</span><div><b>${esc(f.name)}</b><small>${esc(tamanhoLegivel(f.size))}</small></div></div>`;
+  $('#anexoLegenda').value = campo.value.trim();
+  abrirModal('modalAnexoBg', '#btnEnviarAnexo');
+}
+
+$('#formAnexo').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  if (!anexoPendente) return;
+  const { arquivo: f, conv } = anexoPendente;
+  const legenda = $('#anexoLegenda').value.trim();
+  const btn = $('#btnEnviarAnexo');
+  btn.disabled = true; btn.innerHTML = '<span class="girando"></span>Enviando…';
   try {
     const base64 = await new Promise((res, rej) => {
       const r = new FileReader();
@@ -1054,74 +1426,182 @@ $('#arquivoInput').addEventListener('change', async (e) => {
     const resp = await fetch('/api/mensagens/enviar-arquivo', {
       method: 'POST', headers: await authCabecalhos(),
       body: JSON.stringify({
-        telefone: conversaAtual.telefone, conversaId: conversaAtual.id,
-        nome_arquivo: f.name, mime: f.type || 'application/octet-stream',
+        telefone: conv.telefone, conversaId: conv.id,
+        nome_arquivo: f.name || 'arquivo', mime: f.type || 'application/octet-stream',
         base64, legenda,
       }),
     });
     const j = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(j.erro || 'falha no envio');
-    if (legenda) campo.value = '';
-    toast('📎 Enviado: ' + f.name);
-    await carregarMensagens();
-    await carregarConversas();
+    // a legenda saiu junto: o que estava no campo não precisa ficar lá
+    if (legenda && conversaAtual?.id === conv.id && campo.value.trim() === legenda) {
+      campo.value = ''; guardarRascunho(conv.id, ''); campo.dispatchEvent(new Event('input'));
+    }
+    fecharModal('modalAnexoBg');
+    toast('📎 Enviado: ' + (f.name || 'arquivo'));
+    avisarMensagem(conv.id, 'saida', null);
+    if (conversaAtual?.id === conv.id) await carregarMensagens();
+    agendarRecargaLista();
   } catch (err) { toast('⚠️ ' + err.message); }
-  finally { btn.disabled = false; btn.textContent = '📎'; }
+  finally { btn.disabled = false; btn.textContent = 'Enviar'; }
 });
+
+// Ctrl+V de uma imagem (print, foto copiada) direto no campo de mensagem
+campo.addEventListener('paste', (ev) => {
+  const item = [...(ev.clipboardData?.items || [])].find(i => i.kind === 'file');
+  const f = item?.getAsFile();
+  if (!f) return;                         // texto normal: cola como sempre
+  ev.preventDefault();
+  const nome = f.name && f.name !== 'image.png' ? f.name : `imagem-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+  prepararAnexo(new File([f], nome, { type: f.type || 'image/png' }));
+});
+
+// Arrastar arquivo para cima do chat
+(() => {
+  const zona = $('#chat'), aviso = $('#soltarAqui');
+  let profundidade = 0;
+  const temArquivo = ev => [...(ev.dataTransfer?.types || [])].includes('Files');
+  zona.addEventListener('dragenter', ev => { if (!temArquivo(ev)) return; ev.preventDefault(); profundidade++; aviso.hidden = false; });
+  zona.addEventListener('dragover', ev => { if (!temArquivo(ev)) return; ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; });
+  zona.addEventListener('dragleave', ev => { if (!temArquivo(ev)) return; if (--profundidade <= 0) { profundidade = 0; aviso.hidden = true; } });
+  zona.addEventListener('drop', ev => {
+    if (!temArquivo(ev)) return;
+    ev.preventDefault();
+    profundidade = 0; aviso.hidden = true;
+    const f = ev.dataTransfer.files?.[0];
+    if (f) prepararAnexo(f);
+    if ((ev.dataTransfer.files?.length || 0) > 1) toast('Um arquivo por vez — mandei a prévia do primeiro.');
+  });
+})();
+
+/* ---------------- Enviar (otimista, com situação e "tentar de novo") ----------------
+   A mensagem aparece NA HORA com ⏳; ao gravar no banco vira a linha de
+   verdade; o CodeWords responde e ela vira ✓ (entregue) ou ⚠ não saiu, com o
+   botão "Tentar de novo". A situação fica gravada em whatsapp_mensagens.status
+   (e o motivo em .erro) — antes TODA mensagem do painel ficava "pendente" para
+   sempre, entregue ou não. Sem internet, vai para a fila e sai sozinha depois. */
+const ENVIOS_LOCAIS = new Map();      // conversaId -> [mensagens ainda sem linha no banco]
+function locaisDe(convId) {
+  if (!ENVIOS_LOCAIS.has(convId)) ENVIOS_LOCAIS.set(convId, []);
+  return ENVIOS_LOCAIS.get(convId);
+}
+function tirarLocal(convId, idLocal) {
+  const l = ENVIOS_LOCAIS.get(convId);
+  if (!l) return;
+  const i = l.findIndex(x => x._idLocal === idLocal);
+  if (i >= 0) l.splice(i, 1);
+}
+const avisarMensagem = (conversaId, direcao, id) => {
+  try { window.dispatchEvent(new CustomEvent('indycar:mensagem', { detail: { conversaId, direcao, id } })); } catch { /* ignora */ }
+};
 
 async function enviarMensagem() {
   const texto = campo.value.trim();
   if (!texto || !conversaAtual) return;
+  const conv = conversaAtual;
+  campo.value = '';
+  campo.style.height = 'auto';
+  guardarRascunho(conv.id, '');
+  atualizarContador();
+  fecharMenuAtalhos();
+  campo.focus();
 
-  const btn = $('#btnEnviar');
-  btn.disabled = true;
+  // sem internet: fila local, sai sozinha quando voltar
+  if (navigator.onLine === false) {
+    filaOfflineAdicionar({ conversaId: conv.id, telefone: conv.telefone, nome: conv.nome, clienteId: conv.cliente_id, corpo: texto });
+    renderMensagens({ forcarFim: true });
+    toast('🕓 Sem internet — a mensagem ficou na fila e sai sozinha quando a conexão voltar.');
+    return;
+  }
+  await entregarMensagem(conv, texto);
+}
+
+/** Grava no banco e entrega pelo CodeWords. Serve ao envio normal, à fila e ao "tentar de novo". */
+async function entregarMensagem(conv, texto, { linhaExistente = null } = {}) {
+  const local = linhaExistente ? null : {
+    _idLocal: 'l' + Date.now() + Math.random().toString(16).slice(2, 6), _local: 'enviando',
+    conversa_id: conv.id, corpo: texto, direcao: 'saida', created_at: new Date().toISOString(),
+  };
+  if (local) {
+    locaisDe(conv.id).push(local);
+    if (conversaAtual?.id === conv.id) renderMensagens({ forcarFim: true });
+  }
+  let linha = linhaExistente;
   try {
-    const { error } = await sb.from('whatsapp_mensagens').insert({
-      conversa_id: conversaAtual.id,
-      cliente_id:  conversaAtual.cliente_id,
-      telefone:    conversaAtual.telefone,
-      nome:        conversaAtual.nome,
-      corpo:       texto,
-      direcao:     'saida',
-      status:      'pendente',
-    });
-    if (error) throw error;
-    campo.value = '';
-    campo.style.height = 'auto';
-    guardarRascunho(conversaAtual.id, '');
-    atualizarContador();
-    fecharMenuAtalhos();
-    await carregarMensagens();
-    renderMensagens({ forcarFim: true });   // quem envia quer ver a própria mensagem
-    await carregarConversas();
+    if (!linha) {
+      const { data, error } = await sb.from('whatsapp_mensagens').insert({
+        conversa_id: conv.id,
+        cliente_id:  conv.cliente_id,
+        telefone:    conv.telefone,
+        nome:        conv.nome,
+        corpo:       texto,
+        direcao:     'saida',
+        status:      'pendente',
+      }).select('*').single();
+      if (error) throw error;
+      linha = data;
+      tirarLocal(conv.id, local._idLocal);
+      if (linha && conversaAtual?.id === conv.id && !MENSAGENS.some(m => m.id === linha.id)) MENSAGENS.push(linha);
+      avisarMensagem(conv.id, 'saida', linha?.id);
+    } else {
+      linha.status = 'pendente'; linha._local = 'enviando';
+    }
+    if (conversaAtual?.id === conv.id) renderMensagens({ forcarFim: true });
+  } catch (err) {
+    // nem chegou ao banco: fica na tela como "não saiu", com o texto para tentar de novo
+    if (local) { local._local = 'falhou'; local.erro = err.message; }
+    if (conversaAtual?.id === conv.id) renderMensagens({ forcarFim: true });
+    toast('⚠️ Não consegui registrar a mensagem: ' + err.message);
+    return false;
+  }
 
-    // Entrega de verdade no WhatsApp, via CodeWords.
-    // Se estiver desligado, a mensagem fica registrada aqui mesmo assim.
-    try {
-      const r = await (await fetch('/api/enviar', {
-        method: 'POST', headers: await authCabecalhos(),
-        body: JSON.stringify({
-          telefone: conversaAtual.telefone,
-          corpo: texto,
-          nome: conversaAtual.nome,
-          conversaId: conversaAtual.id,
-        }),
-      })).json();
-      if (!r.ok && !r.desligado) {
-        toast('⚠️ Registrado aqui, mas o envio falhou: ' + (r.erro || ''));
-        // chave recusada: a faixa de saúde acende na hora, sem esperar o vigia
-        if (r.codigo === 'codewords-401') mostrarSaude({ problema: 'codewords-fora', texto: r.erro, desde: null });
-      }
-    } catch (err) {
-      // A mensagem já está salva; o que falhou foi a entrega. Avisa, para
-      // ninguém achar que o cliente recebeu.
-      toast('⚠️ Registrado aqui, mas não saiu no WhatsApp: ' + (err.message || 'falha de rede'));
+  // Entrega de verdade no WhatsApp, via CodeWords.
+  let ok = false, erro = '';
+  try {
+    const r = await (await fetch('/api/enviar', {
+      method: 'POST', headers: await authCabecalhos(),
+      body: JSON.stringify({ telefone: conv.telefone, corpo: texto, nome: conv.nome, conversaId: conv.id }),
+    })).json();
+    ok = !!r.ok;
+    if (!ok) {
+      erro = r.erro || 'o WhatsApp não confirmou';
+      toast('⚠️ Registrado aqui, mas não saiu no WhatsApp: ' + erro);
+      // chave recusada: a faixa de saúde acende na hora, sem esperar o vigia
+      if (r.codigo === 'codewords-401') mostrarSaude({ problema: 'codewords-fora', texto: r.erro, desde: null });
     }
   } catch (err) {
-    toast('⚠️ ' + err.message);
-  } finally {
-    btn.disabled = false;
+    // A mensagem já está salva; o que falhou foi a entrega. Avisa, para
+    // ninguém achar que o cliente recebeu.
+    erro = err.message || 'falha de rede';
+    toast('⚠️ Registrado aqui, mas não saiu no WhatsApp: ' + erro);
   }
+  const status = ok ? 'enviado' : 'falhou';
+  linha.status = status; linha.erro = ok ? null : erro; delete linha._local;
+  const daLista = MENSAGENS.find(m => m.id === linha.id);
+  if (daLista && daLista !== linha) { daLista.status = status; daLista.erro = linha.erro; delete daLista._local; }
+  if (conversaAtual?.id === conv.id) renderMensagens();
+  // grava a situação (só a coluna status/erro; nenhum gatilho do banco roda em update)
+  sb.from('whatsapp_mensagens').update({ status, erro: ok ? null : String(erro).slice(0, 300) })
+    .eq('id', linha.id).then(() => {}, () => {});
+  agendarRecargaLista();
+  return ok;
+}
+
+/** "Tentar de novo" de uma mensagem que não saiu. */
+async function tentarDeNovo(id) {
+  if (!conversaAtual) return;
+  const conv = conversaAtual;
+  const local = (ENVIOS_LOCAIS.get(conv.id) || []).find(x => x._idLocal === id);
+  if (local) {
+    tirarLocal(conv.id, id);
+    renderMensagens();
+    return entregarMensagem(conv, local.corpo);
+  }
+  const linha = MENSAGENS.find(m => m.id === id);
+  if (!linha) return;
+  renderMensagens();
+  const ok = await entregarMensagem(conv, linha.corpo, { linhaExistente: linha });
+  if (ok) toast('✅ Agora foi');
 }
 
 /* ---------------- Status da conversa ---------------- */
@@ -1174,10 +1654,7 @@ $('#btnExcluirConversa').addEventListener('click', async () => {
     if (!r.ok) throw new Error(r.erro || 'não consegui excluir');
 
     toast(`🗑 Conversa de ${nome} excluída (${r.apagadas} mensagens)`);
-    conversaAtual = null;
-    $('#chat').hidden = true;
-    $('#chatVazio').hidden = false;
-    $('.conversas-layout').classList.remove('vendo-chat');
+    fecharConversa();
     await carregarConversas();
   } catch (err) {
     toast('⚠️ ' + err.message);
@@ -1288,13 +1765,14 @@ async function carregarFicha(conv) {
       <div class="ficha-cab">
         <span class="avatar">${esc(iniciais(f.nome || conv.nome))}</span>
         <strong>${esc(f.nome || conv.nome || conv.telefone)}</strong>
-        <small>${esc(conv.telefone)}</small>
+        <small>${esc(telefoneBonito(conv.telefone))}</small>
         <div class="ficha-selos">
           ${diasNiver === 0 ? '<span class="tag niver">🎂 aniversário hoje</span>'
             : diasNiver !== null && diasNiver <= 7 ? `<span class="tag niver">🎂 em ${diasNiver} dia${diasNiver > 1 ? 's' : ''}</span>` : ''}
           ${!aceita ? '<span class="tag mudo">🔕 sem mensagens automáticas</span>' : ''}
           ${revAtrasada ? '<span class="tag atrasada">🔧 revisão atrasada</span>' : ''}
         </div>
+        ${linksDoClienteHtml(conv, fx?.comunicarUrl)}
       </div>
 
       <div class="ficha-stats">
@@ -1333,9 +1811,9 @@ async function carregarFicha(conv) {
           <button type="button" class="ficha-editar" id="btnEditarCliente">✎ Editar</button>
         </div>
         <div id="clienteVer">
-          <div class="ficha-linha"><span>Nome</span><b>${esc(f.nome) || '—'}</b></div>
-          <div class="ficha-linha"><span>Carro</span><b>${esc(f.carro_modelo) || '—'}</b></div>
-          <div class="ficha-linha"><span>Placa</span><b>${esc(f.placa) || '—'}</b></div>
+          ${linhaInline('nome', 'Nome', f.nome)}
+          ${linhaInline('carro_modelo', 'Carro', f.carro_modelo, 'Ex.: Onix 2019')}
+          ${linhaInline('placa', 'Placa', f.placa, 'ABC1D23')}
           <div class="ficha-linha"><span>Aniversário</span><b>${cli.nascimento
             ? esc(aniversarioTexto(cli.nascimento)) + (idade !== null ? `<small class="ficha-sub">${idade} anos</small>` : '')
             : '<span class="ficha-faltando">não informado</span>'}</b></div>
@@ -1528,6 +2006,7 @@ function renderAvisosDoChat({ diasNiver, aceita, rev, revAtrasada }) {
    continuar legível e para poder religar tudo depois de cada recarga. */
 function ligarEdicaoDaFicha(conv, f, leads, cli = {}) {
   const ver = $('#clienteVer'), form = $('#clienteEditar');
+  ligarEdicaoInline(conv, f);
 
   /* Chave "Aceita mensagens automáticas": grava em clientes (o atendente tem
      permissão) com data e motivo, para o Comunicar saber por que pulou. */
@@ -1735,30 +2214,57 @@ function ligarTempoReal() {
   canalRealtime = sb.channel('atendimento')
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'whatsapp_mensagens' },
       async payload => {
-        if (conversaAtual && payload.new.conversa_id === conversaAtual.id) {
-          // o envio já recarrega a lista; sem esta checagem a mensagem
-          // apareceria duas vezes (uma pelo reload, outra pelo tempo real)
-          const jaTem = MENSAGENS.some(m => m.id === payload.new.id);
-          if (!jaTem) { MENSAGENS.push(payload.new); renderMensagens(); }
-          if (payload.new.direcao === 'entrada') {
-            await sb.from('conversas').update({ nao_lidas: 0 }).eq('id', conversaAtual.id);
+        const m = payload.new || {};
+        const aberta = conversaAtual && m.conversa_id === conversaAtual.id;
+        const olhando = aberta && document.visibilityState === 'visible';
+        if (aberta) {
+          // o envio já põe a própria mensagem na tela; sem esta checagem ela
+          // apareceria duas vezes (uma pelo envio, outra pelo tempo real)
+          const jaTem = MENSAGENS.some(x => x.id === m.id);
+          if (!jaTem) { MENSAGENS.push(m); renderMensagens(); }
+          // contrato com o copiloto: chegou/saiu mensagem na conversa aberta
+          if (!jaTem) avisarMensagem(m.conversa_id, m.direcao, m.id);
+          /* Só conta como lida se o atendente está OLHANDO: com a aba em
+             segundo plano a conversa aberta continua "não lida" até ele voltar. */
+          if (m.direcao === 'entrada' && olhando) {
+            sb.from('conversas').update({ nao_lidas: 0 }).eq('id', conversaAtual.id).then(() => {}, () => {});
           }
-        } else if (payload.new.direcao === 'entrada') {
-          toast('💬 Nova mensagem de ' + (payload.new.nome || payload.new.telefone));
+        } else if (m.direcao === 'entrada') {
+          toast('💬 Nova mensagem de ' + (m.nome || telefoneBonito(m.telefone)));
         }
+        if (m.direcao === 'entrada' && !olhando) avisarMensagemNova(m);
         // Chegou mensagem do cliente: se a chavinha estiver ligada, a IA relê
         // a conversa e atualiza a plaquinha sozinha.
-        if (payload.new.direcao === 'entrada' && payload.new.conversa_id) {
-          agendarClassificacaoAutomatica(payload.new.conversa_id);
+        if (m.direcao === 'entrada' && m.conversa_id) {
+          agendarClassificacaoAutomatica(m.conversa_id);
         }
-        await carregarConversas();
+        agendarRecargaLista();
+      })
+    // situação de entrega mudou (✓ / ⚠): atualiza só a mensagem, sem recarregar o chat
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'whatsapp_mensagens' },
+      payload => {
+        const m = payload.new || {};
+        if (!conversaAtual || m.conversa_id !== conversaAtual.id) return;
+        const daLista = MENSAGENS.find(x => x.id === m.id);
+        if (daLista && !daLista._local && (daLista.status !== m.status || daLista.corpo !== m.corpo)) {
+          Object.assign(daLista, m);
+          renderMensagens();
+        }
       })
     .on('postgres_changes', { event:'*', schema:'public', table:'conversas' },
-      () => carregarConversas())
+      () => agendarRecargaLista())
     .on('postgres_changes', { event:'*', schema:'public', table:'etapas_funil' },
       async () => { await carregarEtapas(); renderConversas(); renderEtapaDoChat();
                     renderEtapasAdmin(); if (abaVisivel('funil')) carregarFunil(); })
     .subscribe(status => statusDoTempoReal(status));
+}
+
+/* Rajada de eventos (importação, cliente mandando 5 mensagens seguidas, o
+   Carlos respondendo junto): UMA recarga da lista a cada 600 ms, no máximo. */
+let recargaListaTimer = null;
+function agendarRecargaLista() {
+  clearTimeout(recargaListaTimer);
+  recargaListaTimer = setTimeout(() => carregarConversas(), 600);
 }
 // Voltou a ter rede: não espera o próximo intervalo, religa já.
 window.addEventListener('online', () => { if (sb && realtimeCaiu) ligarTempoReal(); });
@@ -1941,6 +2447,7 @@ async function carregarEquipe() {
         <div class="equipe-txt">
           <strong>${esc(p.nome)}</strong>${p.id === perfil.id ? ' <em class="voce">(você)</em>' : ''}
           <br><small>${esc(p.email)}${p.ativo ? '' : ' · sem acesso'}</small>
+          <span class="equipe-carga" data-carga="${esc(p.id)}" aria-live="polite"></span>
         </div>
         ${ehAdmin ? `
           <label class="equipe-rodizio" title="Recebe clientes novos pelo rodízio">
@@ -2011,6 +2518,7 @@ async function carregarEquipe() {
         await carregarEquipe();
       } catch (err) { toast('⚠️ ' + err.message); b.disabled = false; }
     }));
+    pintarCargaDaEquipe();
   } catch {
     $('#listaEquipe').innerHTML = '<div class="vazio">Você vê apenas o seu próprio perfil.</div>';
   }
@@ -2155,12 +2663,21 @@ let fichaCache = null;   // dados do cliente da conversa aberta (para as variáv
 function fecharMenuAtalhos() {
   menuAberto = false;
   $('#atalhoMenu').hidden = true;
+  campo.removeAttribute('aria-activedescendant');
+  $('#btnRespostas')?.setAttribute('aria-expanded', 'false');
 }
 
 function abrirMenuAtalhos(termo = '') {
-  const t = termo.toLowerCase();
-  menuFiltrados = ATALHOS.filter(a => a.ativo &&
-    (a.comando.includes(t) || a.titulo.toLowerCase().includes(t)));
+  /* Sem acento e sem caixa, também pelo texto da mensagem; favoritos (★)
+     primeiro, depois os mais usados — o que o atendente usa todo dia sobe. */
+  const t = semAcentoBusca(termo);
+  const fav = favoritosAtalhos();
+  menuFiltrados = ATALHOS.filter(a => a.ativo && (!t
+      || semAcentoBusca(a.comando).includes(t) || semAcentoBusca(a.titulo).includes(t)
+      || (t.length >= 3 && semAcentoBusca(a.corpo).includes(t))))
+    .sort((a, b) => (fav.has(b.id) - fav.has(a.id))
+      || ((semAcentoBusca(b.comando).startsWith(t)) - (semAcentoBusca(a.comando).startsWith(t)))
+      || ((b.usos || 0) - (a.usos || 0)));
 
   if (!menuFiltrados.length) return fecharMenuAtalhos();
 
@@ -2174,30 +2691,59 @@ function renderMenuAtalhos() {
   /* A prévia já vem com as variáveis trocadas ("Oi, Camila! Seu Corolla…"):
      o atendente vê o que vai sair, não o molde. Variável sem valor fica
      marcada em amarelo para ele completar antes de enviar. */
+  const fav = favoritosAtalhos();
   $('#atalhoLista').innerHTML = menuFiltrados.map((a, i) => {
     const previa = aplicarVariaveis(a.corpo).replace(/\n/g, ' ').slice(0, 90);
     const comMarcas = esc(previa).replace(/\{(\w+)\}/g, '<mark class="var-vazia" title="Sem valor para esta variável">{$1}</mark>');
+    const ehFav = fav.has(a.id);
     return `
-    <div class="atalho-op ${i === menuIndice ? 'marcado' : ''}" data-i="${i}">
+    <div class="atalho-op ${i === menuIndice ? 'marcado' : ''}" data-i="${i}" role="option" id="atalho-op-${i}"
+         aria-selected="${i === menuIndice}">
       <span class="atalho-op-cmd">/${esc(a.comando)}</span>
       <span class="atalho-op-txt">
-        <strong>${esc(a.titulo)}</strong>
+        <strong>${esc(a.titulo)}${a.usos ? ` <small class="atalho-usos">${esc(String(a.usos))}×</small>` : ''}</strong>
         <small>${comMarcas}</small>
       </span>
+      <button type="button" class="atalho-fav${ehFav ? ' ligado' : ''}" data-fav="${esc(a.id)}"
+              aria-pressed="${ehFav}" title="${ehFav ? 'Tirar dos favoritos' : 'Favoritar (fica no topo)'}"
+              aria-label="${ehFav ? 'Tirar dos favoritos' : 'Favoritar'} /${esc(a.comando)}">${ehFav ? '★' : '☆'}</button>
     </div>`; }).join('');
-  $$('.atalho-op', $('#atalhoLista')).forEach(el =>
-    el.addEventListener('click', () => usarAtalho(menuFiltrados[+el.dataset.i])));
+  campo.setAttribute('aria-activedescendant', `atalho-op-${menuIndice}`);
   $('.atalho-op.marcado')?.scrollIntoView({ block: 'nearest' });
 }
+// um ouvinte só para o menu: usar o atalho ou (na estrela) favoritar
+$('#atalhoLista').addEventListener('mousedown', ev => ev.preventDefault());   // não tira o foco do campo
+$('#atalhoLista').addEventListener('click', ev => {
+  const fav = ev.target.closest('[data-fav]');
+  if (fav) {
+    ev.stopPropagation();
+    alternarFavorito(fav.dataset.fav);
+    abrirMenuAtalhos((/^\/(\w*)$/.exec(campo.value) || [])[1] || '');   // reordena: favorito sobe
+    return;
+  }
+  const op = ev.target.closest('.atalho-op');
+  if (op) usarAtalho(menuFiltrados[+op.dataset.i]);
+});
 
 async function usarAtalho(a) {
   if (!a) return;
-  campo.value = aplicarVariaveis(a.corpo);
+  const texto = aplicarVariaveis(a.corpo);
+  /* Veio do "/" (o campo é só o comando): troca tudo. Veio do ⚡ com texto já
+     escrito: encaixa onde está o cursor, sem apagar o que o atendente digitou. */
+  if (/^\/\w*$/.test(campo.value) || !campo.value.trim()) campo.value = texto;
+  else {
+    const p = campo.selectionStart ?? campo.value.length, f = campo.selectionEnd ?? p;
+    const antes = campo.value.slice(0, p), depois = campo.value.slice(f);
+    const sep = antes && !/\s$/.test(antes) ? ' ' : '';
+    campo.value = antes + sep + texto + depois;
+    campo.selectionStart = campo.selectionEnd = (antes + sep + texto).length;
+  }
   campo.dispatchEvent(new Event('input'));
   fecharMenuAtalhos();
   campo.focus();
-  // conta o uso, para saber quais atalhos valem a pena
-  sb.from('atalhos_mensagem').update({ usos: (a.usos || 0) + 1 }).eq('id', a.id).then(() => {});
+  // conta o uso, para saber quais atalhos valem a pena (e subir os mais usados no menu)
+  a.usos = (a.usos || 0) + 1;
+  sb.from('atalhos_mensagem').update({ usos: a.usos }).eq('id', a.id).then(() => {}, () => {});
 }
 
 /* Detecta "/" no começo da mensagem */
@@ -2228,25 +2774,47 @@ campo.addEventListener('keydown', e => {
 
 /* ---------- Aba de atalhos ---------- */
 function renderAtalhos() {
-  const lista = filtroCategoria ? ATALHOS.filter(a => a.categoria === filtroCategoria) : ATALHOS;
+  const fav = favoritosAtalhos();
+  const lista = (filtroCategoria ? ATALHOS.filter(a => a.categoria === filtroCategoria) : ATALHOS).slice()
+    // favoritos primeiro, depois os mais usados — a mesma ordem do menu do "/"
+    .sort((a, b) => (fav.has(b.id) - fav.has(a.id)) || ((b.usos || 0) - (a.usos || 0)));
   const el = $('#atalhosGrade');
   if (!lista.length) {
-    el.innerHTML = '<div class="vazio">Nenhum atalho nesta categoria.</div>';
+    el.innerHTML = `<div class="vazio estado-vazio"><span class="vazio-ico" aria-hidden="true">⚡</span>
+      <p>${ATALHOS.length ? 'Nenhum atalho nesta categoria.' : 'Nenhum atalho ainda. Crie o primeiro e use digitando / no chat.'}</p>
+      <button type="button" class="btn btn-primary sm" onclick="abrirModalAtalho(null)">+ Novo atalho</button></div>`;
     return;
   }
+  const maisUsado = Math.max(0, ...lista.map(a => a.usos || 0));
   el.innerHTML = lista.map(a => `
-    <div class="atalho-cartao ${a.ativo ? '' : 'inativo'}" data-id="${a.id}">
+    <div class="atalho-cartao ${a.ativo ? '' : 'inativo'}" data-id="${esc(a.id)}" tabindex="0" role="button"
+         aria-label="Editar o atalho /${esc(a.comando)}">
       <div class="ac-topo">
         <span class="ac-cmd">/${esc(a.comando)}</span>
         <span class="ac-cat">${esc(a.categoria || 'geral')}</span>
+        <button type="button" class="atalho-fav${fav.has(a.id) ? ' ligado' : ''}" data-fav="${esc(a.id)}"
+                aria-pressed="${fav.has(a.id)}" aria-label="${fav.has(a.id) ? 'Tirar dos favoritos' : 'Favoritar'}"
+                title="Favoritos aparecem primeiro no menu do /">${fav.has(a.id) ? '★' : '☆'}</button>
       </div>
       <h4>${esc(a.titulo)}</h4>
       <div class="ac-corpo">${esc(a.corpo)}</div>
-      <div class="ac-rodape">${a.usos || 0} usos${a.ativo ? '' : ' · desativado'}</div>
+      <div class="ac-rodape">${esc(String(a.usos || 0))} usos${a.ativo ? '' : ' · desativado'}${
+        maisUsado > 0 && (a.usos || 0) === maisUsado ? ' · <b class="ac-top">🏆 mais usado</b>' : ''}</div>
     </div>`).join('');
-  $$('.atalho-cartao', el).forEach(c =>
-    c.addEventListener('click', () => abrirModalAtalho(ATALHOS.find(a => a.id === c.dataset.id))));
 }
+// um ouvinte para a grade: estrela favorita, o resto abre a edição (clique ou Enter)
+$('#atalhosGrade').addEventListener('click', ev => {
+  const fav = ev.target.closest('[data-fav]');
+  if (fav) { ev.stopPropagation(); alternarFavorito(fav.dataset.fav); renderAtalhos(); return; }
+  const c = ev.target.closest('.atalho-cartao');
+  if (c) abrirModalAtalho(ATALHOS.find(a => a.id === c.dataset.id));
+});
+$('#atalhosGrade').addEventListener('keydown', ev => {
+  if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList?.contains('atalho-cartao')) {
+    ev.preventDefault();
+    abrirModalAtalho(ATALHOS.find(a => a.id === ev.target.dataset.id));
+  }
+});
 
 $$('#filtrosCategoria .chip').forEach(c => c.addEventListener('click', () => {
   $$('#filtrosCategoria .chip').forEach(x => x.classList.toggle('ativo', x === c));
@@ -2319,9 +2887,7 @@ $('#btnExcluirAtalho').addEventListener('click', async () => {
 });
 
 /* Voltar do chat para a lista (celular) */
-$('#btnVoltarLista').addEventListener('click', () => {
-  $('.conversas-layout').classList.remove('vendo-chat');
-});
+$('#btnVoltarLista').addEventListener('click', () => fecharConversa({ focarLista: true }));
 
 /* ============================================================
    AGENDAR  —  cria cliente + lead (CRM) + horário (Agenda)
@@ -2351,7 +2917,7 @@ function renderBotaoAssumir() {
       : 'Assumir este atendimento — o Carlos para de responder este cliente';
     b.classList.remove('assumido');
   } else {
-    b.textContent = '↩️ Devolver para a IA';
+    b.innerHTML = '↩️ Devolver<span class="so-largo"> para a IA</span>';
     b.title = 'O Carlos está parado neste cliente. Clique para ele voltar a responder.';
     b.classList.add('assumido');
   }
@@ -2411,12 +2977,17 @@ $('#btnAgendar').addEventListener('click', () => {
   $('#agendarQuem').textContent =
     `${conversaAtual.nome || conversaAtual.telefone} · ${conversaAtual.telefone}`;
   const f = $('#formAgendar');
-  const amanha = new Date(); amanha.setDate(amanha.getDate() + 1);
-  f.data.value = amanha.toISOString().slice(0, 10);
+  // próximo dia de oficina (domingo não abre); data no fuso de SP, não em UTC
+  const prox = new Date(hojeSP() + 'T12:00:00');
+  do { prox.setDate(prox.getDate() + 1); } while (prox.getDay() === 0);
+  f.data.value = diaTexto(prox);
+  f.data.min = hojeSP();
   f.veiculo.value = fichaCache?.carro_modelo || '';
   f.placa.value   = fichaCache?.placa || '';
   f.origem.value  = fichaCache?.origem || 'whatsapp';
-  $('#modalAgendarBg').classList.add('aberto');
+  conferirDataAgendar();
+  abrirModal('modalAgendarBg', '#agendarServico');
+  carregarHorariosSugeridos(conversaAtual.id);
 });
 
 $('#agendarServico').addEventListener('change', e => {
@@ -2775,6 +3346,7 @@ async function trocarDono(conv, novoId) {
   const antes = conv.atribuida_a;
   conv.atribuida_a = novoId;           // pinta na hora; desfaz se o banco recusar
   renderConversas();
+  if (conversaAtual?.id === conv.id) { conversaAtual.atribuida_a = novoId; renderDonoDoChat(); }
   try {
     const { error } = await sb.from('conversas')
       .update({ atribuida_a: novoId }).eq('id', conv.id);
@@ -2787,6 +3359,7 @@ async function trocarDono(conv, novoId) {
   } catch (err) {
     conv.atribuida_a = antes;
     renderConversas();
+    if (conversaAtual?.id === conv.id) { conversaAtual.atribuida_a = antes; renderDonoDoChat(); }
     toast('⚠️ ' + err.message);
   }
 }
@@ -2860,11 +3433,11 @@ async function trocarEtapa(conv, etapaId) {
    ============================================================ */
 async function carregarFunil() {
   const quadro = $('#funilQuadro');
-  quadro.innerHTML = '<div class="vazio"><span class="girando"></span>Montando o funil…</div>';
+  if (!CONVERSAS_FUNIL.length) quadro.innerHTML = esqueletoFunil();
   try {
     const { data, error } = await sb.from('conversas')
       .select('id,nome,telefone,cliente_id,etapa_id,etapa_em,etapa_por_ia,ultima_previa,'
-            + 'ultima_mensagem_em,status,clientes(carro_modelo,placa)')
+            + 'ultima_mensagem_em,status,atribuida_a,clientes(carro_modelo,placa)')
       .order('etapa_em', { ascending: true, nullsFirst: false })
       .limit(500);
     if (error) throw error;
@@ -2893,7 +3466,7 @@ function renderFunil() {
   const semEtapa = [];
   let ganhos = 0, perdidos = 0, abertos = 0;
 
-  for (const c of CONVERSAS_FUNIL) {
+  for (const c of CONVERSAS_FUNIL.filter(passaNoFiltroDoFunil)) {
     const e = c.etapa_id ? etapaPorId(c.etapa_id) : null;
     if (!e || !e.ativa) { semEtapa.push(c); continue; }
     porEtapa.get(e.id).push(c);
@@ -2955,10 +3528,14 @@ function cartaoHtml(c) {
   const parado = tempoParado(c.etapa_em);
   const atrasado = parado.dias >= PARADO_DEMAIS;
   const carro = [c.clientes?.carro_modelo, c.clientes?.placa].filter(Boolean).join(' · ');
-  return `<article class="funil-cartao${atrasado ? ' atrasado' : ''}" draggable="true" data-id="${esc(c.id)}">
+  const dono = c.atribuida_a ? EQUIPE.get(c.atribuida_a) : null;
+  return `<article class="funil-cartao${atrasado ? ' atrasado' : ''}" draggable="true" data-id="${esc(c.id)}"
+    tabindex="0" role="button" aria-label="${esc(`${c.nome || c.telefone}, ${parado.texto}. Enter abre a conversa; setas para os lados mudam a etapa`)}">
     <div class="fc-topo">
       <strong>${esc(c.nome || c.telefone)}</strong>
       ${c.etapa_por_ia ? '<i class="pl-ia" title="Etapa carimbada pela IA">✨</i>' : ''}
+      ${dono ? `<span class="fc-dono" style="--dn-cor:${corDoDono(c.atribuida_a)}" title="Responsável: ${esc(dono.nome)}">${
+        esc(c.atribuida_a === perfil?.id ? '★ meu' : primeiroNome(dono.nome))}</span>` : ''}
     </div>
     <small class="fc-tel">${esc(c.telefone || '')}</small>
     ${carro ? `<small class="fc-carro">${esc(carro)}</small>` : ''}
@@ -3013,6 +3590,7 @@ function ligarArrastar() {
       await trocarEtapa(conv, col.dataset.etapa || null);
     });
   });
+  ligarFunilPorToqueETeclado(quadro);
 }
 
 /** Vai para a aba Conversas já com a conversa aberta. */
@@ -3839,25 +4417,46 @@ $('#btnRelAplicar').addEventListener('click', () => {
 
 $$('#relAtalhos .chip').forEach(c => c.addEventListener('click', () => {
   $$('#relAtalhos .chip').forEach(x => x.classList.toggle('ativo', x === c));
-  prepararRelatorios(Number(c.dataset.dias) || 30);
+  if (c.dataset.periodo) prepararPeriodoNomeado(c.dataset.periodo);
+  else prepararRelatorios(Number(c.dataset.dias) || 30);
   carregarRelatorios();
 }));
 
+/** "Hoje", "Este mês" e "Mês passado" — os que a oficina mais pergunta. */
+function prepararPeriodoNomeado(nome) {
+  const hoje = new Date(hojeSP() + 'T12:00:00');
+  let de = hoje, ate = hoje;
+  if (nome === 'mes') de = new Date(hoje.getFullYear(), hoje.getMonth(), 1, 12);
+  if (nome === 'mes-passado') {
+    de = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1, 12);
+    ate = new Date(hoje.getFullYear(), hoje.getMonth(), 0, 12);
+  }
+  $('#relDe').value = diaTexto(de);
+  $('#relAte').value = diaTexto(ate);
+}
+
+let geracaoRelatorio = 0;
 async function carregarRelatorios() {
   const corpo = $('#relCorpo');
   const de = $('#relDe').value, ate = $('#relAte').value;
   if (!de || !ate) { corpo.innerHTML = semDados('Escolha as duas datas do período.'); return; }
+  if (de > ate) { corpo.innerHTML = semDados('A data inicial está depois da final — troque as duas.'); return; }
+  const minha = ++geracaoRelatorio;     // trocou o período no meio: a resposta velha não pinta por cima
 
-  corpo.innerHTML = '<div class="vazio"><span class="girando"></span>Montando os relatórios…</div>';
+  corpo.innerHTML = esqueletoRelatorios();
   try {
     const resposta = await fetch(`/api/relatorios?de=${encodeURIComponent(de)}&ate=${encodeURIComponent(ate)}`,
       { headers: await authCabecalhos() });
     const r = await resposta.json();
+    if (minha !== geracaoRelatorio) return;
     if (!r.ok) throw new Error(r.erro || 'não consegui montar os relatórios');
     RELATORIO = r;
     desenharRelatorios(r);
+    compararComPeriodoAnterior(de, ate, minha);
   } catch (err) {
-    corpo.innerHTML = `<div class="grafico-vazio">⚠️ ${esc(err.message)}</div>`;
+    if (minha !== geracaoRelatorio) return;
+    corpo.innerHTML = `<div class="grafico-vazio">⚠️ ${esc(err.message)}<br><br>
+      <button type="button" class="btn btn-ghost sm" onclick="carregarRelatorios()">Tentar de novo</button></div>`;
   }
 }
 
@@ -3880,15 +4479,15 @@ function desenharRelatorios(r) {
 
   /* (a) cartões */
   partes.push(`<div class="kpis">
-    <div class="kpi roxa"><span>Volume de leads</span><b>${esc(num(r.resumo.leads))}</b>
+    <div class="kpi roxa" data-kpi="leads"><span>Volume de leads</span><b>${esc(num(r.resumo.leads))}</b>
       <small>criados no período</small></div>
-    <div class="kpi laranja"><span>Taxa de conversão</span><b>${esc(pct(r.resumo.conversao))}</b>
+    <div class="kpi laranja" data-kpi="conversao"><span>Taxa de conversão</span><b>${esc(pct(r.resumo.conversao))}</b>
       <small>${r.resumo.ganhos + r.resumo.perdidos
         ? esc(`${num(r.resumo.ganhos)} de ${num(r.resumo.ganhos + r.resumo.perdidos)} leads decididos`)
         : 'nenhum lead decidido ainda'}</small></div>
-    <div class="kpi verde"><span>Clientes ganhos</span><b>${esc(num(r.resumo.ganhos))}</b>
+    <div class="kpi verde" data-kpi="ganhos"><span>Clientes ganhos</span><b>${esc(num(r.resumo.ganhos))}</b>
       <small>leads concluídos</small></div>
-    <div class="kpi vermelha"><span>Clientes perdidos</span><b>${esc(num(r.resumo.perdidos))}</b>
+    <div class="kpi vermelha" data-kpi="perdidos" data-kpi-inverso="1"><span>Clientes perdidos</span><b>${esc(num(r.resumo.perdidos))}</b>
       <small>leads perdidos</small></div>
   </div>`);
 
@@ -4067,6 +4666,7 @@ function desenharRelatorios(r) {
     `equipes_${r.periodo.de}_a_${r.periodo.ate}.csv`,
     [['Equipe', 'Novas', 'Resolvidas', 'Backlog', '1a resposta media (min)', 'Resolucao media (min)'],
      ...linhasEquipe(r.equipes)]));
+  pintarDeltas();       // comparação com o período anterior (se já chegou)
 }
 
 /* ---------------- Fechar modais novos ---------------- */
@@ -4103,7 +4703,7 @@ const TEMA_KEY = 'indycar_tema';
 const temaAtual = () =>
   document.documentElement.getAttribute('data-tema') === 'claro' ? 'claro' : 'escuro';
 
-function aplicarTema(tema) {
+function aplicarTema(tema, { salvar = true } = {}) {
   const claro = tema === 'claro';
   const html = document.documentElement;
   /* Regra da casa: na troca de tema, NENHUMA transição roda por um quadro.
@@ -4125,7 +4725,7 @@ function aplicarTema(tema) {
   if (ico) ico.textContent = claro ? '☀️' : '🌙';
   if (txt) txt.textContent = claro ? 'Tema claro' : 'Tema escuro';
 
-  try { localStorage.setItem(TEMA_KEY, claro ? 'claro' : 'escuro'); } catch { /* ignora */ }
+  if (salvar) { try { localStorage.setItem(TEMA_KEY, claro ? 'claro' : 'escuro'); } catch { /* ignora */ } }
 
   // Os SVG dos relatórios são pintados com cores lidas na hora do desenho:
   // se já houver relatório montado, redesenha para o eixo/texto acompanhar.
@@ -4136,7 +4736,7 @@ $('#btnTema')?.addEventListener('click', () =>
   aplicarTema(temaAtual() === 'claro' ? 'escuro' : 'claro'));
 
 // Deixa o botão e o meta coerentes com o que o script do <head> já aplicou.
-aplicarTema(temaAtual());
+aplicarTema(temaAtual(), { salvar: false });   // sem escolha salva, continua seguindo o sistema
 
 iniciar();
 
@@ -4188,6 +4788,8 @@ function reservarEspacoDaTarja() {
   const hFaixa = (!faixa || faixa.hidden) ? 0 : Math.ceil(faixa.getBoundingClientRect().height);
   const total = hTarja + hFaixa;
   app.style.paddingTop = total ? `${total}px` : '';
+  // a gaveta da ficha (celular) começa logo abaixo das faixas, não por baixo delas
+  document.documentElement.style.setProperty('--topo-faixas', `${total}px`);
 }
 // Redimensionar a janela faz o texto quebrar e a tarja mudar de altura.
 if (typeof ResizeObserver === 'function') {
@@ -4427,6 +5029,1209 @@ document.addEventListener('keydown', e => {
   const ficha = document.getElementById('colFicha');
   if (ficha?.classList.contains('aberta')) { ficha.classList.remove('aberta'); return; }
   if (window.matchMedia('(max-width:900px)').matches && document.querySelector('.conversas-layout.vendo-chat')) {
-    document.querySelector('.conversas-layout').classList.remove('vendo-chat');
+    fecharConversa({ focarLista: true });
   }
 });
+
+/* ============================================================
+   RODADA 2 (09/10/2026) — a tela do dia a dia
+   Caixa de entrada rápida, filtros que cruzam com Agenda/CRM/Comunicar,
+   contrato com o copiloto da IA, atalhos de teclado, avisos, modo foco,
+   fila offline e acessibilidade. Tudo que é novo nesta rodada mora daqui
+   para baixo; as funções antigas só ganharam ganchos para cá.
+   ============================================================ */
+
+/* ---------------- Estado da lista: dono e ordem ---------------- */
+let filtroDono = (() => {
+  try { return localStorage.getItem('indycar_dono') ?? (localStorage.getItem('indycar_so_minhas') === '1' ? 'meus' : ''); }
+  catch { return ''; }
+})();
+let ordemLista = (() => { try { return localStorage.getItem('indycar_ordem') || 'recentes'; } catch { return 'recentes'; } })();
+const FILTROS_URL = ['', 'nao_lidas', 'hoje', 'aguardando', 'agendada', 'fechou', 'nao_fechou', 'disparo',
+  'quentes', 'amanha', 'revisao', 'aniversario'];
+
+function restaurarPreferenciasDaLista() {
+  // ?filtro=nao_lidas (atalho do app instalado, links de outros sistemas)
+  const doLink = new URLSearchParams(location.search).get('filtro');
+  if (doLink && FILTROS_URL.includes(doLink)) filtroStatus = doLink;
+  $$('#aba-conversas .filtros-status .chip').forEach(x => {
+    const ativo = (x.dataset.status || '') === filtroStatus;
+    x.classList.toggle('ativo', ativo);
+    x.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+  });
+  if (!['', 'meus', 'sem'].includes(filtroDono)) filtroDono = '';
+  pintarSegmentoDono();
+  const sel = $('#ordemLista');
+  if (sel) sel.value = ['recentes', 'espera', 'naolidas'].includes(ordemLista) ? ordemLista : 'recentes';
+}
+
+function pintarSegmentoDono() {
+  $$('[data-dono-filtro]').forEach(b => {
+    const ativo = (b.dataset.donoFiltro || '') === filtroDono;
+    b.classList.toggle('ativo', ativo);
+    b.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+  });
+}
+
+$$('[data-dono-filtro]').forEach(b => b.addEventListener('click', () => {
+  filtroDono = b.dataset.donoFiltro || '';
+  try {
+    localStorage.setItem('indycar_dono', filtroDono);
+    localStorage.setItem('indycar_so_minhas', filtroDono === 'meus' ? '1' : '0');   // compatível com a versão anterior
+  } catch { /* ignora */ }
+  pintarSegmentoDono();
+  limiteLista = PASSO_LISTA;
+  carregarConversas();
+}));
+
+$('#ordemLista')?.addEventListener('change', (ev) => {
+  ordemLista = ev.target.value;
+  try { localStorage.setItem('indycar_ordem', ordemLista); } catch { /* ignora */ }
+  carregarConversas();
+});
+
+/* ---------------- Filtros que cruzam com Agenda, CRM e Comunicar ----------------
+   O banco diz QUEM (clientes com horário amanhã, com revisão vencida, com
+   aniversário) e a lista traz as conversas dessas pessoas. */
+const consultaBaseDaLista = () => aplicarFiltrosBase(sb.from('conversas').select('*'))
+  .order('ultima_mensagem_em', { ascending: false, nullsFirst: false });
+
+async function conversasDosClientes(ids) {
+  const unicos = [...new Set(ids.filter(Boolean))];
+  if (!unicos.length) return { data: [], error: null };
+  const lotes = [];
+  for (let i = 0; i < unicos.length && i < 1200; i += 150) lotes.push(unicos.slice(i, i + 150));
+  const rs = await Promise.all(lotes.map(l => consultaBaseDaLista().in('cliente_id', l).limit(300)));
+  const erro = rs.find(r => r.error)?.error;
+  if (erro) return { data: null, error: erro };
+  const data = rs.flatMap(r => r.data || [])
+    .sort((a, b) => String(b.ultima_mensagem_em || '').localeCompare(String(a.ultima_mensagem_em || '')));
+  return { data, error: null };
+}
+
+const amanhaSP = () => { const d = new Date(hojeSP() + 'T12:00:00'); d.setDate(d.getDate() + 1); return diaTexto(d); };
+let cacheAniversarios = { ate: 0, ids: [] };
+
+const FILTROS_ESPECIAIS = {
+  /* 🔥 Quentes: quem espera consultor + orçamento na mesa com conversa nos últimos 3 dias */
+  async quentes() {
+    const etapasOrc = ETAPAS.filter(e => e.ativa && (e.status_lead === 'orcamento' || /or[cç]amento/i.test(e.nome))).map(e => e.id);
+    const desde = new Date(Date.now() - 72 * 3600_000).toISOString();
+    const pedidos = [consultaBaseDaLista().eq('aguardando_consultor', true).limit(150)];
+    if (etapasOrc.length) pedidos.push(consultaBaseDaLista().in('etapa_id', etapasOrc).gte('ultima_mensagem_em', desde).limit(250));
+    const rs = await Promise.all(pedidos);
+    const erro = rs.find(r => r.error)?.error;
+    if (erro) return { data: null, error: erro };
+    const vistos = new Set();
+    const data = rs.flatMap(r => r.data || []).filter(c => !vistos.has(c.id) && vistos.add(c.id));
+    return { data, error: null };
+  },
+  /* 📅 Amanhã: horário marcado na Agenda para amanhã (não cancelado) */
+  async amanha() {
+    const { data, error } = await sb.from('agendamentos').select('cliente_id')
+      .eq('data', amanhaSP()).in('status', ['aguardando', 'confirmado', 'em_atendimento']).limit(500);
+    if (error) return { data: null, error };
+    return conversasDosClientes((data || []).map(a => a.cliente_id));
+  },
+  /* 🔧 Revisão vencida: último serviço há 6+ meses e nada marcado (regra padrão do Comunicar) */
+  async revisao() {
+    const corte = new Date(); corte.setMonth(corte.getMonth() - 6);
+    const { data, error } = await sb.from('v_cliente_360').select('id')
+      .lt('ultimo_servico_em', corte.toISOString()).is('proximo_horario', null).limit(1200);
+    if (error) return { data: null, error };
+    return conversasDosClientes((data || []).map(c => c.id));
+  },
+  /* 🎂 Aniversário hoje ou nos próximos 7 dias (ano 1904 = só dia e mês, vale igual) */
+  async aniversario() {
+    if (cacheAniversarios.ate < Date.now()) {
+      const { data, error } = await sb.from('clientes').select('id,nascimento').not('nascimento', 'is', null).limit(8000);
+      if (error) return { data: null, error };
+      cacheAniversarios = { ate: Date.now() + 10 * 60_000,
+        ids: (data || []).filter(c => { const d = diasParaAniversario(c.nascimento); return d !== null && d <= 7; }).map(c => c.id) };
+    }
+    return conversasDosClientes(cacheAniversarios.ids);
+  },
+};
+
+/* ---------------- Contadores das abas (no banco, com respiro) ----------------
+   Antes: 3 contagens a CADA evento do tempo real. Agora: no máximo uma rodada
+   a cada 15 s (e logo depois de quem pediu por último). */
+let contadoresTimer = null, contadoresUltimo = 0;
+let naoLidasBanco = null;      // última contagem do banco (null = ainda não veio)
+function agendarContadores({ ja = false } = {}) {
+  clearTimeout(contadoresTimer);
+  const espera = ja ? 0 : Math.max(1200, 15_000 - (Date.now() - contadoresUltimo));
+  contadoresTimer = setTimeout(atualizarContadores, espera);
+}
+async function contar(montar) {
+  try {
+    const { count, error } = await montar(sb.from('conversas').select('id', { count: 'exact', head: true }));
+    return error ? null : (count ?? 0);
+  } catch { return null; }
+}
+function pintarContador(id, n, { mostrarZero = false } = {}) {
+  const el = document.getElementById(id);
+  if (!el || n === null) return;
+  el.textContent = n > 999 ? '999+' : String(n);
+  el.hidden = !n && !mostrarZero;
+}
+async function atualizarContadores() {
+  if (!sb || !perfil) return;
+  contadoresUltimo = Date.now();
+  const aberto = q => q.eq('tipo', 'atendimento').is('desfecho', null);
+  const [naoLidas, meus, semDono] = await Promise.all([
+    contar(q => aberto(q).gt('nao_lidas', 0)),
+    contar(q => aberto(q).eq('atribuida_a', perfil.id)),
+    contar(q => aberto(q).is('atribuida_a', null)),
+  ]);
+  pintarContador('cntNaoLidas', naoLidas);
+  pintarContador('cntMeus', meus);
+  pintarContador('cntSemDono', semDono);
+  // o número da barra lateral e do título: conversas esperando leitura (no banco, não só as carregadas)
+  if (naoLidas !== null) {
+    naoLidasBanco = naoLidas;
+    const b = $('#badgeNaoLidas');
+    b.textContent = naoLidas > 99 ? '99+' : naoLidas;
+    b.hidden = !naoLidas;
+    atualizarTituloDaAba(naoLidas);
+  }
+  atualizarBadgeHoje();       // Novos hoje + Aguardando consultor + Disparos (já existiam)
+}
+
+/* ---------------- Título da aba e selo do app instalado ---------------- */
+const TITULO_BASE = 'IndyCar · Atendimento';
+function atualizarTituloDaAba(n) {
+  document.title = n > 0 ? `(${n > 99 ? '99+' : n}) ${TITULO_BASE}` : TITULO_BASE;
+  try {
+    if (n > 0) navigator.setAppBadge?.(n).catch(() => {});
+    else navigator.clearAppBadge?.().catch(() => {});
+  } catch { /* navegador sem selo */ }
+}
+
+/* ---------------- Rodapé e rolagem infinita ---------------- */
+function atualizarRodapeLista(n) {
+  const el = $('#listaRodape');
+  if (!el) return;
+  const t = termoBusca.trim();
+  el.textContent = !jaCarregouConversas ? ''
+    : t ? `${n} resultado${n === 1 ? '' : 's'} para “${t}”${BUSCA_REMOTA.buscando ? ' · procurando no banco…' : ''}`
+    : temMaisConversas ? `${n} conversas na tela · role para ver mais`
+    : `${n} conversa${n === 1 ? '' : 's'}`;
+}
+
+let observadorFim = null;
+function vigiarFimDaLista() {
+  const alvo = $('#listaMais');
+  if (!alvo || typeof IntersectionObserver !== 'function') return;
+  observadorFim?.disconnect();
+  observadorFim = new IntersectionObserver(entradas => {
+    if (entradas.some(e => e.isIntersecting)) carregarMaisConversas();
+  }, { root: $('#listaConversas'), rootMargin: '0px 0px 300px 0px' });
+  observadorFim.observe(alvo);
+}
+function carregarMaisConversas() {
+  if (!temMaisConversas || carregandoMais || limiteLista >= 3000) return;
+  carregandoMais = true;
+  limiteLista += PASSO_LISTA;
+  const b = $('#listaMais button');
+  if (b) b.innerHTML = '<span class="girando"></span>Carregando…';
+  carregarConversas();
+}
+
+/* ---------------- Cliques e teclado na lista (um ouvinte só) ---------------- */
+const acharConversa = id => CONVERSAS.find(c => c.id === id) || BUSCA_REMOTA.lista.find(c => c.id === id)
+  || (conversaAtual?.id === id ? conversaAtual : null);
+
+$('#listaConversas').addEventListener('click', async (ev) => {
+  const t = ev.target;
+  const acao = t.closest('[data-acao]')?.dataset.acao;
+  if (acao === 'nova-conversa') return abrirModalNova();
+  if (acao === 'carregar-mais') return carregarMaisConversas();
+  if (acao === 'recarregar-lista') return carregarConversas();
+  const pegar = t.closest('[data-pegar]');
+  if (pegar) {
+    ev.stopPropagation();
+    const conv = acharConversa(pegar.dataset.pegar);
+    if (conv && perfil?.id) await trocarDono(conv, perfil.id);
+    return;
+  }
+  /* A plaquinha de dono abre o menu de quem responde — sem abrir a conversa */
+  const dono = t.closest('[data-dono]');
+  if (dono) {
+    ev.stopPropagation();
+    const conv = acharConversa(dono.dataset.dono);
+    if (conv) abrirMenuDono(dono, conv);
+    return;
+  }
+  /* A plaquinha abre o menu de etapas — e NÃO abre a conversa junto */
+  const pl = t.closest('.plaquinha');
+  if (pl) {
+    ev.stopPropagation();
+    const conv = acharConversa(pl.closest('.conversa')?.dataset.id);
+    if (conv) abrirMenuEtapas(pl, conv);
+    return;
+  }
+  const linha = t.closest('.conversa');
+  if (linha && !linha.classList.contains('esqueleto')) abrirConversa(linha.dataset.id);
+});
+
+/* ↑ ↓ (ou J K) andam entre as conversas; Enter abre e já põe o cursor no campo. */
+$('#listaConversas').addEventListener('keydown', (ev) => {
+  const linhas = $$('#listaConversas .conversa:not(.esqueleto)');
+  const atual = ev.target.closest?.('.conversa');
+  if (!linhas.length || !atual || ev.target !== atual) return;
+  const i = linhas.indexOf(atual);
+  let destino = null;
+  if (ev.key === 'ArrowDown' || ev.key === 'j') destino = linhas[Math.min(linhas.length - 1, i + 1)];
+  else if (ev.key === 'ArrowUp' || ev.key === 'k') destino = linhas[Math.max(0, i - 1)];
+  else if (ev.key === 'Home') destino = linhas[0];
+  else if (ev.key === 'End') destino = linhas[linhas.length - 1];
+  else if (ev.key === 'Enter' || ev.key === ' ') {
+    ev.preventDefault();
+    abrirConversa(atual.dataset.id, { focarCampo: !window.matchMedia('(max-width:900px)').matches });
+    return;
+  }
+  if (destino) {
+    ev.preventDefault();
+    linhas.forEach(l => l.setAttribute('tabindex', l === destino ? '0' : '-1'));
+    destino.focus();
+    if (destino === linhas[linhas.length - 1]) carregarMaisConversas();
+  }
+});
+
+/* ---------------- Dono no topo do chat ---------------- */
+function renderDonoDoChat() {
+  const el = $('#chatDono');
+  if (!el) return;
+  if (!conversaAtual) { el.innerHTML = ''; return; }
+  el.innerHTML = conversaAtual.atribuida_a ? donoHtml(conversaAtual)
+    : `<button type="button" class="dono pegar" data-pegar="${esc(conversaAtual.id)}"
+         title="Ninguém responsável — um clique e o cliente é seu (Alt+M)">★ Pegar para mim</button>`;
+}
+$('#chatDono')?.addEventListener('click', async (ev) => {
+  if (!conversaAtual) return;
+  ev.stopPropagation();
+  if (ev.target.closest('[data-pegar]')) return trocarDono(conversaAtual, perfil.id);
+  const b = ev.target.closest('[data-dono]');
+  if (b) abrirMenuDono(b, conversaAtual);
+});
+
+/* O menu de dono não fechava ao clicar fora nem com Esc (o de etapas fechava). */
+document.addEventListener('click', e => {
+  const el = $('#menuDono');
+  if (el && !el.hidden && !e.target.closest('#menuDono')) fecharMenuDono();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharMenuDono(); });
+window.addEventListener('resize', () => fecharMenuDono());
+
+/* ---------------- Contrato com o copiloto (public/copiloto.js) ---------------- */
+function detalheDaConversa(conv) {
+  return conv ? { conversaId: conv.id, clienteId: conv.cliente_id || null, telefone: conv.telefone || null, nome: conv.nome || null }
+    : { conversaId: null };
+}
+function avisarConversaAberta(conv) {
+  try { window.dispatchEvent(new CustomEvent('indycar:conversa', { detail: detalheDaConversa(conv) })); } catch { /* ignora */ }
+  // o endereço da página acompanha a conversa: dá para copiar, favoritar e voltar
+  try {
+    const u = new URL(location.href);
+    u.searchParams.delete('tel');
+    if (conv) u.searchParams.set('conversa', conv.id); else u.searchParams.delete('conversa');
+    history.replaceState(null, '', u.pathname + (u.searchParams.toString() ? '?' + u.searchParams : '') + u.hash);
+  } catch { /* ignora */ }
+}
+
+/** Fecha a conversa (voltar para a lista, não lida, excluída). */
+function fecharConversa({ focarLista = false } = {}) {
+  const tinha = conversaAtual;
+  conversaAtual = null;
+  conversaRenderizada = null;
+  MENSAGENS = [];
+  clearInterval(syncAbertaTimer);
+  fecharBuscaNaConversa();
+  $('#chat').hidden = true;
+  $('#chatVazio').hidden = false;
+  $('.conversas-layout').classList.remove('vendo-chat');
+  $('#colFicha').classList.remove('aberta');
+  $('#copilotoSlot').hidden = true;
+  $('#fichaConteudo').hidden = true;
+  const vazio = $('#fichaVazia');
+  vazio.hidden = false;
+  vazio.innerHTML = '<p>Sem conversa selecionada.</p>';
+  fichaCache = null;
+  if (tinha) avisarConversaAberta(null);
+  renderConversas();
+  if (focarLista && tinha) {
+    const linha = $(`#listaConversas .conversa[data-id="${CSS.escape(tinha.id)}"]`);
+    (linha || $('#buscaConversa'))?.focus({ preventScroll: false });
+  }
+}
+
+/** Põe o texto no campo de mensagem, foca e NÃO envia (Ctrl+Z desfaz). */
+function inserirNoCampo(texto) {
+  if (!conversaAtual) { toast('Abra uma conversa primeiro.'); return false; }
+  const t = String(texto ?? '');
+  campo.focus();
+  campo.select();
+  // execCommand mantém o desfazer do navegador; se não existir, troca direto
+  let foi = false;
+  try { foi = document.execCommand && document.execCommand('insertText', false, t); } catch { foi = false; }
+  if (!foi || campo.value !== t) { campo.value = t; }
+  campo.dispatchEvent(new Event('input'));
+  campo.selectionStart = campo.selectionEnd = campo.value.length;
+  return true;
+}
+
+/* window.IndyCar: a porta que o copiloto (e qualquer extensão da tela) usa.
+   Fica disponível desde o carregamento; "papel" e "conversa" são lidos na hora. */
+window.IndyCar = {
+  versao: 2,
+  authCabecalhos: () => authCabecalhos(),
+  toast: (msg, tipo) => toast(msg, tipo),
+  inserirNoCampo,
+  recarregarFicha: () => (conversaAtual ? carregarFicha(conversaAtual) : Promise.resolve()),
+  recarregarConversa: async () => {
+    if (!conversaAtual) return;
+    await Promise.all([carregarMensagens(), carregarConversas()]);
+    renderEtapaDoChat(); renderDonoDoChat(); renderBotaoAssumir();
+  },
+  abrirConversa: (id) => abrirConversa(id),
+  get papel() { return perfil?.papel || null; },
+  get conversa() { return detalheDaConversa(conversaAtual); },
+};
+function publicarApiIndyCar() {
+  // avisa quem carregou antes do login que agora tem perfil (e a conversa, se já abriu)
+  try { window.dispatchEvent(new CustomEvent('indycar:pronto', { detail: { papel: perfil?.papel || null } })); } catch { /* ignora */ }
+}
+
+/* ✨ no topo do chat: abre a ficha (gaveta no celular) já no copiloto */
+function abrirCopiloto() {
+  if (!conversaAtual) return;
+  const ficha = $('#colFicha');
+  if (window.matchMedia('(max-width:1180px)').matches) ficha.classList.add('aberta');
+  else $('.conversas-layout').classList.remove('ficha-fechada');
+  ficha.scrollTop = 0;
+  const slot = $('#copilotoSlot');
+  slot.hidden = false;
+  slot.setAttribute('tabindex', '-1');
+  slot.focus({ preventScroll: true });
+  try { window.dispatchEvent(new CustomEvent('indycar:copiloto-abrir', { detail: detalheDaConversa(conversaAtual) })); } catch { /* ignora */ }
+}
+$('#btnCopiloto')?.addEventListener('click', abrirCopiloto);
+$('#btnFecharFicha')?.addEventListener('click', () => { $('#colFicha').classList.remove('aberta'); $('#btnPainelCliente')?.focus(); });
+// gaveta aberta no celular/tablet: tocar fora fecha
+document.addEventListener('click', (ev) => {
+  const ficha = $('#colFicha');
+  if (!ficha?.classList.contains('aberta')) return;
+  if (ev.target.closest('#colFicha, #btnPainelCliente, #btnCopiloto, .menu-etapas, .modal-bg')) return;
+  ficha.classList.remove('aberta');
+});
+
+/* ---------------- Abrir pelo endereço: ?conversa= e ?tel= ----------------
+   É assim que Agenda, CRM e Comunicar mandam o atendente direto para a
+   conversa certa. */
+const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function abrirPeloEndereco() {
+  const p = new URLSearchParams(location.search);
+  const id = p.get('conversa'), tel = p.get('tel');
+  if (id && RE_UUID.test(id)) return abrirConversa(id);
+  if (!tel) return;
+  const digitos = normalizarDigitos(tel);
+  if (digitos.length < 10) return toast('⚠️ O telefone do link está incompleto.');
+  let conversaId = null;
+  try {
+    const r = await fetch(`/api/conversa-por-telefone?t=${encodeURIComponent(digitos)}`, { headers: await authCabecalhos() });
+    if (r.ok) conversaId = (await r.json())?.conversaId || null;
+  } catch { /* servidor sem a rota ainda: tenta direto no banco */ }
+  if (!conversaId) {
+    const { data } = await sb.from('conversas').select('id').eq('telefone_e164', digitos)
+      .order('ultima_mensagem_em', { ascending: false, nullsFirst: false }).limit(1);
+    conversaId = data?.[0]?.id || null;
+  }
+  if (conversaId) return abrirConversa(conversaId);
+  // ninguém com esse número ainda: já deixa a "Nova conversa" preenchida
+  $('#novaTelefone').value = telefoneBonito(digitos);
+  abrirModalNova();
+  toast('Nenhuma conversa com ' + telefoneBonito(digitos) + ' ainda — confira e abra uma nova.');
+}
+
+/* ---------------- Copiar (link da conversa, telefone, mensagem) ---------------- */
+async function copiarTexto(texto, aviso = '📋 Copiado') {
+  try { await navigator.clipboard.writeText(String(texto ?? '')); toast(aviso); }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = String(texto ?? ''); ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast(aviso); } catch { toast('⚠️ Não consegui copiar.'); }
+    ta.remove();
+  }
+}
+$('#btnCopiarLink')?.addEventListener('click', () => {
+  if (!conversaAtual) return;
+  copiarTexto(`${location.origin}/?conversa=${conversaAtual.id}`, '🔗 Link da conversa copiado');
+});
+$('#chatTelefone')?.addEventListener('click', () => {
+  if (conversaAtual) copiarTexto(telefoneBonito(conversaAtual.telefone), '📋 Telefone copiado');
+});
+
+/* ---------------- Ficha: links do cliente e edição na hora ---------------- */
+const URL_AGENDA = 'https://indycar-agendamentos.onrender.com';
+const URL_CRM = 'https://indycar-crm.onrender.com';
+const URL_COMUNICAR = 'https://indycar-posvenda.onrender.com';
+function linkComTelefone(base, tel) {
+  try { const u = new URL(base); if (tel) u.searchParams.set('tel', tel); return u.href; } catch { return base; }
+}
+function linksDoClienteHtml(conv, comunicarUrl) {
+  const tel = normalizarDigitos(conv.telefone_e164 || conv.telefone);
+  return `<nav class="ficha-links" aria-label="Este cliente nos outros sistemas">
+    <a href="${esc(linkComTelefone(URL_AGENDA, tel))}" target="_blank" rel="noopener" title="Abrir este cliente na Agenda">📅 Agenda</a>
+    <a href="${esc(linkComTelefone(URL_CRM, tel))}" target="_blank" rel="noopener" title="Abrir este cliente no CRM">📈 CRM</a>
+    <a href="${esc(linkComTelefone(comunicarUrl || URL_COMUNICAR, tel))}" target="_blank" rel="noopener" title="Abrir este cliente no Comunicar">📣 Comunicar</a>
+    <button type="button" data-copiar-tel title="Copiar o telefone">📋 Tel.</button>
+  </nav>`;
+}
+$('#colFicha')?.addEventListener('click', ev => {
+  if (ev.target.closest('[data-copiar-tel]') && conversaAtual) copiarTexto(telefoneBonito(conversaAtual.telefone), '📋 Telefone copiado');
+});
+
+function linhaInline(campoBanco, rotulo, valor, dica = '') {
+  return `<div class="ficha-linha"><span>${esc(rotulo)}</span>
+    <button type="button" class="inline-valor" data-inline="${esc(campoBanco)}" data-dica="${esc(dica)}"
+            title="Clique para editar" aria-label="${esc(rotulo)}: ${esc(valor || 'vazio')}. Editar">
+      ${valor ? esc(valor) : '<span class="ficha-faltando">adicionar</span>'}<i aria-hidden="true">✎</i></button></div>`;
+}
+/** Placa: tira espaço/hífen e põe em maiúsculas; aceita a antiga (ABC1234) e a Mercosul (ABC1D23). */
+function normalizarPlaca(v) { return String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+const placaValida = p => /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(p);
+
+function ligarEdicaoInline(conv, f) {
+  $$('#clienteVer [data-inline]').forEach(btn => btn.addEventListener('click', () => {
+    const campoBanco = btn.dataset.inline;
+    const atual = f[campoBanco] || '';
+    const input = document.createElement('input');
+    input.className = 'inline-input';
+    input.value = atual;
+    input.placeholder = btn.dataset.dica || '';
+    input.maxLength = campoBanco === 'placa' ? 8 : campoBanco === 'nome' ? 120 : 80;
+    input.setAttribute('aria-label', btn.getAttribute('aria-label')?.split(':')[0] || campoBanco);
+    if (campoBanco === 'placa') input.style.textTransform = 'uppercase';
+    btn.replaceWith(input);
+    input.focus(); input.select();
+    let feito = false;
+    const voltar = () => { if (input.isConnected) input.replaceWith(btn); btn.focus(); };
+    const salvar = async () => {
+      if (feito) return; feito = true;
+      let novo = input.value.trim();
+      if (campoBanco === 'placa') novo = normalizarPlaca(novo);
+      if (novo === (atual || '')) return voltar();
+      if (campoBanco === 'nome' && !novo) { toast('⚠️ O nome não pode ficar vazio.'); return voltar(); }
+      if (campoBanco === 'placa' && novo && !placaValida(novo)) { toast('⚠️ Placa fora do padrão (ABC1234 ou ABC1D23).'); feito = false; input.focus(); return; }
+      input.disabled = true;
+      try {
+        const { error } = await sb.from('clientes').update({ [campoBanco]: novo || null }).eq('id', conv.cliente_id);
+        if (error) throw error;
+        if (campoBanco === 'nome' && novo !== conv.nome) {
+          await sb.from('conversas').update({ nome: novo }).eq('id', conv.id);
+          conv.nome = novo;
+          if (conversaAtual?.id === conv.id) { $('#chatNome').textContent = novo; $('#chatAvatar').textContent = iniciais(novo); }
+        }
+        CLIENTES_INFO.set(conv.cliente_id, { ...(CLIENTES_INFO.get(conv.cliente_id) || {}), [campoBanco]: novo || null });
+        toast('✅ Salvo');
+        renderConversas();
+        if (conversaAtual?.id === conv.id) await carregarFicha(conv);
+      } catch (err) { toast('⚠️ ' + err.message); voltar(); }
+    };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); salvar(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); feito = true; voltar(); }
+    });
+    input.addEventListener('blur', () => { if (!feito) salvar(); });
+  }));
+}
+
+/* ---------------- Agendar: data conferida e horários livres ---------------- */
+function conferirDataAgendar() {
+  const f = $('#formAgendar'), aviso = $('#agendarAvisoData');
+  const v = f?.data.value;
+  if (!aviso) return;
+  if (!v) { aviso.hidden = true; return; }
+  const d = new Date(v + 'T12:00:00');
+  const msg = v < hojeSP() ? '⚠️ Essa data já passou.'
+    : d.getDay() === 0 ? '⚠️ Domingo a oficina não abre (seg–sáb, 8h às 17h30).' : '';
+  aviso.textContent = msg;
+  aviso.hidden = !msg;
+}
+$('#formAgendar')?.data?.addEventListener('change', conferirDataAgendar);
+
+/* Se o servidor expuser horários livres no contexto do copiloto, viram botões:
+   um toque preenche data e hora. Sem isso, o formulário segue como sempre. */
+async function carregarHorariosSugeridos(convId) {
+  const caixa = $('#agendarHorarios'), lista = $('#agendarHorariosLista');
+  caixa.hidden = true; lista.innerHTML = '';
+  const ctrl = new AbortController();
+  const limite = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    /* 1º: a rota de horários livres da Agenda (/api/ia/horarios), já filtrada
+       pelo serviço escolhido; 2º: o contexto do copiloto, se ela não existir. */
+    const servico = $('#agendarServico')?.selectedOptions[0]?.value ? $('#agendarServico').selectedOptions[0].textContent : '';
+    const cab = await authCabecalhos();
+    let brutos = [];
+    const r = await fetch(`/api/ia/horarios?dias=7&servico=${encodeURIComponent(servico)}`, { headers: cab, signal: ctrl.signal });
+    if (r.ok) {
+      const j = await r.json();
+      const sugeridos = j.sugeridos || [];
+      const chave = h => `${h.data} ${h.hora}`;
+      const ja = new Set(sugeridos.map(chave));
+      // as duas sugestões da IA primeiro; depois um de cada período por dia
+      const vistos = new Set();
+      const resto = (j.livres || []).filter(h => !ja.has(chave(h)) && !vistos.has(h.data + h.periodo) && vistos.add(h.data + h.periodo));
+      brutos = [...sugeridos.map(h => ({ ...h, sugerido: true })), ...resto];
+    } else {
+      const r2 = await fetch(`/api/ia/contexto/${encodeURIComponent(convId)}`, { headers: cab, signal: ctrl.signal });
+      if (!r2.ok) return;
+      const j = await r2.json();
+      brutos = j.ficha?.horariosSugeridos || j.horarios_sugeridos || [];
+    }
+    if (conversaAtual?.id !== convId) return;
+    const horarios = brutos.map(h => {
+      const s = typeof h === 'string' ? h : (h.inicio || (h.data && h.hora ? `${h.data} ${h.hora}` : ''));
+      const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(String(s));
+      return m ? { data: m[1], hora: m[2], sugerido: !!h.sugerido } : null;
+    }).filter(Boolean).filter(h => h.data >= hojeSP()).slice(0, 10);
+    if (!horarios.length) return;
+    lista.innerHTML = horarios.map(h => {
+      const d = new Date(`${h.data}T12:00:00`);
+      const dia = d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).replace('.', '');
+      return `<button type="button" class="chip horario${h.sugerido ? ' sugerido' : ''}" data-data="${esc(h.data)}" data-hora="${esc(h.hora)}"
+        ${h.sugerido ? 'title="Sugestão da IA"' : ''}>${h.sugerido ? '✨ ' : ''}${esc(dia)} · ${esc(h.hora)}</button>`;
+    }).join('');
+    caixa.hidden = false;
+  } catch { /* sem contexto: o formulário normal resolve */ }
+  finally { clearTimeout(limite); }
+}
+$('#agendarHorariosLista')?.addEventListener('click', ev => {
+  const b = ev.target.closest('[data-data]');
+  if (!b) return;
+  const f = $('#formAgendar');
+  f.data.value = b.dataset.data;
+  f.hora.value = b.dataset.hora;
+  $$('#agendarHorariosLista .chip').forEach(x => x.classList.toggle('ativo', x === b));
+  conferirDataAgendar();
+});
+
+/* ---------------- Funil: filtro, esqueleto, toque e teclado ---------------- */
+function esqueletoFunil() {
+  const coluna = `<section class="funil-coluna sk-coluna" aria-hidden="true"><header class="col-topo">
+      <span class="sk-linha" style="width:55%"></span></header><div class="funil-cartoes">
+      ${'<div class="funil-cartao sk-cartao"><div class="sk-linha" style="width:70%"></div><div class="sk-linha fina"></div><div class="sk-linha fina" style="width:50%"></div></div>'.repeat(3)}
+    </div></section>`;
+  return coluna.repeat(4);
+}
+function passaNoFiltroDoFunil(c) {
+  if ($('#funilSoMeus')?.checked && c.atribuida_a !== perfil?.id) return false;
+  const t = semAcentoBusca($('#funilBusca')?.value || '');
+  if (!t) return true;
+  const dig = normalizarDigitos(t);
+  const placa = semAcentoBusca(c.clientes?.placa).replace(/[\s-]/g, '');
+  return semAcentoBusca(c.nome).includes(t)
+    || (dig.length >= 3 && normalizarDigitos(c.telefone).includes(dig))
+    || (placa && placa.includes(t.replace(/[\s-]/g, '')))
+    || semAcentoBusca(c.clientes?.carro_modelo).includes(t);
+}
+let funilFiltroTimer = null;
+$('#funilBusca')?.addEventListener('input', () => { clearTimeout(funilFiltroTimer); funilFiltroTimer = setTimeout(renderFunil, 150); });
+$('#funilSoMeus')?.addEventListener('change', renderFunil);
+
+function moverCartaoPorTeclado(id, passo) {
+  const conv = CONVERSAS_FUNIL.find(c => c.id === id);
+  if (!conv) return;
+  const ativas = etapasAtivas();
+  const i = ativas.findIndex(e => e.id === conv.etapa_id);
+  const j = i < 0 ? (passo > 0 ? 0 : -1) : i + passo;
+  if (j < 0 || j >= ativas.length) return;
+  trocarEtapa(conv, ativas[j].id).then(() => {
+    $(`#funilQuadro .funil-cartao[data-id="${CSS.escape(id)}"]`)?.focus();
+  });
+}
+
+function ligarFunilPorToqueETeclado(quadro) {
+  if (quadro.dataset.ligado) return;          // ouvintes no quadro: ligados uma vez só
+  quadro.dataset.ligado = '1';
+
+  quadro.addEventListener('keydown', ev => {
+    const cart = ev.target.closest?.('.funil-cartao');
+    if (!cart || ev.target !== cart) return;
+    if (ev.key === 'Enter') { ev.preventDefault(); irParaConversa(cart.dataset.id); }
+    else if (ev.key === 'ArrowRight') { ev.preventDefault(); moverCartaoPorTeclado(cart.dataset.id, +1); }
+    else if (ev.key === 'ArrowLeft') { ev.preventDefault(); moverCartaoPorTeclado(cart.dataset.id, -1); }
+    else if (ev.key === ' ') {
+      ev.preventDefault();
+      const conv = CONVERSAS_FUNIL.find(c => c.id === cart.dataset.id);
+      if (conv) abrirMenuEtapas(cart, conv);
+    }
+  });
+
+  /* Arrastar no celular: segure o cartão (~0,35 s), ele "descola" e acompanha
+     o dedo; solte sobre a coluna. Toque rápido continua abrindo a conversa e
+     deslizar sem segurar continua rolando o quadro. */
+  let toque = null, ignorarClique = false;
+  const limpar = () => {
+    if (!toque) return;
+    clearTimeout(toque.timer);
+    toque.fantasma?.remove();
+    toque.cart.classList.remove('arrastando');
+    $$('.funil-coluna.sobre', quadro).forEach(c => c.classList.remove('sobre'));
+    toque = null;
+  };
+  quadro.addEventListener('touchstart', ev => {
+    const cart = ev.target.closest('.funil-cartao');
+    if (!cart || ev.touches.length !== 1 || ev.target.closest('.fc-mover')) return;
+    const t = ev.touches[0];
+    toque = { cart, x0: t.clientX, y0: t.clientY, arrastando: false, col: null };
+    toque.timer = setTimeout(() => {
+      if (!toque) return;
+      toque.arrastando = true;
+      cart.classList.add('arrastando');
+      const r = cart.getBoundingClientRect();
+      const f = cart.cloneNode(true);
+      f.className = 'funil-cartao fantasma-toque';
+      f.style.width = r.width + 'px';
+      f.style.left = (toque.x0 - r.width / 2) + 'px';
+      f.style.top = (toque.y0 - 30) + 'px';
+      document.body.appendChild(f);
+      toque.fantasma = f;
+      try { navigator.vibrate?.(15); } catch { /* sem vibração */ }
+    }, 350);
+  }, { passive: true });
+  quadro.addEventListener('touchmove', ev => {
+    if (!toque) return;
+    const t = ev.touches[0];
+    if (!toque.arrastando) {
+      if (Math.hypot(t.clientX - toque.x0, t.clientY - toque.y0) > 10) limpar();   // é rolagem
+      return;
+    }
+    ev.preventDefault();
+    toque.fantasma.style.left = (t.clientX - toque.fantasma.offsetWidth / 2) + 'px';
+    toque.fantasma.style.top = (t.clientY - 30) + 'px';
+    toque.fantasma.style.visibility = 'hidden';
+    const col = document.elementFromPoint(t.clientX, t.clientY)?.closest('.funil-coluna');
+    toque.fantasma.style.visibility = '';
+    $$('.funil-coluna', quadro).forEach(c => c.classList.toggle('sobre', c === col));
+    toque.col = col || null;
+    // perto da borda: o quadro rola sozinho para a próxima coluna
+    const r = quadro.getBoundingClientRect();
+    if (t.clientX > r.right - 40) quadro.scrollLeft += 18;
+    else if (t.clientX < r.left + 40) quadro.scrollLeft -= 18;
+  }, { passive: false });
+  quadro.addEventListener('touchend', () => {
+    if (!toque) return;
+    const { arrastando, col, cart } = toque;
+    limpar();
+    if (!arrastando) return;
+    ignorarClique = true; setTimeout(() => { ignorarClique = false; }, 450);
+    const conv = CONVERSAS_FUNIL.find(c => c.id === cart.dataset.id);
+    if (conv && col) trocarEtapa(conv, col.dataset.etapa || null);
+  });
+  quadro.addEventListener('touchcancel', limpar);
+  // depois de arrastar, o "clique" que o celular solta não abre a conversa
+  quadro.addEventListener('click', ev => { if (ignorarClique) { ev.stopPropagation(); ev.preventDefault(); } }, true);
+}
+
+/* ---------------- Relatórios: esqueleto e comparação ---------------- */
+function esqueletoRelatorios() {
+  return `<div class="kpis" aria-hidden="true">${'<div class="kpi sk-kpi"><div class="sk-linha" style="width:50%"></div><div class="sk-linha grossa" style="width:35%"></div><div class="sk-linha fina" style="width:70%"></div></div>'.repeat(4)}</div>
+    <section class="bloco-rel sk-bloco" aria-hidden="true"><div class="sk-linha" style="width:30%"></div><div class="sk-grafico"></div></section>
+    <p class="vazio" role="status"><span class="girando"></span>Montando os relatórios…</p>`;
+}
+let RELATORIO_ANTERIOR = null;
+async function compararComPeriodoAnterior(de, ate, geracao) {
+  RELATORIO_ANTERIOR = null;
+  const d0 = new Date(de + 'T12:00:00'), d1 = new Date(ate + 'T12:00:00');
+  const dias = Math.round((d1 - d0) / 86400000) + 1;
+  const antAte = new Date(d0); antAte.setDate(antAte.getDate() - 1);
+  const antDe = new Date(antAte); antDe.setDate(antDe.getDate() - (dias - 1));
+  try {
+    const r = await (await fetch(`/api/relatorios?de=${diaTexto(antDe)}&ate=${diaTexto(antAte)}`, { headers: await authCabecalhos() })).json();
+    if (geracao !== geracaoRelatorio || !r.ok) return;
+    RELATORIO_ANTERIOR = { chave: `${de}|${ate}`, resumo: r.resumo, de: diaTexto(antDe), ate: diaTexto(antAte) };
+    pintarDeltas();
+  } catch { /* sem comparação: os números do período continuam valendo */ }
+}
+function pintarDeltas() {
+  if (!RELATORIO || !RELATORIO_ANTERIOR) return;
+  if (RELATORIO_ANTERIOR.chave !== `${$('#relDe').value}|${$('#relAte').value}`) return;
+  const ant = RELATORIO_ANTERIOR.resumo || {};
+  $$('#relCorpo [data-kpi]').forEach(k => {
+    k.querySelector('.delta')?.remove();
+    const chave = k.dataset.kpi;
+    const a = Number(RELATORIO.resumo?.[chave]), b = Number(ant[chave]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+    let texto, sobe;
+    if (chave === 'conversao') {
+      const pp = Math.round((a - b) * 10) / 10;
+      if (pp === 0) texto = '= igual ao período anterior';
+      else texto = `${pp > 0 ? '▲' : '▼'} ${Math.abs(pp).toLocaleString('pt-BR')} pontos`;
+      sobe = pp > 0;
+    } else if (b === 0) {
+      texto = a ? '▲ antes era zero' : '= igual ao período anterior'; sobe = a > 0;
+    } else {
+      const pc = Math.round(((a - b) / b) * 100);
+      texto = pc === 0 ? '= igual ao período anterior' : `${pc > 0 ? '▲' : '▼'} ${Math.abs(pc)}%`;
+      sobe = pc > 0;
+    }
+    const bom = k.dataset.kpiInverso ? !sobe : sobe;
+    const neutro = texto.startsWith('=');
+    const el = document.createElement('small');
+    el.className = 'delta ' + (neutro ? 'neutro' : bom ? 'bom' : 'ruim');
+    el.textContent = neutro ? texto : `${texto} vs ${ddmm(RELATORIO_ANTERIOR.de)}–${ddmm(RELATORIO_ANTERIOR.ate)}`;
+    el.title = `Período anterior (${ddmm(RELATORIO_ANTERIOR.de)} a ${ddmm(RELATORIO_ANTERIOR.ate)}): ${chave === 'conversao' ? pct(b) : num(b)}`;
+    k.appendChild(el);
+  });
+}
+
+/* ---------------- Equipe: quem está com quantos clientes ---------------- */
+async function pintarCargaDaEquipe() {
+  const alvos = $$('#listaEquipe [data-carga]');
+  if (!alvos.length) return;
+  try {
+    const { data, error } = await sb.from('conversas').select('atribuida_a,nao_lidas,aguardando_consultor')
+      .eq('tipo', 'atendimento').is('desfecho', null).not('atribuida_a', 'is', null).limit(5000);
+    if (error) throw error;
+    const por = new Map();
+    for (const c of data || []) {
+      const p = por.get(c.atribuida_a) || { total: 0, naoLidas: 0, espera: 0 };
+      p.total++; if (c.nao_lidas > 0) p.naoLidas++; if (c.aguardando_consultor) p.espera++;
+      por.set(c.atribuida_a, p);
+    }
+    alvos.forEach(el => {
+      const p = por.get(el.dataset.carga);
+      el.innerHTML = !p ? '<span class="carga-zero">nenhum cliente em aberto</span>'
+        : `<b>${esc(String(p.total))}</b> cliente${p.total > 1 ? 's' : ''} em aberto${
+            p.naoLidas ? ` · <b class="carga-alerta">${esc(String(p.naoLidas))}</b> sem ler` : ''}${
+            p.espera ? ` · <b class="carga-alerta">${esc(String(p.espera))}</b> esperando consultor` : ''}`;
+    });
+  } catch { alvos.forEach(el => { el.textContent = ''; }); }
+}
+
+/* ---------------- Atalhos favoritos (por pessoa, neste navegador) ---------------- */
+const chaveFavoritos = () => `indycar_atalhos_fav_${perfil?.id || 'anon'}`;
+function favoritosAtalhos() {
+  try { return new Set(JSON.parse(localStorage.getItem(chaveFavoritos()) || '[]')); } catch { return new Set(); }
+}
+function alternarFavorito(id) {
+  const s = favoritosAtalhos();
+  s.has(id) ? s.delete(id) : s.add(id);
+  try { localStorage.setItem(chaveFavoritos(), JSON.stringify([...s])); } catch { /* ignora */ }
+  toast(s.has(id) ? '★ Favorito — aparece primeiro no menu' : '☆ Saiu dos favoritos');
+}
+/* ⚡ abre as respostas rápidas sem digitar "/" */
+$('#btnRespostas')?.addEventListener('click', () => {
+  if (!conversaAtual) return toast('Abra uma conversa primeiro.');
+  if (menuAberto) return fecharMenuAtalhos();
+  abrirMenuAtalhos('');
+  if (!menuAberto) return toast('Nenhum atalho ativo. Crie na aba Atalhos.');
+  $('#btnRespostas').setAttribute('aria-expanded', 'true');
+  campo.focus();
+});
+$('#btnRespostas')?.setAttribute('aria-haspopup', 'listbox');
+$('#atalhoLista')?.setAttribute('role', 'listbox');
+
+/* ---------------- Busca dentro da conversa ---------------- */
+const BUSCA_MSG = { termo: '', indice: 0, total: 0 };
+let buscaMsgTimer = null;
+function abrirBuscaNaConversa() {
+  if (!conversaAtual) return;
+  $('#buscaMsgBar').hidden = false;
+  const c = $('#buscaMsgCampo');
+  c.focus(); c.select();
+}
+function fecharBuscaNaConversa() {
+  const bar = $('#buscaMsgBar');
+  if (!bar || bar.hidden) return;
+  bar.hidden = true;
+  $('#buscaMsgCampo').value = '';
+  const tinha = !!BUSCA_MSG.termo;
+  Object.assign(BUSCA_MSG, { termo: '', indice: 0, total: 0 });
+  $('#buscaMsgConta').textContent = '';
+  if (tinha && conversaAtual) renderMensagens();
+}
+function atualizarResultadosBusca({ manterIndice = false, rolar = !manterIndice } = {}) {
+  const marcas = $$('#mensagens mark.achado');
+  BUSCA_MSG.total = marcas.length;
+  if (!manterIndice) BUSCA_MSG.indice = marcas.length - 1;            // começa da mais recente
+  BUSCA_MSG.indice = Math.min(Math.max(0, BUSCA_MSG.indice), Math.max(0, marcas.length - 1));
+  marcas.forEach((m, i) => m.classList.toggle('atual', i === BUSCA_MSG.indice));
+  $('#buscaMsgConta').textContent = !BUSCA_MSG.termo ? ''
+    : marcas.length ? `${BUSCA_MSG.indice + 1} de ${marcas.length}` : 'nada encontrado';
+  if (rolar && marcas[BUSCA_MSG.indice]) marcas[BUSCA_MSG.indice].scrollIntoView({ block: 'center' });
+}
+function andarNaBusca(passo) {
+  if (!BUSCA_MSG.total) return;
+  BUSCA_MSG.indice = (BUSCA_MSG.indice + passo + BUSCA_MSG.total) % BUSCA_MSG.total;
+  atualizarResultadosBusca({ manterIndice: true, rolar: true });
+}
+$('#btnBuscarNaConversa')?.addEventListener('click', () => ($('#buscaMsgBar').hidden ? abrirBuscaNaConversa() : fecharBuscaNaConversa()));
+$('#buscaMsgCampo')?.addEventListener('input', ev => {
+  clearTimeout(buscaMsgTimer);
+  buscaMsgTimer = setTimeout(() => {
+    BUSCA_MSG.termo = ev.target.value.trim().length >= 2 ? ev.target.value.trim() : '';
+    renderMensagens({ manterTopo: false });
+    atualizarResultadosBusca();
+  }, 150);
+});
+$('#buscaMsgCampo')?.addEventListener('keydown', ev => {
+  if (ev.key === 'Enter') { ev.preventDefault(); andarNaBusca(ev.shiftKey ? +1 : -1); }   // Enter = mais antiga
+  else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); fecharBuscaNaConversa(); campo.focus(); }
+});
+$('#buscaMsgAnt')?.addEventListener('click', () => andarNaBusca(-1));
+$('#buscaMsgProx')?.addEventListener('click', () => andarNaBusca(+1));
+$('#buscaMsgFechar')?.addEventListener('click', () => { fecharBuscaNaConversa(); campo.focus(); });
+
+/* ---------------- Avisos: notificação e som (só em segundo plano) ---------------- */
+function lerAvisos() {
+  try { return { notificacao: false, som: false, ...JSON.parse(localStorage.getItem('indycar_avisos') || '{}') }; }
+  catch { return { notificacao: false, som: false }; }
+}
+function gravarAvisos(a) { try { localStorage.setItem('indycar_avisos', JSON.stringify(a)); } catch { /* ignora */ } pintarAvisos(); }
+function pintarAvisos() {
+  const a = lerAvisos();
+  const ligado = a.notificacao || a.som;
+  const b = $('#btnNotificar');
+  if (b) {
+    b.textContent = ligado ? '🔔' : '🔕';
+    b.setAttribute('aria-pressed', ligado ? 'true' : 'false');
+    b.title = ligado ? 'Avisos ligados (notificação/som em segundo plano) — clique para desligar' : 'Ligar aviso de mensagem nova';
+  }
+  if ($('#cfgNotificacao')) $('#cfgNotificacao').checked = a.notificacao;
+  if ($('#cfgSom')) $('#cfgSom').checked = a.som;
+  const aviso = $('#cfgNotificacaoAviso');
+  if (aviso) {
+    const negada = 'Notification' in window && Notification.permission === 'denied';
+    aviso.hidden = !(a.notificacao && negada);
+    aviso.textContent = 'O navegador bloqueou as notificações deste site. Libere no cadeado ao lado do endereço.';
+  }
+}
+async function pedirPermissaoNotificacao() {
+  if (!('Notification' in window)) { toast('Este navegador não mostra notificações — fica só o som.'); return false; }
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') { toast('⚠️ Notificações bloqueadas. Libere no cadeado ao lado do endereço.'); return false; }
+  return (await Notification.requestPermission()) === 'granted';
+}
+$('#btnNotificar')?.addEventListener('click', async () => {
+  const a = lerAvisos();
+  if (a.notificacao || a.som) { gravarAvisos({ notificacao: false, som: false }); return toast('🔕 Avisos desligados'); }
+  const pode = await pedirPermissaoNotificacao();
+  gravarAvisos({ notificacao: pode, som: true });
+  toast(pode ? '🔔 Avisos ligados: notificação e som quando o painel estiver em segundo plano' : '🔔 Som ligado');
+});
+$('#cfgNotificacao')?.addEventListener('change', async ev => {
+  const a = lerAvisos();
+  a.notificacao = ev.target.checked ? await pedirPermissaoNotificacao() : false;
+  gravarAvisos(a);
+});
+$('#cfgSom')?.addEventListener('change', ev => { const a = lerAvisos(); a.som = ev.target.checked; gravarAvisos(a); if (a.som) tocarSom(); });
+$('#btnTestarAviso')?.addEventListener('click', () => {
+  const a = lerAvisos();
+  if (!a.notificacao && !a.som) return toast('Ligue a notificação ou o som primeiro.');
+  if (a.som) tocarSom();
+  if (a.notificacao && 'Notification' in window && Notification.permission === 'granted') {
+    new Notification('💬 Teste — IndyCar Atendimento', { body: 'É assim que a mensagem nova aparece.', icon: '/icon-192.png', tag: 'teste' });
+  }
+});
+$('#btnVerAtalhosTeclado')?.addEventListener('click', () => abrirAjudaTeclado());
+
+let audioCtx = null, ultimoSom = 0;
+function tocarSom() {
+  if (Date.now() - ultimoSom < 2500) return;     // rajada de mensagens = um "plim" só
+  ultimoSom = Date.now();
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const agora = audioCtx.currentTime;
+    [[880, 0], [1320, 0.12]].forEach(([freq, t]) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, agora + t);
+      g.gain.exponentialRampToValueAtTime(0.12, agora + t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, agora + t + 0.22);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(agora + t); o.stop(agora + t + 0.25);
+    });
+  } catch { /* sem áudio: segue sem som */ }
+}
+function avisarMensagemNova(m) {
+  const a = lerAvisos();
+  if (!a.notificacao && !a.som) return;
+  const segundoPlano = document.visibilityState !== 'visible';
+  const outraConversa = conversaAtual?.id !== m.conversa_id;
+  if (!segundoPlano && !outraConversa) return;
+  if (a.som) tocarSom();
+  // notificação só com o painel em segundo plano: na frente, o toast já avisa
+  if (a.notificacao && segundoPlano && 'Notification' in window && Notification.permission === 'granted') {
+    try {
+      const n = new Notification(`💬 ${m.nome || telefoneBonito(m.telefone) || 'Cliente'}`, {
+        body: String(m.corpo || (m.anexo ? '📎 anexo' : 'mensagem nova')).slice(0, 140),
+        icon: '/icon-192.png', tag: 'conv-' + (m.conversa_id || ''), renotify: true,
+      });
+      n.onclick = () => { window.focus(); if (m.conversa_id) irParaConversa(m.conversa_id); n.close(); };
+    } catch { /* alguns navegadores só notificam pelo service worker */ }
+  }
+}
+pintarAvisos();
+
+/* ---------------- Modo foco ---------------- */
+function aplicarModoFoco(ligar) {
+  $('#telaApp').classList.toggle('modo-foco', ligar);
+  $('#btnFoco')?.setAttribute('aria-pressed', ligar ? 'true' : 'false');
+  try { localStorage.setItem('indycar_foco', ligar ? '1' : '0'); } catch { /* ignora */ }
+}
+$('#btnFoco')?.addEventListener('click', () => {
+  const ligar = !$('#telaApp').classList.contains('modo-foco');
+  aplicarModoFoco(ligar);
+  toast(ligar ? '⛶ Modo foco — Alt+Z ou ⛶ para voltar' : 'Modo foco desligado');
+});
+try { if (localStorage.getItem('indycar_foco') === '1') aplicarModoFoco(true); } catch { /* ignora */ }
+
+/* ---------------- "⋯" no celular: ações menos usadas ---------------- */
+function fecharMenuMais({ focar = false } = {}) {
+  const m = $('#menuMaisAcoes');
+  if (!m || m.hidden) return;
+  m.hidden = true;
+  $('#btnMaisAcoes').setAttribute('aria-expanded', 'false');
+  if (focar) $('#btnMaisAcoes').focus();
+}
+$('#btnMaisAcoes')?.addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  const m = $('#menuMaisAcoes');
+  if (!m.hidden) return fecharMenuMais();
+  m.hidden = false;
+  // tela estreita: se o menu sairia pela esquerda, ancora pela esquerda do botão
+  m.style.left = ''; m.style.right = '';
+  if (m.getBoundingClientRect().left < 8) { m.style.left = '0'; m.style.right = 'auto'; }
+  $('#btnMaisAcoes').setAttribute('aria-expanded', 'true');
+  $('button:not([hidden]), select', m)?.focus();
+});
+// escolheu uma ação (botão) no menu: ele fecha; o seletor de situação fecha ao mudar
+$('#menuMaisAcoes')?.addEventListener('click', ev => { if (ev.target.closest('button')) fecharMenuMais(); });
+$('#chatStatus')?.addEventListener('change', () => fecharMenuMais());
+document.addEventListener('click', ev => { if (!ev.target.closest('.mais-acoes')) fecharMenuMais(); });
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && !$('#menuMaisAcoes')?.hidden) { ev.stopPropagation(); fecharMenuMais({ focar: true }); }
+}, true);
+
+/* ---------------- Sem internet: faixa e fila de envio ---------------- */
+const FILA_KEY = 'indycar_fila_envio';
+function lerFila() { try { return JSON.parse(localStorage.getItem(FILA_KEY) || '[]'); } catch { return []; } }
+function gravarFila(f) { try { localStorage.setItem(FILA_KEY, JSON.stringify(f)); } catch { /* ignora */ } }
+function filaOfflineAdicionar(item) {
+  const fila = lerFila();
+  const novo = { ...item, idLocal: 'f' + Date.now() + Math.random().toString(16).slice(2, 6), criada: new Date().toISOString() };
+  fila.push(novo);
+  gravarFila(fila);
+  locaisDe(item.conversaId).push({ _idLocal: novo.idLocal, _local: 'na_fila', conversa_id: item.conversaId,
+    corpo: item.corpo, direcao: 'saida', created_at: novo.criada });
+  pintarFaixaOffline();
+}
+let processandoFila = false;
+async function filaOfflineProcessar() {
+  const fila = lerFila();
+  // depois de recarregar a página, as que estão na fila voltam a aparecer no chat
+  for (const it of fila) {
+    const l = locaisDe(it.conversaId);
+    if (!l.some(x => x._idLocal === it.idLocal)) l.push({ _idLocal: it.idLocal, _local: 'na_fila', conversa_id: it.conversaId,
+      corpo: it.corpo, direcao: 'saida', created_at: it.criada });
+  }
+  if (!fila.length || navigator.onLine === false || processandoFila || !sb) { pintarFaixaOffline(); return; }
+  processandoFila = true;
+  let saiu = 0;
+  try {
+    for (const it of fila) {
+      tirarLocal(it.conversaId, it.idLocal);
+      gravarFila(lerFila().filter(x => x.idLocal !== it.idLocal));
+      const ok = await entregarMensagem({ id: it.conversaId, telefone: it.telefone, nome: it.nome, cliente_id: it.clienteId }, it.corpo);
+      if (ok) saiu++;
+    }
+  } finally { processandoFila = false; }
+  if (saiu) toast(`📤 ${saiu} mensage${saiu > 1 ? 'ns' : 'm'} da fila enviada${saiu > 1 ? 's' : ''}`);
+  if (conversaAtual) renderMensagens();
+  pintarFaixaOffline();
+}
+function pintarFaixaOffline() {
+  const f = $('#faixaOffline');
+  if (!f) return;
+  const fora = navigator.onLine === false, n = lerFila().length;
+  f.hidden = !fora && !n;
+  f.classList.toggle('na-fila', !fora && n > 0);
+  $('#faixaOfflineTexto').textContent = fora
+    ? `Sem internet. ${n ? `${n} mensage${n > 1 ? 'ns' : 'm'} na fila — ` : 'O que você enviar fica na fila e '}sai sozinho quando a conexão voltar.`
+    : `Enviando ${n} mensage${n > 1 ? 'ns' : 'm'} da fila…`;
+}
+window.addEventListener('offline', pintarFaixaOffline);
+window.addEventListener('online', () => { pintarFaixaOffline(); filaOfflineProcessar(); agendarRecargaLista(); });
+pintarFaixaOffline();
+
+/* ---------------- Modais: Esc, foco preso e foco de volta ---------------- */
+const FOCAVEIS = 'a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const modalAberto = () => [...document.querySelectorAll('.modal-bg.aberto')].pop() || null;
+function abrirModal(id, focoSel) {
+  const bg = document.getElementById(id);
+  if (!bg) return;
+  bg.classList.add('aberto');
+  if (focoSel) setTimeout(() => $(focoSel, bg)?.focus(), 80);
+}
+function fecharModal(id) { document.getElementById(id)?.classList.remove('aberto'); }
+$$('.modal-bg').forEach((bg, i) => {
+  const modal = $('.modal', bg);
+  const titulo = $('h3', modal);
+  if (titulo && !titulo.id) titulo.id = `modalTitulo${i}`;
+  modal?.setAttribute('role', 'dialog');
+  modal?.setAttribute('aria-modal', 'true');
+  if (titulo) modal?.setAttribute('aria-labelledby', titulo.id);
+  $$('.modal-x', bg).forEach(x => x.setAttribute('aria-label', 'Fechar'));
+  bg.setAttribute('aria-hidden', 'true');
+  let quemAbriu = null;
+  new MutationObserver(() => {
+    const aberto = bg.classList.contains('aberto');
+    if (aberto && bg.getAttribute('aria-hidden') === 'true') {
+      bg.setAttribute('aria-hidden', 'false');
+      quemAbriu = document.activeElement && !bg.contains(document.activeElement) ? document.activeElement : null;
+      setTimeout(() => { if (!bg.contains(document.activeElement)) $(FOCAVEIS, modal)?.focus(); }, 90);
+    } else if (!aberto && bg.getAttribute('aria-hidden') === 'false') {
+      bg.setAttribute('aria-hidden', 'true');
+      if (bg.id === 'modalAnexoBg' && anexoPendente?.url) { URL.revokeObjectURL(anexoPendente.url); anexoPendente = null; }
+      if (quemAbriu?.isConnected) quemAbriu.focus({ preventScroll: true });
+      quemAbriu = null;
+    }
+  }).observe(bg, { attributes: true, attributeFilter: ['class'] });
+  // clicar no fundo escuro fecha (todos os modais, não só alguns)
+  bg.addEventListener('click', e => { if (e.target === bg) bg.classList.remove('aberto'); });
+});
+document.addEventListener('keydown', e => {
+  const bg = modalAberto();
+  if (!bg) return;
+  if (e.key === 'Escape' && !menuAberto) { e.preventDefault(); bg.classList.remove('aberto'); return; }
+  if (e.key !== 'Tab') return;
+  const itens = $$(FOCAVEIS, bg).filter(el => el.offsetParent !== null);
+  if (!itens.length) return;
+  const primeiro = itens[0], ultimo = itens[itens.length - 1];
+  if (e.shiftKey && document.activeElement === primeiro) { e.preventDefault(); ultimo.focus(); }
+  else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primeiro.focus(); }
+  else if (!bg.contains(document.activeElement)) { e.preventDefault(); primeiro.focus(); }
+});
+// botão "+ Nova" ganha nome acessível e dica do atalho
+btnNova.setAttribute('aria-label', 'Nova conversa (Alt+N)');
+btnNova.title = 'Nova conversa (Alt+N)';
+btnNova.classList.add('btn-nova');
+
+/* ---------------- Atalhos de teclado ---------------- */
+const TECLAS = [
+  ['Ctrl + K  ou  /', 'Buscar conversa'],
+  ['↑ ↓  (ou J K) na lista', 'Andar entre as conversas · Enter abre'],
+  ['Alt + ↑ / ↓', 'Conversa anterior / próxima'],
+  ['Enter', 'Enviar · Shift+Enter quebra a linha'],
+  ['/  no campo', 'Respostas rápidas (★ favoritas primeiro)'],
+  ['Alt + 1 … 9', 'Marcar a etapa do funil (na ordem das colunas)'],
+  ['Alt + E', 'Abrir o menu de etapas'],
+  ['Alt + M', 'Pegar o cliente para mim'],
+  ['Alt + U', 'Marcar como não lida e voltar'],
+  ['Alt + F', 'Buscar dentro da conversa'],
+  ['Alt + I', 'Abrir o copiloto da IA'],
+  ['Alt + Z', 'Modo foco (só chat e ficha)'],
+  ['Alt + N', 'Nova conversa'],
+  ['Esc', 'Fechar menu, busca, gaveta ou modal'],
+  ['?', 'Esta lista'],
+];
+function abrirAjudaTeclado() {
+  const etapas = etapasAtivas().slice(0, 9).map((e, i) => `Alt+${i + 1} ${e.nome}`).join(' · ');
+  $('#listaTeclas').innerHTML = TECLAS.map(([k, d]) =>
+    `<dt>${k.split('  ').map(p => `<kbd>${esc(p.trim())}</kbd>`).join(' ')}</dt><dd>${esc(d)}</dd>`).join('')
+    + (etapas ? `<dt><kbd>Etapas</kbd></dt><dd>${esc(etapas)}</dd>` : '');
+  abrirModal('modalAjudaBg');
+}
+const digitando = el => !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+function irParaAbaConversas() {
+  if (!abaVisivel('conversas')) $$('.nav-item').find(b => b.dataset.aba === 'conversas')?.click();
+}
+function conversaVizinha(passo) {
+  const lista = conversasFiltradas();
+  if (!lista.length) return;
+  const i = lista.findIndex(c => c.id === conversaAtual?.id);
+  const alvo = lista[i < 0 ? 0 : Math.min(lista.length - 1, Math.max(0, i + passo))];
+  if (alvo && alvo.id !== conversaAtual?.id) {
+    abrirConversa(alvo.id);
+    $(`#listaConversas .conversa[data-id="${CSS.escape(alvo.id)}"]`)?.scrollIntoView({ block: 'nearest' });
+  }
+}
+document.addEventListener('keydown', (e) => {
+  if (e.defaultPrevented || modalAberto()) return;
+  const noCampo = digitando(e.target);
+  // Ctrl+K funciona até digitando; "/" e "?" só fora de campo
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+    e.preventDefault(); irParaAbaConversas(); fecharConversaNoCelular(); $('#buscaConversa').focus(); $('#buscaConversa').select(); return;
+  }
+  if (!noCampo && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.key === '?') { e.preventDefault(); return abrirAjudaTeclado(); }
+    if (e.key === '/' && abaVisivel('conversas')) { e.preventDefault(); fecharConversaNoCelular(); $('#buscaConversa').focus(); return; }
+  }
+  if (!e.altKey || e.ctrlKey || e.metaKey) return;
+  const cod = e.code;
+  if (cod === 'KeyN') { e.preventDefault(); irParaAbaConversas(); return abrirModalNova(); }
+  if (cod === 'KeyZ') { e.preventDefault(); return $('#btnFoco')?.click(); }
+  if (!conversaAtual || !abaVisivel('conversas')) return;
+  if (cod === 'ArrowDown') { e.preventDefault(); return conversaVizinha(+1); }
+  if (cod === 'ArrowUp') { e.preventDefault(); return conversaVizinha(-1); }
+  if (cod === 'KeyF') { e.preventDefault(); return abrirBuscaNaConversa(); }
+  if (cod === 'KeyI') { e.preventDefault(); return abrirCopiloto(); }
+  if (cod === 'KeyU') { e.preventDefault(); return $('#btnNaoLida')?.click(); }
+  if (cod === 'KeyM') {
+    e.preventDefault();
+    if (conversaAtual.atribuida_a === perfil?.id) return toast('★ Este cliente já é seu');
+    return trocarDono(conversaAtual, perfil.id);
+  }
+  if (cod === 'KeyE') { e.preventDefault(); const p = $('#chatEtapa .plaquinha'); if (p) abrirMenuEtapas(p, conversaAtual); return; }
+  const m = /^Digit([1-9])$/.exec(cod);
+  if (m) {
+    e.preventDefault();
+    const etapa = etapasAtivas()[Number(m[1]) - 1];
+    if (!etapa) return toast(`Não há etapa ${m[1]} — são ${etapasAtivas().length}.`);
+    if (etapa.id === conversaAtual.etapa_id) return toast(`Já está em ${etapa.nome}`);
+    trocarEtapa(conversaAtual, etapa.id);
+  }
+});
+/** No celular a busca fica na lista: se o chat está na frente, volta para ela. */
+function fecharConversaNoCelular() {
+  if (window.matchMedia('(max-width:900px)').matches && conversaAtual) fecharConversa();
+}
+
+/* O seletor de dono "★ Meus" antigo saiu da tela; o estado continua valendo. */
+pintarSegmentoDono();
+
+/* Relógio dos selos de espera: a cada minuto a lista se atualiza sozinha
+   ("⏱ 14min" vira "⏱ 15min" e muda de cor) sem ir ao banco. */
+setInterval(() => { if (jaCarregouConversas && document.visibilityState === 'visible') renderConversas(); }, 60_000);
+// trocou o serviço no "Agendar": os horários livres são outros (cada serviço tem a sua janela)
+$('#agendarServico')?.addEventListener('change', () => { if (conversaAtual) carregarHorariosSugeridos(conversaAtual.id); });
+
+/** Abriu (ou marcou como não lida) uma conversa: o número da barra e do título mexe na hora. */
+function ajustarNaoLidas(delta) {
+  if (naoLidasBanco === null) return;
+  naoLidasBanco = Math.max(0, naoLidasBanco + delta);
+  const b = $('#badgeNaoLidas');
+  b.textContent = naoLidasBanco > 99 ? '99+' : naoLidasBanco;
+  b.hidden = !naoLidasBanco;
+  pintarContador('cntNaoLidas', naoLidasBanco);
+  atualizarTituloDaAba(naoLidasBanco);
+}
+
+/* Chips numa linha só: a roda do mouse rola para o lado, e o chip ativo
+   (vindo do link ?filtro= ou de um clique) sempre fica à vista. */
+(() => {
+  const barra = $('#aba-conversas .filtros-status');
+  if (!barra) return;
+  barra.addEventListener('wheel', ev => {
+    if (Math.abs(ev.deltaY) <= Math.abs(ev.deltaX) || barra.scrollWidth <= barra.clientWidth) return;
+    ev.preventDefault();
+    barra.scrollLeft += ev.deltaY;
+  }, { passive: false });
+  const mostrarAtivo = () => $('.chip.ativo', barra)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  barra.addEventListener('click', () => setTimeout(mostrarAtivo, 0));
+  window.addEventListener('load', () => setTimeout(mostrarAtivo, 300));
+})();

@@ -4,6 +4,11 @@
 //   node scripts/mock-server.mjs            → http://localhost:3211  (perfil admin)
 //   abra  http://localhost:3211/?papel=atendente   para ver como o atendente vê
 //   abra  http://localhost:3211/?saude=ok          para ver a tela sem a faixa de saúde
+//   abra  http://localhost:3211/?envio=ok          para o envio dar certo (✓) em vez do 401
+//   MOCK_MUITAS=400 node scripts/mock-server.mjs   → +400 conversas (testa a rolagem infinita)
+//   MOCK_COPILOTO=c:/caminho/copiloto-teste.js     → serve esse arquivo como /copiloto.js
+//                                                    (sem ele e sem public/copiloto.js: arquivo vazio, sem erro)
+//   No console do navegador: __mockTempoReal('INSERT', 'whatsapp_mensagens', {...}) simula o tempo real.
 //
 // Serve a pasta public/ de verdade (o mesmo index.html, app.js e styles.css que
 // vão para o Render) e responde /api/* com dados inventados. A única coisa
@@ -24,6 +29,9 @@ const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; chars
 const agora = Date.now();
 const h = (n) => new Date(agora - n * 3600_000).toISOString();          // n horas atrás
 const d = (n) => new Date(agora - n * 86400_000).toISOString();         // n dias atrás
+// dia no fuso da oficina, n dias à frente (AAAA-MM-DD)
+const diaSP = (n = 0) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' })
+  .format(new Date(agora + n * 86400_000));
 const hojeMMDD = () => { const x = new Date(); return `${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
 
 const U = { admin: '11111111-1111-4111-8111-111111111111', atendente: '22222222-2222-4222-8222-222222222222' };
@@ -44,7 +52,7 @@ const DB = {
   ],
   etapas_funil: [
     { id: ETAPA.novo, nome: 'Novo contato', cor: '#3b82f6', ordem: 1, ativa: true, gatilhos: [] },
-    { id: ETAPA.orc, nome: 'Orçamento enviado', cor: '#f59e0b', ordem: 2, ativa: true, gatilhos: [] },
+    { id: ETAPA.orc, nome: 'Orçamento enviado', cor: '#f59e0b', ordem: 2, ativa: true, gatilhos: [], status_lead: 'orcamento' },
     { id: ETAPA.agendado, nome: 'Agendado', cor: '#22c55e', ordem: 3, ativa: true, gatilhos: [] },
     { id: ETAPA.servico, nome: 'Em serviço', cor: '#a855f7', ordem: 4, ativa: true, gatilhos: [] },
     { id: ETAPA.concluido, nome: 'Serviço concluído', cor: '#14b8a6', ordem: 5, ativa: true, gatilhos: [] },
@@ -81,7 +89,7 @@ const DB = {
   ],
   whatsapp_mensagens: [
     { id: 'm1', conversa_id: CONV.camila, telefone: '5512996830111', nome: 'Camila', corpo: 'Oi! Quanto fica a troca de óleo do Corolla?', direcao: 'entrada', status: 'recebido', created_at: d(1) },
-    { id: 'm2', conversa_id: CONV.camila, corpo: 'Oi, Camila! Aqui é o atendimento da IndyCar. Para o Corolla a gente faz o diagnóstico gratuito primeiro, pode trazer?', direcao: 'saida', status: 'enviado', created_at: d(1) },
+    { id: 'm2', conversa_id: CONV.camila, corpo: 'Oi, Camila! Aqui é o atendimento da IndyCar. Para o Corolla a gente faz o diagnóstico gratuito primeiro, pode trazer?', direcao: 'saida', status: 'enviado', created_at: new Date(agora - 86400_000 + 120_000).toISOString() },
     { id: 'm3', conversa_id: CONV.camila, corpo: 'Consigo levar amanhã de manhã?', direcao: 'entrada', status: 'recebido', created_at: h(0.2) },
     { id: 'm4', conversa_id: CONV.jose, corpo: 'Bom dia, meu freio está fazendo barulho', direcao: 'entrada', status: 'recebido', created_at: h(6) },
     { id: 'm5', conversa_id: CONV.jose, corpo: 'Bom dia, José! Vou passar para um consultor te atender.', direcao: 'saida', status: 'enviado', gerada_por_ia: true, created_at: h(5.5) },
@@ -95,10 +103,10 @@ const DB = {
     { id: 'l3', cliente_id: CLI.jose, servico: 'Pastilha de freio', valor_orcado: 450, valor_pago: 450, status: 'concluido', created_at: d(400), closed_at: d(395), origem: 'google' },
   ],
   agendamentos: [
-    { id: 'a1', cliente_id: CLI.camila, servico: 'Troca de óleo do motor', inicio_em: d(190), status: 'concluido', valor: 340, consultores: { nome: 'Leonardo' } },
-    { id: 'a2', cliente_id: CLI.camila, servico: 'Alinhamento 3D', inicio_em: new Date(agora + 86400_000).toISOString(), status: 'confirmado', valor: 0, consultores: { nome: 'Leonardo' } },
-    { id: 'a3', cliente_id: CLI.jose, servico: 'Pastilha de freio', inicio_em: d(395), status: 'concluido', valor: 450, consultores: { nome: 'Leonardo' } },
-    { id: 'a4', cliente_id: CLI.jose, servico: 'Revisão', inicio_em: d(100), status: 'nao_veio', valor: 0, consultores: null },
+    { id: 'a1', cliente_id: CLI.camila, servico: 'Troca de óleo do motor', inicio_em: d(190), data: d(190).slice(0, 10), status: 'concluido', valor: 340, consultores: { nome: 'Leonardo' } },
+    { id: 'a2', cliente_id: CLI.camila, servico: 'Alinhamento 3D', inicio_em: new Date(agora + 86400_000).toISOString(), data: diaSP(1), hora: '09:00', status: 'confirmado', valor: 0, consultores: { nome: 'Leonardo' } },
+    { id: 'a3', cliente_id: CLI.jose, servico: 'Pastilha de freio', inicio_em: d(395), data: d(395).slice(0, 10), status: 'concluido', valor: 450, consultores: { nome: 'Leonardo' } },
+    { id: 'a4', cliente_id: CLI.jose, servico: 'Revisão', inicio_em: d(100), data: d(100).slice(0, 10), status: 'nao_veio', valor: 0, consultores: null },
   ],
   v_cliente_360: [
     { id: CLI.camila, nome: 'Camila Rodrigues', telefone: '12996830111', carro_modelo: 'Corolla 2020', placa: 'FHR6F16', origem: 'whatsapp', cliente_desde: d(400),
@@ -128,6 +136,18 @@ const DB = {
 let CHAVE = 'cwk-chave-antiga-de-teste-0000000000943a';
 let ultimoEnvio401 = true;   // o primeiro envio simula a chave recusada
 
+// Caixa de entrada cheia (como a real, com 2.400+): MOCK_MUITAS=400 cria conversas de enchimento
+const NOMES = ['Ana', 'Bruno', 'Carla', 'Diego', 'Elaine', 'Fábio', 'Gisele', 'Hugo', 'Íris', 'Jorge', 'Kátia', 'Lucas'];
+for (let i = 0; i < Number(process.env.MOCK_MUITAS || 0); i++) {
+  const tel = String(12900000000 + i * 7919).slice(0, 11);
+  DB.conversas.push({ id: `c1000000-0000-4000-8000-${String(i).padStart(12, '0')}`, cliente_id: null, telefone: '55' + tel, telefone_e164: tel,
+    nome: `${NOMES[i % NOMES.length]} Teste ${String(i + 1).padStart(3, '0')}`, status: 'aberta', atribuida_a: i % 3 ? U.admin : null,
+    ia_ativa: true, nao_lidas: i % 7 === 0 ? 1 : 0, ultima_mensagem_em: h(2 + i * 0.7), ultima_previa: 'Mensagem de enchimento ' + (i + 1),
+    created_at: d(1 + i), tipo: 'atendimento', etapa_id: ETAPA.novo, desfecho: null, aguardando_consultor: false });
+}
+// ações do copiloto em memória (para executar / recusar / desfazer)
+const ACOES = new Map();
+
 // ------------------------------------------------- dublê do supabase-js
 // Montado em texto para ser injetado no HTML. Encadeia .from().select().eq()...
 // e resolve { data, error, count } lendo o DB em memória pela rota /api/_mock.
@@ -153,7 +173,17 @@ const DUBLE_SUPABASE = `<script>
     p.then = function(ok, ko){ return pedir(op).then(ok, ko); };
     return p;
   }
-  var canal = { on: function(){ return canal; }, subscribe: function(cb){ setTimeout(function(){ cb && cb('SUBSCRIBED'); }, 300); return canal; } };
+  // tempo real de mentira: guarda os ouvintes; __mockTempoReal(evento, tabela, linha) dispara
+  var ouvintes = [];
+  var canal = { on: function(tipo, filtro, cb){ ouvintes.push({ f: filtro || {}, cb: cb }); return canal; },
+                subscribe: function(cb){ setTimeout(function(){ cb && cb('SUBSCRIBED'); }, 300); return canal; } };
+  window.__mockTempoReal = function(evento, tabela, linha){
+    var n = 0;
+    ouvintes.forEach(function(o){
+      if ((o.f.event === '*' || o.f.event === evento) && o.f.table === tabela) { n++; o.cb({ eventType: evento, new: linha || {}, old: {} }); }
+    });
+    return n;
+  };
   window.supabase = { createClient: function(){ return {
     auth: {
       getSession: function(){ return Promise.resolve({ data: { session: { access_token: 'mock-' + PAPEL, user: { id: PAPEL === 'admin' ? ${JSON.stringify(U.admin)} : ${JSON.stringify(U.atendente)}, email: 'teste@indycartaubate.com' } } } }); },
@@ -179,14 +209,15 @@ function aplicarFiltro(l, [f, a, b]) {
     case 'neq': return v !== b;
     case 'gt': return v > b; case 'gte': return v >= b; case 'lt': return v < b; case 'lte': return v <= b;
     case 'is': return b === null ? (v === null || v === undefined) : v === b;
-    case 'in': return (b || []).map(String).includes(String(v));
-    case 'like': case 'ilike': return new RegExp('^' + String(b).replace(/%/g, '.*') + '$', 'i').test(String(v ?? ''));
+    case 'in': return (Array.isArray(b) ? b : String(b || '').replace(/^\(|\)$/g, '').split(',')).map(String).includes(String(v));
+    case 'like': case 'ilike': return new RegExp('^' + String(b).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i').test(String(v ?? ''));
     case 'not': { const [, , op, val] = [f, a, b]; if (op === 'is' && val === null) return !(v === null || v === undefined); return !aplicarFiltro(l, [op, a, val]); }
     case 'or': return String(a).split(',').some(parte => {
-      const m = /^([a-z_0-9]+)\.(eq|in|is)\.(.*)$/.exec(parte.trim());
+      const m = /^([a-z_0-9]+)\.(eq|in|is|gt|gte|lt|lte|like|ilike)\.(.*)$/.exec(parte.trim());
       if (!m) return false;
       if (m[2] === 'in') return m[3].replace(/^\(|\)$/g, '').split(',').map(s => s.replace(/"/g, '')).includes(String(pegar(l, m[1])));
-      return aplicarFiltro(l, [m[2], m[1], m[3] === 'null' ? null : m[3]]);
+      const val = m[3] === 'null' ? null : m[3] === 'true' ? true : m[3] === 'false' ? false : /^\d+$/.test(m[3]) && /^(gt|gte|lt|lte)$/.test(m[2]) ? Number(m[3]) : m[3];
+      return aplicarFiltro(l, [m[2], m[1], val]);
     });
     default: return true;
   }
@@ -210,7 +241,12 @@ function consultar(op) {
   }
   // o builder guarda [f,a,b,c]; o filtro 'not' chega como ['not', coluna, 'is', null]
   let linhas = tabela.filter(l => op.filtros.every(([f, a, b, c]) => f === 'not' ? !aplicarFiltro(l, [b, a, c]) : aplicarFiltro(l, [f, a, b])));
-  if (op.acao === 'update') { linhas.forEach(l => Object.assign(l, op.corpo)); return { data: linhas, error: null }; }
+  if (op.acao === 'update') {
+    linhas.forEach(l => Object.assign(l, op.corpo));
+    // v_cliente_360 é uma VIEW no banco real: o que muda em clientes aparece nela
+    if (op.tabela === 'clientes') linhas.forEach(l => { const v = DB.v_cliente_360.find(x => x.id === l.id); if (v) ['nome', 'carro_modelo', 'placa', 'email', 'observacoes'].forEach(k => { if (k in op.corpo) v[k] = op.corpo[k]; }); });
+    return { data: linhas, error: null };
+  }
   if (op.acao === 'delete') { linhas.forEach(l => tabela.splice(tabela.indexOf(l), 1)); return { data: linhas, error: null }; }
   for (const [col, o] of op.ordem.slice().reverse()) {
     const asc = o.ascending !== false;
@@ -237,12 +273,25 @@ http.createServer(async (req, res) => {
     if (p === '/' || p === '/index.html') {
       PAPEL = url.searchParams.get('papel') === 'atendente' ? 'atendente' : 'admin';
       SAUDE_OK = url.searchParams.get('saude') === 'ok';
-      const html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')
+      if (url.searchParams.get('envio') === 'ok') ultimoEnvio401 = false;
+      let html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')
         .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase[^"]*"><\/script>/, DUBLE_SUPABASE.replace('__PAPEL__', PAPEL))
         .replace(/<link href="https:\/\/fonts\.googleapis\.com[^>]*>/, '');   // sem fonte externa no teste
+      /* As duas tags do copiloto são do outro agente; se ainda não estiverem no
+         index.html, o mock põe — assim dá para testar o contrato desde já. */
+      if (!/copiloto\.css/.test(html)) html = html.replace('</head>', '  <link rel="stylesheet" href="copiloto.css" />\n</head>');
+      if (!/copiloto\.js/.test(html)) html = html.replace('<script src="app.js"></script>', '<script src="app.js"></script>\n<script src="copiloto.js" defer></script>');
       res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' }); return res.end(html);
     }
     if (p === '/sw.js') { res.writeHead(200, { 'Content-Type': MIME['.js'] }); return res.end('/* sem service worker no modo de teste */'); }
+    // copiloto: o real (public/), o de teste (MOCK_COPILOTO) ou vazio — nunca 404
+    if (p === '/copiloto.js' || p === '/copiloto.css') {
+      const real = path.join(PUBLIC, p.slice(1));
+      const teste = p === '/copiloto.js' ? process.env.MOCK_COPILOTO : process.env.MOCK_COPILOTO_CSS;
+      const arq = fs.existsSync(real) ? real : (teste && fs.existsSync(teste) ? teste : null);
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(p)], 'Cache-Control': 'no-store' });
+      return res.end(arq ? fs.readFileSync(arq) : `/* ${p.slice(1)} ainda não existe — slot fica vazio */`);
+    }
     const arq = path.join(PUBLIC, path.normalize(p));
     if (!arq.startsWith(PUBLIC) || !fs.existsSync(arq) || fs.statSync(arq).isDirectory()) { res.writeHead(404); return res.end('Not Found'); }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(arq)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
@@ -314,6 +363,59 @@ http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, resposta: '{"status":"sent"}' });
   }
   if (p === '/api/conversas/sincronizar') return json(res, 200, { ok: true, novas: 0 });
+
+  /* ---------- copiloto da IA (respostas fictícias, para a integração visual) ---------- */
+  const livres = () => {
+    const l = [];
+    for (let i = 1; l.length < 12 && i < 10; i++) {
+      const dia = diaSP(i);
+      if (new Date(dia + 'T12:00:00').getDay() === 0) continue;
+      ['09:00', '14:30'].forEach(hora => l.push({ data: dia, hora, rotulo: `${dia.slice(8)}/${dia.slice(5, 7)} às ${hora}`, periodo: hora < '12' ? 'manhã' : 'tarde' }));
+    }
+    return l;
+  };
+  if ((mm = /^\/api\/ia\/contexto\/([^/]+)$/.exec(p))) {
+    const conv = DB.conversas.find(c => c.id === mm[1]);
+    if (!conv) return json(res, 404, { ok: false, erro: 'Conversa não encontrada.' });
+    const cli = DB.clientes.find(c => c.id === conv.cliente_id) || null;
+    const l = livres();
+    return json(res, 200, { ok: true, conversa: { id: conv.id, nome: conv.nome, telefone: conv.telefone, etapa_id: conv.etapa_id },
+      cliente: cli && { id: cli.id, nome: cli.nome, carro_modelo: cli.carro_modelo, placa: cli.placa },
+      resumo: 'Cliente quer trazer o carro amanhã de manhã; já fez troca de óleo há 6 meses.',
+      leads: DB.leads.filter(x => x.cliente_id === conv.cliente_id), agendamentos: DB.agendamentos.filter(x => x.cliente_id === conv.cliente_id),
+      ficha: { horariosLivres: l, horariosSugeridos: [l[0], l[3]] } });   // formato da rota real (lib/contexto.js)
+  }
+  if (p === '/api/ia/horarios') { const l = livres(); return json(res, 200, { ok: true, livres: l, sugeridos: [l[0], l[3]] }); }
+  if (p === '/api/ia/copiloto' && m === 'POST') {
+    const conv = DB.conversas.find(c => c.id === body.conversaId);
+    const nome = (conv?.nome || 'cliente').split(' ')[0];
+    const acoes = [
+      { id: 'ac' + Date.now(), tipo: 'mover_etapa', resumo: 'Mover para "Orçamento enviado"', parametros: { etapa_id: ETAPA.orc }, status: 'proposta', precisa_clique: true, reversivel: true },
+      { id: 'ad' + Date.now(), tipo: 'agendar', resumo: 'Agendar diagnóstico gratuito amanhã 09:00', parametros: { data: diaSP(1), hora: '09:00' }, status: 'proposta', precisa_clique: true, reversivel: true },
+    ];
+    acoes.forEach(a => ACOES.set(a.id, a));
+    const hs = livres().slice(0, 2).map(({ data, hora, rotulo }) => ({ data, hora, rotulo }));
+    return json(res, 200, { ok: true, id: 'cp' + Date.now(), resposta_acao_id: null, resposta_sugerida: `Oi, ${nome}! Pode trazer sim — amanhã às 9h fazemos o diagnóstico digital gratuito (uns 30 min). Quem conhece, Indyca! 🏎`,
+      acoes, resumo: 'Quer levar o carro amanhã de manhã.', pendencias: ['Confirmar o horário'], intencao: 'agendar', temperatura: 'quente',
+      motivo_classificacao: 'Pediu horário para amanhã.', horarios_sugeridos: hs, autonomia: 'confirmar', modelo: 'mock',
+      tokens: { entrada: 1200, saida: 180 }, duracao_ms: 900, uso: { chamadas: 13, limite: 500 } });
+  }
+  if ((mm = /^\/api\/ia\/acoes\/([^/]+)\/(executar|recusar|desfazer)$/.exec(p))) {
+    const a = ACOES.get(mm[1]) || { id: mm[1], tipo: 'desconhecida', resumo: '—' };
+    a.status = mm[2] === 'executar' ? 'executada' : mm[2] === 'recusar' ? 'recusada' : 'desfeita';
+    ACOES.set(a.id, a);
+    return json(res, 200, { ok: true, acao: a });
+  }
+  if (p === '/api/ia/acoes') return json(res, 200, { ok: true, acoes: [...ACOES.values()] });
+  if (p === '/api/ia/uso') return json(res, 200, { ok: true, chamadas: 12, limite: 500, tokens_entrada: 48000, tokens_saida: 6100, minhas: 4 });
+  if (p === '/api/ia/config') return json(res, 200, { ok: true, config: { ativo: true, autonomia: 'confirmar', modelo_rapido: 'claude-sonnet-5-5', modelo_forte: 'claude-opus-5-5' } });
+  if (p === '/api/conversa-por-telefone') {
+    const t = String(url.searchParams.get('t') || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+    const conv = DB.conversas.find(c => c.telefone_e164 === t);
+    return conv ? json(res, 200, { ok: true, conversaId: conv.id, nome: conv.nome, clienteId: conv.cliente_id, telefone: conv.telefone_e164,
+        link: `/?conversa=${conv.id}`, outras: [] })
+      : json(res, 404, { ok: false, conversaId: null, erro: 'Nenhuma conversa com esse telefone.' });
+  }
   if (p === '/api/ia/sugerir') return json(res, 200, { ok: true, sugestao: 'Oi! Aqui é o atendimento da IndyCar. Pode trazer o carro amanhã às 9h para o diagnóstico gratuito?', modelo: 'mock' });
   if (p === '/api/relatorios') {
     if (!admin) return json(res, 403, { erro: 'Só o administrador vê os relatórios da equipe.' });
