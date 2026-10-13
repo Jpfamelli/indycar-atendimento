@@ -88,7 +88,12 @@ async function iniciar() {
     return mostrarErroLogin('A biblioteca do Supabase não carregou. Verifique sua conexão com a internet.');
   }
 
-  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+  /* "Manter conectado" desmarcado: o login fica só nesta aba (sessionStorage) e
+     some ao fechar o navegador — computador compartilhado não fica logado. */
+  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+    auth: { storage: (typeof Acesso !== 'undefined' && Acesso.armazenamentoDaSessao()) || undefined,
+            persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
 
   // aba de IA fica desativada se não houver chave
   const selo = $('#seloIA');
@@ -96,13 +101,15 @@ async function iniciar() {
   selo.className = 'selo ' + (cfg.iaConfigurada ? 'on' : 'off');
   mostrarCartaoIA(cfg);
 
-  const { data: { session } } = await sb.auth.getSession();
-  if (session) await entrarNoApp(session.user);
-  else await verPrimeiroAcesso();   // sistema vazio? abre a criação do admin
-
+  // ouvinte ANTES de ler a sessão: a volta do link de "esqueci a senha" chega como evento
   sb.auth.onAuthStateChange((evento, sessao) => {
-    if (evento === 'SIGNED_OUT') location.reload();
+    if (evento === 'PASSWORD_RECOVERY') return Acesso.recuperacao();
+    if (evento === 'SIGNED_OUT' && !Acesso.saindoSozinho) location.reload();
   });
+  Acesso.preparar();
+  const { data: { session } } = await sb.auth.getSession();
+  if (session && !Acesso.emRecuperacao) await entrarNoApp(session.user);
+  else if (!session) await verPrimeiroAcesso();   // sistema vazio? abre a criação do admin
 }
 
 function mostrarErroLogin(msg) {
@@ -114,28 +121,8 @@ function mostrarErroLogin(msg) {
 /* ============================================================
    LOGIN
    ============================================================ */
-$('#formLogin').addEventListener('submit', async e => {
-  e.preventDefault();
-  const email = $('#loginEmail').value.trim();
-  const senha = $('#loginSenha').value;
-  const btn = $('#btnEntrar');
-  $('#loginErro').hidden = true;
-
-  if (!email || !senha) return mostrarErroLogin('Preencha e-mail e senha.');
-
-  btn.disabled = true;
-  btn.innerHTML = '<span class="girando"></span>Entrando…';
-  try {
-    const { data, error } = await sb.auth.signInWithPassword({ email, password: senha });
-    if (error) throw error;
-    await entrarNoApp(data.user);
-  } catch (err) {
-    mostrarErroLogin(traduzErroAuth(err.message));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Entrar';
-  }
-});
+/* O formulário de entrar (mostrar senha, Caps Lock, espera progressiva depois
+   de 5 erros, verificação em duas etapas) mora no acesso.js. */
 
 /* PRIMEIRO ACESSO
    O botão só aparece enquanto o sistema não tem NINGUÉM. Quem criar a
@@ -211,6 +198,7 @@ $('#formPrimeiro').addEventListener('submit', async (e) => {
 });
 
 function traduzErroAuth(m = '') {
+  if (typeof Acesso !== 'undefined') return Acesso.traduzirErro(m);
   const t = m.toLowerCase();
   if (t.includes('invalid login')) return 'E-mail ou senha incorretos.';
   if (t.includes('already registered')) return 'Esse e-mail já tem conta. Use "Entrar".';
@@ -219,31 +207,38 @@ function traduzErroAuth(m = '') {
   return m || 'Não consegui entrar.';
 }
 
-$('#btnSair').addEventListener('click', async () => {
-  if (canalRealtime) await sb.removeChannel(canalRealtime);
-  await sb.auth.signOut();
-});
+// Sair: abre a escolha de limpar o aparelho (acesso.js)
+$('#btnSair').addEventListener('click', () => Acesso.pedirSair());
 
 async function entrarNoApp(user) {
   usuario = user;
 
   const { data: p } = await sb.from('perfis').select('*').eq('id', user.id).maybeSingle();
   perfil = p || { nome: user.email.split('@')[0], email: user.email, papel: 'atendente' };
+  /* Portão: desativado, sem o app, verificação em duas etapas e troca obrigatória
+     de senha param aqui — cada um com a sua tela (acesso.js). */
+  if (!(await Acesso.portao(user, perfil, p))) return;
+  /* Já tinha entrado nesta página (sessão caiu e a pessoa entrou de novo, ou
+     acabou de trocar a senha): recarrega limpo em vez de ligar tudo duas vezes. */
+  if (window.__jaEntrou) { location.reload(); return; }
+  window.__jaEntrou = true;
 
   $('#telaLogin').hidden = true;
   $('#telaApp').hidden = false;
 
   $('#usuarioNome').textContent = perfil.nome;
-  $('#usuarioPapel').textContent = perfil.papel === 'admin' ? 'Administrador' : 'Atendente';
+  $('#usuarioPapel').textContent = rotuloPapel(perfil.papel);
   $('#usuarioAvatar').textContent = iniciais(perfil.nome);
   $('#perfilNome').value = perfil.nome;
   $('#perfilEmail').value = perfil.email;
-  $('#perfilPapel').value = perfil.papel === 'admin' ? 'Administrador' : 'Atendente';
+  $('#perfilPapel').value = rotuloPapel(perfil.papel);
   aplicarPapelConfig();
   await carregarNomesDaEquipe();      // a plaquinha de dono precisa dos nomes
-  const soAdmin = perfil.papel !== 'admin';
-  $('#btnExcluirConversa').hidden = soAdmin;
-  $('#btnSelecionarMsgs').hidden  = soAdmin;
+  /* Apagar é só de gestor/admin (o banco recusa o resto): o botão nem aparece. */
+  const naoApaga = !ehGestorAqui();
+  $('#btnExcluirConversa').hidden = naoApaga;
+  $('#btnSelecionarMsgs').hidden  = naoApaga;
+  if ($('#btnApagarLead')) $('#btnApagarLead').hidden = naoApaga;
   $('#btnSoMinhas')?.classList.toggle('ativo', soMinhas);
   vigiarConexao();   // acende a tarja se o WhatsApp estiver fora do ar
 
@@ -263,7 +258,15 @@ async function entrarNoApp(user) {
   carregarCodeWords();
   carregarFluxos();
   prepararRelatorios();       // só acerta as datas; o relatório vem ao abrir a aba
+  Acesso.depoisDeEntrar();     // menu do perfil, último acesso, vigia de desativação
+  Tarefas.iniciar();           // sino, minhas tarefas, presença na conversa
+  Equipe.iniciar();            // telas Equipe e Auditoria (gestor/admin)
 }
+
+/* Rótulos de papel em português, iguais em todo o ecossistema. */
+const ROTULO_PAPEL = { admin: 'Administrador', gestor: 'Gestor', atendente: 'Atendente', agenda: 'Agenda' };
+function rotuloPapel(p) { return ROTULO_PAPEL[p] || 'Atendente'; }
+const ehGestorAqui = () => perfil?.papel === 'admin' || perfil?.papel === 'gestor';
 
 /* Cartão da Claude na aba Integrações. A chave nunca vem para cá —
    o servidor só conta SE existe uma configurada e qual é o modelo. */
@@ -290,6 +293,9 @@ $$('.nav-item').forEach(b => b.addEventListener('click', () => {
   if (aba === 'relatorios' && !RELATORIO) carregarRelatorios();
   if (aba === 'funil')  carregarFunil();
   if (aba === 'etapas') atualizarAbaEtapas();
+  if (aba === 'tarefas') Tarefas.abrirAba();
+  if (aba === 'equipe') Equipe.abrirEquipe();
+  if (aba === 'auditoria') Equipe.abrirAuditoria();
 }));
 
 /* ============================================================
@@ -337,6 +343,7 @@ function esqueletoConversas(n = 7) {
    número de "geração": se outra carga começou depois (filtro trocado no meio,
    tempo real em rajada), a resposta velha é jogada fora em vez de pintar a
    lista errada por cima da certa. */
+let filtroEquipeLista = (() => { try { return sessionStorage.getItem('indycar_filtro_equipe') || ''; } catch { return ''; } })();
 const PASSO_LISTA = 150;
 let limiteLista = PASSO_LISTA;
 let geracaoLista = 0;
@@ -361,6 +368,11 @@ function aplicarFiltrosBase(q, { incluirDono = true } = {}) {
   if (filtroStatus === 'hoje') q = q.gte('created_at', new Date(hojeSP() + 'T00:00:00-03:00').toISOString());
   if (incluirDono && filtroDono === 'meus' && perfil?.id) q = q.eq('atribuida_a', perfil.id);
   if (incluirDono && filtroDono === 'sem') q = q.is('atribuida_a', null);
+  /* "Da equipe X": conversas cujo dono é alguém dessa equipe (conversas não têm equipe própria). */
+  if (incluirDono && filtroEquipeLista && filtroDono !== 'sem') {
+    const ids = [...EQUIPE.values()].filter(p => p.equipe_id === filtroEquipeLista).map(p => p.id);
+    q = q.in('atribuida_a', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
+  }
   return q;
 }
 
@@ -487,11 +499,20 @@ function normalizarDigitos(v) {
 /* Rascunho por conversa: o que foi digitado e não enviado fica guardado
    neste navegador e volta quando a conversa é reaberta. */
 const RASCUNHO_KEY = id => `indycar_rascunho_${id}`;
-function lerRascunho(id) { try { return localStorage.getItem(RASCUNHO_KEY(id)) || ''; } catch { return ''; } }
+/* Rodada 3: rascunho vive no sessionStorage — some ao fechar o navegador, então
+   texto de cliente não fica guardado no computador da recepção. O que ainda
+   estava no localStorage (versão anterior) é migrado na primeira leitura. */
+function lerRascunho(id) {
+  try {
+    const velho = localStorage.getItem(RASCUNHO_KEY(id));
+    if (velho !== null) { sessionStorage.setItem(RASCUNHO_KEY(id), velho); localStorage.removeItem(RASCUNHO_KEY(id)); }
+    return sessionStorage.getItem(RASCUNHO_KEY(id)) || '';
+  } catch { return ''; }
+}
 function guardarRascunho(id, texto) {
   try {
-    if (texto && texto.trim()) localStorage.setItem(RASCUNHO_KEY(id), texto);
-    else localStorage.removeItem(RASCUNHO_KEY(id));
+    if (texto && texto.trim()) sessionStorage.setItem(RASCUNHO_KEY(id), texto);
+    else sessionStorage.removeItem(RASCUNHO_KEY(id));
   } catch { /* armazenamento cheio ou bloqueado: o rascunho só não persiste */ }
 }
 
@@ -1068,6 +1089,8 @@ function renderMensagens({ forcarFim = false, manterTopo = false } = {}) {
     // mesma pessoa, menos de 5 min depois: cola na anterior (lê como um bloco só)
     const seguida = anterior && anterior.direcao === m.direcao
       && (new Date(m.created_at) - new Date(anterior.created_at)) < 5 * 60_000;
+    // outra pessoa da equipe respondeu logo depois: o nome dela aparece mesmo colado
+    const trocouAutor = !anterior || (anterior.enviado_por || null) !== (m.enviado_por || null) || !!anterior.gerada_por_ia !== !!m.gerada_por_ia;
     anterior = m;
     /* Documento/foto enviado tem cópia guardada: vira cartão que ABRE.
        Foto ganha miniatura (carregada depois, com link assinado). */
@@ -1088,7 +1111,7 @@ function renderMensagens({ forcarFim = false, manterTopo = false } = {}) {
         seguida ? ' seguida' : ''}${st === 'falhou' ? ' falhou' : ''}${m._local ? ' local' : ''}${
         modoSelecao && m.id ? ' selecionavel' : ''}${marcada ? ' marcada' : ''}" data-msg="${esc(idMsg)}">
       ${modoSelecao && m.id ? `<span class="msg-marca">${marcada ? '✓' : ''}</span>` : ''}
-      ${anexoHtml}<span class="msg-texto">${corpoHtml(m.corpo, termo)}</span>
+      ${m.direcao !== 'entrada' && (!seguida || trocouAutor) ? autorDaMensagem(m) : ''}${anexoHtml}<span class="msg-texto">${corpoHtml(m.corpo, termo)}</span>
       <span class="msg-hora">${esc(hora)} ${statusDaMensagem(m)}</span>
       ${!modoSelecao && m.corpo ? `<button type="button" class="msg-copiar" data-copiar="${esc(idMsg)}" title="Copiar o texto" aria-label="Copiar o texto da mensagem">⧉</button>` : ''}
     </div>`);
@@ -1120,6 +1143,23 @@ function renderMensagens({ forcarFim = false, manterTopo = false } = {}) {
     catch { /* fica sem miniatura; o clique ainda tenta abrir */ }
   });
   if (BUSCA_MSG.termo) atualizarResultadosBusca({ manterIndice: true });
+}
+
+/* Quem mandou a mensagem: iniciais com a cor da pessoa (ou ✨ quando foi a IA). */
+function autorDaMensagem(m) {
+  if (m.gerada_por_ia) return '<span class="msg-autor ia" title="Escrita pela IA" aria-label="Escrita pela IA">✨</span>';
+  const id = m.enviado_por || (m._local ? perfil?.id : null);
+  if (!id) return '';
+  const p = id === perfil?.id ? perfil : EQUIPE.get(id);
+  const nome = p?.nome || 'Equipe';
+  const cor = corDaPessoa(id, p);
+  return '<span class="msg-autor" style="--autor:' + cor + '" title="Enviada por ' + esc(nome) + '">'
+    + '<b aria-hidden="true">' + esc(iniciais(nome)) + '</b><i>' + esc(id === perfil?.id ? 'você' : primeiroNome(nome)) + '</i></span>';
+}
+/** Cor do perfil (avatar_cor, se válida) ou a cor estável calculada pelo id. */
+function corDaPessoa(id, p = null) {
+  const c = (p || EQUIPE.get(id) || (id === perfil?.id ? perfil : null))?.avatar_cor;
+  return /^#[0-9a-f]{6}$/i.test(String(c || '')) ? c : corDoDono(id || '');
 }
 
 /* Cliques dentro do chat: UM ouvinte só, ligado uma vez (antes eram vários
@@ -1517,6 +1557,7 @@ async function enviarMensagem() {
 }
 
 /** Grava no banco e entrega pelo CodeWords. Serve ao envio normal, à fila e ao "tentar de novo". */
+let COLUNA_ENVIADO_POR = true;
 async function entregarMensagem(conv, texto, { linhaExistente = null } = {}) {
   const local = linhaExistente ? null : {
     _idLocal: 'l' + Date.now() + Math.random().toString(16).slice(2, 6), _local: 'enviando',
@@ -1529,7 +1570,7 @@ async function entregarMensagem(conv, texto, { linhaExistente = null } = {}) {
   let linha = linhaExistente;
   try {
     if (!linha) {
-      const { data, error } = await sb.from('whatsapp_mensagens').insert({
+      const linhaNova = {
         conversa_id: conv.id,
         cliente_id:  conv.cliente_id,
         telefone:    conv.telefone,
@@ -1537,7 +1578,16 @@ async function entregarMensagem(conv, texto, { linhaExistente = null } = {}) {
         corpo:       texto,
         direcao:     'saida',
         status:      'pendente',
-      }).select('*').single();
+      };
+      /* Quem mandou (avatar com a cor da pessoa no chat). A coluna enviado_por é
+         nova: se o banco ainda não tiver, grava sem ela e não tenta de novo. */
+      if (COLUNA_ENVIADO_POR && perfil?.id) linhaNova.enviado_por = perfil.id;
+      let { data, error } = await sb.from('whatsapp_mensagens').insert(linhaNova).select('*').single();
+      if (error && linhaNova.enviado_por && /enviado_por|PGRST204|column/i.test(String(error.message || '') + (error.code || ''))) {
+        COLUNA_ENVIADO_POR = false;
+        delete linhaNova.enviado_por;
+        ({ data, error } = await sb.from('whatsapp_mensagens').insert(linhaNova).select('*').single());
+      }
       if (error) throw error;
       linha = data;
       tirarLocal(conv.id, local._idLocal);
@@ -2170,8 +2220,11 @@ $('#btnApagarLead')?.addEventListener('click', async () => {
   const { conv, lead } = leadEmEdicao;
   if (!confirm(`Apagar o registro "${lead.servico || 'sem serviço'}"?\n\nIsso sai do histórico do cliente e do CRM.`)) return;
   try {
-    const { error } = await sb.from('leads').delete().eq('id', lead.id);
+    /* O RLS novo deixa só gestor/admin apagar e, quando recusa, devolve 0 linhas
+       SEM erro — sem conferir, a tela diria 'apagado' sem ter apagado. */
+    const { data: apagadas, error } = await sb.from('leads').delete().eq('id', lead.id).select('id');
     if (error) throw error;
+    if (!apagadas?.length) throw new Error('Só gestor ou administrador pode apagar registros do CRM.');
     $('#modalLeadBg').classList.remove('aberto');
     toast('🗑 Registro apagado');
     await carregarFicha(conv);
@@ -2371,19 +2424,7 @@ $('#btnTestarIA').addEventListener('click', async () => {
 /* ============================================================
    CONFIGURAÇÕES
    ============================================================ */
-$('#formPerfil').addEventListener('submit', async e => {
-  e.preventDefault();
-  const nome = $('#perfilNome').value.trim();
-  if (!nome) return;
-  try {
-    const { error } = await sb.from('perfis').update({ nome }).eq('id', usuario.id);
-    if (error) throw error;
-    perfil.nome = nome;
-    $('#usuarioNome').textContent = nome;
-    $('#usuarioAvatar').textContent = iniciais(nome);
-    toast('✅ Perfil salvo');
-  } catch (err) { toast('⚠️ ' + err.message); }
-});
+/* Meu perfil (nome, cargo, telefone, cor) e a troca de senha moram no acesso.js. */
 
 /* Seletor interno das Configurações: "Minha conta" x "Equipe e sistema" */
 $$('#configTabs .config-pilula').forEach(b => b.addEventListener('click', () => {
@@ -2391,34 +2432,6 @@ $$('#configTabs .config-pilula').forEach(b => b.addEventListener('click', () => 
   $$('#configTabs .config-pilula').forEach(x => x.classList.toggle('ativo', x === b));
   $$('.config-secao').forEach(s => s.classList.toggle('ativa', s.id === `config-${secao}`));
 }));
-
-/* Trocar a própria senha — direto no cliente, via Supabase Auth.
-   Regras: mínimo 8 caracteres e as duas iguais. */
-$('#formSenha').addEventListener('submit', async e => {
-  e.preventDefault();
-  const s1 = $('#senhaNova').value, s2 = $('#senhaNova2').value;
-  const msg = $('#senhaMsg'), btn = $('#btnTrocarSenha');
-  const mostrar = (texto, ok) => {
-    msg.textContent = texto;
-    msg.className = 'form-msg ' + (ok ? 'ok' : 'erro');
-    msg.hidden = false;
-  };
-  if (s1.length < 8) return mostrar('A senha precisa ter pelo menos 8 caracteres.', false);
-  if (s1 !== s2)     return mostrar('As duas senhas não são iguais. Confira e tente de novo.', false);
-
-  btn.disabled = true; btn.textContent = 'Trocando…';
-  try {
-    const { error } = await sb.auth.updateUser({ password: s1 });
-    if (error) throw error;
-    $('#formSenha').reset();
-    mostrar('✅ Senha trocada. Use a nova da próxima vez que entrar.', true);
-    toast('✅ Senha alterada com sucesso');
-  } catch (err) {
-    mostrar('⚠️ Não consegui trocar: ' + (err.message || 'erro desconhecido'), false);
-  } finally {
-    btn.disabled = false; btn.textContent = 'Trocar senha';
-  }
-});
 
 /* A seção "Equipe e sistema" (WhatsApp Cloud API + equipe) é só para admin.
    Para atendente, escondemos o seletor e deixamos apenas "Minha conta".
@@ -2433,124 +2446,10 @@ function aplicarPapelConfig() {
   }
 }
 
-async function carregarEquipe() {
-  const ehAdmin = perfil?.papel === 'admin';
-  $('#blocoCadastro').hidden  = !ehAdmin;   // só o dono cadastra
-  $('#avisoCadastro').hidden  = ehAdmin;
-  try {
-    const { data } = await sb.from('perfis').select('*').order('created_at');
-    const el = $('#listaEquipe');
-    const lista = data || [];
-    el.innerHTML = lista.length ? lista.map(p => `
-      <div class="equipe-item${p.ativo ? '' : ' inativo'}">
-        <span class="avatar">${esc(iniciais(p.nome))}</span>
-        <div class="equipe-txt">
-          <strong>${esc(p.nome)}</strong>${p.id === perfil.id ? ' <em class="voce">(você)</em>' : ''}
-          <br><small>${esc(p.email)}${p.ativo ? '' : ' · sem acesso'}</small>
-          <span class="equipe-carga" data-carga="${esc(p.id)}" aria-live="polite"></span>
-        </div>
-        ${ehAdmin ? `
-          <label class="equipe-rodizio" title="Recebe clientes novos pelo rodízio">
-            <input type="checkbox" data-rodizio="${esc(p.id)}" ${p.recebe_leads ? 'checked' : ''} />
-            <span>recebe</span>
-          </label>
-          <select class="equipe-papel" data-papel="${esc(p.id)}" title="O que esta pessoa pode fazer">
-            <option value="atendente"${p.papel === 'admin' ? '' : ' selected'}>Atendente</option>
-            <option value="admin"${p.papel === 'admin' ? ' selected' : ''}>Administrador</option>
-          </select>` : `<span class="equipe-papel-txt">${p.papel === 'admin' ? 'Administrador' : 'Atendente'}</span>`}
-        ${ehAdmin && p.id !== perfil.id ? `<button class="btn btn-ghost sm" data-membro="${esc(p.id)}"
-            data-ativar="${p.ativo ? '0' : '1'}">${p.ativo ? 'Tirar acesso' : 'Devolver acesso'}</button>` : ''}
-      </div>`).join('')
-      : '<div class="vazio">Só você por enquanto.</div>';
-
-    /* Entrar ou sair do rodízio de clientes novos. Serve para férias e para
-       quem só administra, sem precisar tirar o acesso da pessoa. */
-    $$('#listaEquipe [data-rodizio]').forEach(cx => cx.addEventListener('change', async () => {
-      cx.disabled = true;
-      try {
-        const r = await (await fetch('/api/equipe/rodizio', {
-          method: 'POST', headers: await authCabecalhos(),
-          body: JSON.stringify({ id: cx.dataset.rodizio, recebe: cx.checked }),
-        })).json();
-        if (!r.ok) throw new Error(r.erro || 'não consegui alterar');
-        toast(cx.checked ? '✅ Volta a receber clientes novos' : '⏸ Fora do rodízio');
-        await carregarNomesDaEquipe();
-      } catch (err) {
-        cx.checked = !cx.checked;   // desfaz o visual: o banco não mudou
-        toast('⚠️ ' + err.message);
-      } finally { cx.disabled = false; }
-    }));
-
-    /* Troca de função. O servidor recusa rebaixar o último administrador —
-       sem isso dá para se trancar para fora do próprio sistema. */
-    $$('#listaEquipe [data-papel]').forEach(s => s.addEventListener('change', async () => {
-      const antes = s.dataset.antes || (s.querySelector('option[selected]')?.value ?? 'atendente');
-      s.disabled = true;
-      try {
-        const r = await (await fetch('/api/equipe/papel', {
-          method: 'POST', headers: await authCabecalhos(),
-          body: JSON.stringify({ id: s.dataset.papel, papel: s.value }),
-        })).json();
-        if (!r.ok) throw new Error(r.erro || 'não consegui mudar');
-        toast(s.value === 'admin' ? '✅ Agora é administrador' : '✅ Agora é atendente');
-        // mudar o próprio papel muda o que você enxerga: recarrega o perfil
-        if (s.dataset.papel === perfil.id) { location.reload(); return; }
-        await carregarEquipe();
-      } catch (err) {
-        toast('⚠️ ' + err.message);
-        s.value = antes;
-        s.disabled = false;
-      }
-    }));
-
-    // ligar/desligar o acesso de alguém
-    $$('#listaEquipe [data-membro]').forEach(b => b.addEventListener('click', async () => {
-      const ativar = b.dataset.ativar === '1';
-      if (!ativar && !confirm('Tirar o acesso desta pessoa? Ela não conseguirá mais entrar.')) return;
-      b.disabled = true;
-      try {
-        const r = await (await fetch('/api/equipe/ativo', {
-          method: 'POST', headers: await authCabecalhos(),
-          body: JSON.stringify({ id: b.dataset.membro, ativo: ativar }),
-        })).json();
-        if (!r.ok) throw new Error(r.erro || 'não consegui alterar');
-        toast(ativar ? '✅ Acesso devolvido' : '🔒 Acesso removido');
-        await carregarEquipe();
-      } catch (err) { toast('⚠️ ' + err.message); b.disabled = false; }
-    }));
-    pintarCargaDaEquipe();
-  } catch {
-    $('#listaEquipe').innerHTML = '<div class="vazio">Você vê apenas o seu próprio perfil.</div>';
-  }
-}
-
-/* Cadastro feito pelo servidor: no plano free o Supabase limita o e-mail de
-   confirmação, então signUp pela tela trava. E cadastro aberto num sistema com
-   dado de cliente seria porta destrancada — quem entra é quem o dono cadastrou. */
-$('#formNovoMembro').addEventListener('submit', async e => {
-  e.preventDefault();
-  const f = e.target, btn = $('#btnNovoMembro');
-  btn.disabled = true; btn.textContent = 'Cadastrando…';
-  try {
-    const r = await (await fetch('/api/equipe', {
-      method: 'POST', headers: await authCabecalhos(),
-      body: JSON.stringify({
-        nome:  f.nome.value.trim(),
-        email: f.email.value.trim(),
-        senha: f.senha.value,
-        papel: f.papel.value,
-      }),
-    })).json();
-    if (!r.ok) throw new Error(r.erro || 'não consegui cadastrar');
-    toast(`✅ ${r.nome} cadastrado — entregue o e-mail e a senha para a pessoa`);
-    f.reset();
-    await carregarEquipe();
-  } catch (err) {
-    toast('⚠️ ' + err.message);
-  } finally {
-    btn.disabled = false; btn.textContent = 'Cadastrar';
-  }
-});
+/* A lista da equipe e o cadastro saíram daqui: viraram a tela Equipe (equipe.js),
+   com convite em passos, papéis, apps e senha temporária. */
+async function carregarEquipe() { if (typeof Equipe !== 'undefined') Equipe.recarregar(); }
+$('#btnIrEquipe')?.addEventListener('click', () => $('.nav-item[data-aba="equipe"]')?.click());
 
 const MASCARA = '•';
 async function carregarWhatsappConfig() {
@@ -2782,7 +2681,7 @@ function renderAtalhos() {
   if (!lista.length) {
     el.innerHTML = `<div class="vazio estado-vazio"><span class="vazio-ico" aria-hidden="true">⚡</span>
       <p>${ATALHOS.length ? 'Nenhum atalho nesta categoria.' : 'Nenhum atalho ainda. Crie o primeiro e use digitando / no chat.'}</p>
-      <button type="button" class="btn btn-primary sm" onclick="abrirModalAtalho(null)">+ Novo atalho</button></div>`;
+      <button type="button" class="btn btn-primary sm" data-de-novo="atalho">+ Novo atalho</button></div>`;
     return;
   }
   const maisUsado = Math.max(0, ...lista.map(a => a.usos || 0));
@@ -3210,7 +3109,7 @@ function donoHtml(conv) {
   const p = EQUIPE.get(id);
   const nome = p?.nome || '';
   const eu = id === perfil?.id;
-  const cor = corDoDono(id);
+  const cor = corDaPessoa(id);
   /* Sem nome na lista, mostra "?" em vez de cortar um rótulo genérico na
      primeira palavra — "outro atendente" virava só "outro" e parecia nome. */
   const rotulo = eu ? '★ meu' : (nome ? primeiroNome(nome) : '?');
@@ -3311,13 +3210,13 @@ function abrirMenuDono(ancora, conv) {
   fecharMenuEtapas();
   convDoMenuDono = conv;
 
-  const gente = [...EQUIPE.values()].filter(p => p.ativo)
+  const gente = [...EQUIPE.values()].filter(p => p.ativo && p.papel !== 'agenda')   // o papel agenda não atende conversa
     .sort((a, b) => (a.id === perfil?.id ? -1 : b.id === perfil?.id ? 1 : a.nome.localeCompare(b.nome)));
 
   const opcoes = gente.map(p => {
     const atual = p.id === conv.atribuida_a;
     return `<button type="button" class="menu-etapa-op${atual ? ' atual' : ''}" data-novo="${esc(p.id)}">
-      <i style="background:${corDoDono(p.id)}"></i>
+      <i style="background:${corDaPessoa(p.id, p)}"></i>
       <span>${esc(p.nome)}${p.id === perfil?.id ? ' (você)' : ''}</span>
       ${atual ? '<b>atual</b>' : ''}
     </button>`;
@@ -3332,13 +3231,37 @@ function abrirMenuDono(ancora, conv) {
     ev.stopPropagation();
     const alvo = convDoMenuDono;
     fecharMenuDono();
-    await trocarDono(alvo, b.dataset.novo || null);
+    const novo = b.dataset.novo || null;
+    /* Passar para um COLEGA vira transferência com motivo (a pessoa é avisada no
+       sino); pegar para si ou deixar sem dono continua de um clique. */
+    if (novo && novo !== perfil?.id && novo !== alvo.atribuida_a && typeof Tarefas !== 'undefined') return Tarefas.abrirTransferir(alvo, novo);
+    await trocarDono(alvo, novo);
   }));
 
   el.style.visibility = 'hidden';
   el.hidden = false;
   posicionarMenu(el, ancora);
   el.style.visibility = '';
+}
+
+/* Gestor: dá dono pelo rodízio do servidor (quem recebe clientes, no expediente, com menos carga). */
+async function distribuirPeloRodizio(conv) {
+  const b = $('#chatDono [data-rodizio-conv]');
+  if (b) b.disabled = true;
+  try {
+    const r = await fetch(`/api/conversas/${encodeURIComponent(conv.id)}/distribuir`, { method: 'POST', headers: await authCabecalhos(), body: '{}' });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 404 && !j.codigo) throw new Error('o servidor ainda não tem o rodízio (POST /api/conversas/:id/distribuir)');
+    if (!r.ok || j.ok === false) {
+      if (j.atribuida_a) { conv.atribuida_a = j.atribuida_a; renderDonoDoChat(); renderConversas(); }
+      throw new Error(j.erro || `o servidor respondeu ${r.status}`);
+    }
+    conv.atribuida_a = j.para?.id || conv.atribuida_a;
+    if (conversaAtual?.id === conv.id) { conversaAtual.atribuida_a = conv.atribuida_a; renderDonoDoChat(); renderBotaoAssumir(); }
+    renderConversas();
+    toast(`🎯 Rodízio: ficou com ${primeiroNome(j.para?.nome || EQUIPE.get(conv.atribuida_a)?.nome || 'um colega')}`, 'ok');
+    agendarRecargaLista();
+  } catch (err) { toast('⚠️ ' + err.message, 'erro'); if (b) b.disabled = false; }
 }
 
 async function trocarDono(conv, novoId) {
@@ -4456,7 +4379,7 @@ async function carregarRelatorios() {
   } catch (err) {
     if (minha !== geracaoRelatorio) return;
     corpo.innerHTML = `<div class="grafico-vazio">⚠️ ${esc(err.message)}<br><br>
-      <button type="button" class="btn btn-ghost sm" onclick="carregarRelatorios()">Tentar de novo</button></div>`;
+      <button type="button" class="btn btn-ghost sm" data-de-novo="relatorios">Tentar de novo</button></div>`;
   }
 }
 
@@ -4738,7 +4661,10 @@ $('#btnTema')?.addEventListener('click', () =>
 // Deixa o botão e o meta coerentes com o que o script do <head> já aplicou.
 aplicarTema(temaAtual(), { salvar: false });   // sem escolha salva, continua seguindo o sistema
 
-iniciar();
+/* Só depois que acesso.js, equipe.js e tarefas.js carregaram (eles vêm depois
+   deste arquivo e o login já usa o acesso.js). */
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar, { once: true });
+else iniciar();
 
 /* ============================================================
    CONEXÃO DO WHATSAPP
@@ -4757,11 +4683,13 @@ var pareamentoTimer = null;
    Sem isto o atendente fica num painel que parece funcionar e não salva nada
    — o pior jeito de descobrir é o cliente esperando resposta. */
 let jaAvisouSessao = false;
-async function sessaoMorreu() {
+async function sessaoMorreu(motivo = 'Sua sessão expirou. Entre de novo para continuar.') {
   if (jaAvisouSessao) return;
   jaAvisouSessao = true;
   clearInterval(conexaoTimer);
-  try { await sb.auth.signOut(); } catch { /* já estava fora */ }
+  if (typeof Acesso !== 'undefined') Acesso.saindoSozinho = true;   // sem recarregar: o aviso precisa ficar na tela
+  try { if (typeof Tarefas !== 'undefined') Tarefas.parar(); } catch { /* ignora */ }
+  try { await sb.auth.signOut({ scope: 'local' }); } catch { /* já estava fora */ }
   const t = document.getElementById('tarjaConexao');
   if (t) t.hidden = true;
   document.getElementById('telaApp').hidden = true;
@@ -4771,7 +4699,8 @@ async function sessaoMorreu() {
     const aviso = document.getElementById('loginErro');
     if (aviso) {
       aviso.hidden = false;
-      aviso.textContent = 'Sua sessão expirou. Entre de novo para continuar.';
+      aviso.textContent = motivo;
+      if (typeof Acesso !== 'undefined') Acesso.mostrarVista('entrar');
     }
   }
 }
@@ -5306,12 +5235,15 @@ function renderDonoDoChat() {
   if (!conversaAtual) { el.innerHTML = ''; return; }
   el.innerHTML = conversaAtual.atribuida_a ? donoHtml(conversaAtual)
     : `<button type="button" class="dono pegar" data-pegar="${esc(conversaAtual.id)}"
-         title="Ninguém responsável — um clique e o cliente é seu (Alt+M)">★ Pegar para mim</button>`;
+         title="Ninguém responsável — um clique e o cliente é seu (Alt+M)">★ Pegar para mim</button>`
+      + (ehGestorAqui() ? `<button type="button" class="dono pegar rodizio" data-rodizio-conv="${esc(conversaAtual.id)}"
+         title="Dar dono pelo rodízio (quem está recebendo clientes e com menos carga)">🎯 Rodízio</button>` : '');
 }
 $('#chatDono')?.addEventListener('click', async (ev) => {
   if (!conversaAtual) return;
   ev.stopPropagation();
   if (ev.target.closest('[data-pegar]')) return trocarDono(conversaAtual, perfil.id);
+  if (ev.target.closest('[data-rodizio-conv]')) return distribuirPeloRodizio(conversaAtual);
   const b = ev.target.closest('[data-dono]');
   if (b) abrirMenuDono(b, conversaAtual);
 });
@@ -6132,6 +6064,7 @@ const TECLAS = [
   ['Alt + E', 'Abrir o menu de etapas'],
   ['Alt + M', 'Pegar o cliente para mim'],
   ['Alt + U', 'Marcar como não lida e voltar'],
+  ['Alt + T', 'Nova tarefa ligada a este cliente'],
   ['Alt + F', 'Buscar dentro da conversa'],
   ['Alt + I', 'Abrir o copiloto da IA'],
   ['Alt + Z', 'Modo foco (só chat e ficha)'],
@@ -6181,6 +6114,7 @@ document.addEventListener('keydown', (e) => {
   if (cod === 'KeyF') { e.preventDefault(); return abrirBuscaNaConversa(); }
   if (cod === 'KeyI') { e.preventDefault(); return abrirCopiloto(); }
   if (cod === 'KeyU') { e.preventDefault(); return $('#btnNaoLida')?.click(); }
+  if (cod === 'KeyT') { e.preventDefault(); return Tarefas.abrirNova({ daConversa: true }); }
   if (cod === 'KeyM') {
     e.preventDefault();
     if (conversaAtual.atribuida_a === perfil?.id) return toast('★ Este cliente já é seu');
@@ -6235,3 +6169,16 @@ function ajustarNaoLidas(delta) {
   barra.addEventListener('click', () => setTimeout(mostrarAtivo, 0));
   window.addEventListener('load', () => setTimeout(mostrarAtivo, 300));
 })();
+
+/* Rodada 3: o servidor agora manda CSP sem 'unsafe-inline' para scripts — atributo
+   onclick="…" no HTML gerado deixou de rodar. Os botões "Tentar de novo" e
+   "+ Novo atalho" dos estados vazios passam por este ouvinte único. */
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-de-novo]');
+  if (!b) return;
+  const alvo = b.dataset.deNovo;
+  if (alvo === 'atalho') abrirModalAtalho(null);
+  else if (alvo === 'relatorios') carregarRelatorios();
+  else if (alvo === 'equipe' && typeof Equipe !== 'undefined') Equipe.recarregar();
+  else if (alvo === 'auditoria' && typeof Equipe !== 'undefined') Equipe.abrirAuditoria();
+});

@@ -52,16 +52,80 @@
     <h1 id="loginTitulo">Bem-vindo!</h1>
     <p class="login-sub" id="loginSub">Informe seu e-mail e senha para entrar:</p>
 
-    <form id="formLogin" novalidate>
+    <form id="formLogin" class="vista-login" novalidate>
       <label>E-mail
-        <input id="loginEmail" type="email" placeholder="seu@email.com" autocomplete="email" required />
+        <input id="loginEmail" type="email" placeholder="seu@email.com" autocomplete="username" inputmode="email" required />
       </label>
       <label>Senha
-        <input id="loginSenha" type="password" placeholder="••••••••" autocomplete="current-password" required />
+        <span class="campo-senha">
+          <input id="loginSenha" type="password" placeholder="••••••••" autocomplete="current-password" required />
+          <button type="button" class="olho" data-olho="loginSenha" aria-label="Mostrar a senha" aria-pressed="false" title="Mostrar a senha">👁</button>
+        </span>
       </label>
-      <div id="loginErro" class="alerta" hidden></div>
+      <p class="aviso-caps" id="avisoCaps" hidden role="status">⇪ Caps Lock ligado</p>
+      <div class="login-opcoes">
+        <label class="caixinha"><input type="checkbox" id="loginLembrar" /> <span>Lembrar meu e-mail</span></label>
+        <label class="caixinha" title="Desmarque em computador compartilhado: ao fechar o navegador, sai sozinho">
+          <input type="checkbox" id="loginManter" checked /> <span>Manter conectado</span></label>
+      </div>
+      <div id="loginErro" class="alerta" hidden role="alert"></div>
       <button type="submit" class="btn btn-primary full" id="btnEntrar">Entrar</button>
+      <button type="button" class="link link-centro" id="btnEsqueci">Esqueci a senha</button>
     </form>
+
+    <!-- Esqueci a senha: o Supabase manda o link; ao voltar, cai na tela de nova senha -->
+    <form id="formEsqueci" class="vista-login" novalidate hidden>
+      <label>Seu e-mail
+        <input id="esqueciEmail" type="email" placeholder="seu@email.com" autocomplete="username" inputmode="email" required />
+      </label>
+      <p class="aviso suave">O e-mail grátis do sistema é limitado (poucos por hora). Se não chegar em alguns minutos,
+        peça ao administrador uma <b>senha temporária</b> — sai na hora.</p>
+      <div id="esqueciMsg" class="alerta" hidden role="status"></div>
+      <button type="submit" class="btn btn-primary full" id="btnEsqueciEnviar">Mandar o link</button>
+      <button type="button" class="link link-centro" data-vista-login="entrar">← Voltar para entrar</button>
+    </form>
+
+    <!-- Nova senha: volta do link de recuperação OU troca obrigatória no primeiro acesso -->
+    <form id="formNovaSenha" class="vista-login" novalidate hidden>
+      <label>Nova senha
+        <span class="campo-senha">
+          <input id="novaSenha1" type="password" minlength="8" autocomplete="new-password" placeholder="pelo menos 8 caracteres" required />
+          <button type="button" class="olho" data-olho="novaSenha1" aria-label="Mostrar a senha" aria-pressed="false" title="Mostrar a senha">👁</button>
+        </span>
+      </label>
+      <div class="forca" id="forcaSenha" aria-live="polite"><i></i><i></i><i></i><i></i><span></span></div>
+      <label>Repita a nova senha
+        <input id="novaSenha2" type="password" minlength="8" autocomplete="new-password" placeholder="digite a mesma senha" required />
+      </label>
+      <ul class="regras-senha" id="regrasSenha">
+        <li data-regra="tam">8 caracteres ou mais</li>
+        <li data-regra="email">diferente do seu e-mail</li>
+        <li data-regra="igual">as duas iguais</li>
+      </ul>
+      <div id="novaSenhaErro" class="alerta" hidden role="alert"></div>
+      <button type="submit" class="btn btn-primary full" id="btnNovaSenha">Salvar a nova senha</button>
+      <button type="button" class="link link-centro" data-acao-login="sair">Sair e entrar com outra conta</button>
+    </form>
+
+    <!-- Verificação em duas etapas: depois da senha, o código do aplicativo -->
+    <form id="formMfa" class="vista-login" novalidate hidden>
+      <label>Código de 6 dígitos
+        <input id="mfaCodigo" class="codigo-mfa" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}"
+               maxlength="6" placeholder="000000" required />
+      </label>
+      <p class="aviso suave">Abra o aplicativo autenticador do seu celular (Google Authenticator, Authy…) e digite o código da IndyCar.</p>
+      <div id="mfaErro" class="alerta" hidden role="alert"></div>
+      <button type="submit" class="btn btn-primary full" id="btnMfa">Confirmar</button>
+      <button type="button" class="link link-centro" data-acao-login="sair">Sair e entrar com outra conta</button>
+    </form>
+
+    <!-- Sem acesso a este app: mostra para onde a pessoa pode ir -->
+    <div id="vistaSemAcesso" class="vista-login" hidden>
+      <div class="sem-acesso-ico" aria-hidden="true">🔒</div>
+      <p class="sem-acesso-txt" id="semAcessoTxt">Você não tem acesso ao Atendimento.</p>
+      <div class="apps-liberados" id="appsLiberados"></div>
+      <button type="button" class="btn btn-ghost full" data-acao-login="sair">Sair</button>
+    </div>
 
     <!-- Primeiro acesso: só aparece enquanto NÃO existir ninguém cadastrado.
          Quem criar esta conta vira o administrador do sistema. -->
@@ -155,6 +219,11 @@
       <svg viewBox="0 0 24 24"><path d="M13 2L4.5 13.5H11l-1 8.5 9.5-12.5H13l0-7.5z" fill="currentColor"/></svg>
       <span>Atalhos <b class="atalho-dica">/</b></span>
     </button>
+    <button class="nav-item" data-aba="tarefas" id="navTarefas">
+      <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2h9" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      <span>Tarefas</span>
+      <b class="badge" id="badgeTarefas" hidden>0</b>
+    </button>
 
     <div class="nav-grupo">Inteligência</div>
     <button class="nav-item" data-aba="ia">
@@ -164,6 +233,16 @@
     <button class="nav-item" data-aba="relatorios">
       <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
       <span>Relatórios</span>
+    </button>
+
+    <div class="nav-grupo" id="navGrupoEquipe" hidden>Pessoas</div>
+    <button class="nav-item" data-aba="equipe" id="navEquipe" hidden>
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4" stroke="currentColor" stroke-width="2" fill="none"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M16 4.6a3.4 3.4 0 010 6.8M18 14.3c1.8.8 3 2.6 3 4.7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      <span>Equipe</span>
+    </button>
+    <button class="nav-item" data-aba="auditoria" id="navAuditoria" hidden>
+      <svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M12 8v4l2.5 1.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      <span>Auditoria</span>
     </button>
 
     <div class="nav-grupo">Sistema</div>
@@ -197,12 +276,22 @@
     </label>
 
     <div class="sidebar-fim">
-      <div class="usuario" id="usuarioBox">
-        <span class="avatar" id="usuarioAvatar">?</span>
-        <div class="usuario-txt">
-          <strong id="usuarioNome">—</strong>
-          <small id="usuarioPapel">—</small>
-        </div>
+      <div class="usuario-linha">
+        <!-- avatar = menu do perfil (Meu perfil, senha, duas etapas, tema, sair) -->
+        <button type="button" class="usuario" id="usuarioBox" aria-haspopup="menu" aria-expanded="false"
+                aria-controls="menuPerfil" title="Meu perfil e sair">
+          <span class="avatar" id="usuarioAvatar">?</span>
+          <span class="usuario-txt">
+            <strong id="usuarioNome">—</strong>
+            <small id="usuarioPapel">—</small>
+          </span>
+          <span class="usuario-seta" aria-hidden="true">▾</span>
+        </button>
+        <button type="button" class="sino" id="btnSino" aria-haspopup="dialog" aria-expanded="false"
+                aria-controls="painelSino" title="Notificações" aria-label="Notificações">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16v-5a6 6 0 10-12 0v5l-2 2h16l-2-2zM10 20a2 2 0 004 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <b class="sino-num" id="sinoNum" hidden>0</b>
+        </button>
       </div>
       <div class="fim-acoes">
         <button class="tema-toggle" id="btnTema" type="button"
@@ -266,6 +355,9 @@
               <button type="button" class="seg" data-dono-filtro="sem" aria-pressed="false"
                       title="Ninguém responsável ainda">Sem dono <b class="seg-num" id="cntSemDono" hidden>0</b></button>
             </div>
+            <select id="filtroEquipe" class="mini-select" aria-label="Conversas de qual equipe" title="Só as conversas de quem é desta equipe" hidden>
+              <option value="">👥 Equipes</option>
+            </select>
             <select id="ordemLista" class="mini-select" aria-label="Ordenar conversas">
               <option value="recentes">Mais recentes</option>
               <option value="espera">Esperando há mais tempo</option>
@@ -301,6 +393,8 @@
                 <div class="chat-linha-tags">
                   <div id="chatEtapa" class="chat-etapa"></div>
                   <div id="chatDono" class="chat-dono"></div>
+                  <!-- colegas com esta mesma conversa aberta agora (Realtime Presence) -->
+                  <div id="chatPresenca" class="chat-presenca" hidden aria-live="polite"></div>
                 </div>
               </div>
             </div>
@@ -327,6 +421,8 @@
                 <button type="button" class="btn-icone btn-mais" id="btnMaisAcoes" aria-expanded="false" aria-haspopup="true"
                         aria-controls="menuMaisAcoes" title="Mais ações" aria-label="Mais ações">⋯</button>
                 <div class="menu-mais" id="menuMaisAcoes" hidden>
+                  <button class="btn btn-ghost sm" id="btnNovaTarefaChat" title="Criar uma tarefa ligada a este cliente (Alt+T)">✓ Nova tarefa</button>
+                  <button class="btn btn-ghost sm" id="btnTransferir" title="Passar esta conversa para um colega, com o motivo">↪ Transferir para colega</button>
                   <button class="btn btn-ghost sm" id="btnNaoLida" title="Marcar como não lida e voltar para a lista (Alt+U)">✉ Marcar como não lida</button>
                   <button class="btn btn-ia sm" id="btnClassificar"
                     title="Deixar a IA dizer em que etapa do funil esta conversa está">
@@ -339,7 +435,7 @@
                       <option value="resolvida">Resolvida</option>
                     </select>
                   </label>
-                  <!-- Só admin enxerga os dois: apagam histórico, sem desfazer -->
+                  <!-- Só gestor/admin enxerga os dois: apagam histórico, sem desfazer (o banco também recusa) -->
                   <button class="btn btn-ghost sm" id="btnSelecionarMsgs" hidden
                           title="Escolher mensagens para apagar do painel">🗑 Apagar mensagens</button>
                   <button class="btn btn-excluir sm" id="btnExcluirConversa" hidden
@@ -423,6 +519,8 @@
         <section id="copilotoSlot" aria-label="Copiloto" hidden></section>
         <div class="ficha-vazia" id="fichaVazia"><p>Sem conversa selecionada.</p></div>
         <div id="fichaConteudo" hidden></div>
+        <!-- tarefas do cliente: fora do #fichaConteudo (que é redesenhado a cada carga) -->
+        <section id="fichaTarefas" class="ficha-tarefas" aria-label="Tarefas deste cliente" hidden></section>
       </aside>
     </div>
   </section>
@@ -686,6 +784,114 @@
     </div>
   </section>
 
+  <!-- ---------- ABA: TAREFAS ---------- -->
+  <section class="aba" id="aba-tarefas">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Tarefas</h1>
+          <p id="tarefasResumo">O que está com você, em ordem de prazo.</p>
+        </div>
+        <button type="button" class="btn btn-primary sm" id="btnNovaTarefa">+ Nova tarefa</button>
+      </header>
+      <div class="tarefas-filtros">
+        <div class="segmento" role="group" aria-label="Quais tarefas">
+          <button type="button" class="seg ativo" data-tarefas-ver="minhas" aria-pressed="true">Minhas</button>
+          <button type="button" class="seg" data-tarefas-ver="criei" aria-pressed="false">Que eu passei</button>
+          <button type="button" class="seg" data-tarefas-ver="feitas" aria-pressed="false">Feitas</button>
+          <button type="button" class="seg" data-tarefas-ver="equipe" aria-pressed="false" id="segTarefasEquipe" hidden>Equipe</button>
+        </div>
+        <input type="search" id="tarefasBusca" class="mini-busca" placeholder="Buscar tarefa ou cliente…" aria-label="Buscar tarefa" autocomplete="off" />
+      </div>
+      <!-- painel do gestor: carga de cada pessoa -->
+      <div class="carga-equipe" id="cargaEquipe" hidden></div>
+      <div id="listaTarefas" class="lista-tarefas" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: EQUIPE (admin muda; gestor só lê) ---------- -->
+  <section class="aba" id="aba-equipe">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Equipe</h1>
+          <p id="equipeResumo">Quem entra nos sistemas da IndyCar e o que cada um pode fazer.</p>
+        </div>
+        <button type="button" class="btn btn-primary sm" id="btnConvidar" hidden>+ Convidar pessoa</button>
+      </header>
+      <p class="aviso faixa-leitura" id="equipeSoLeitura" hidden>👁 Você vê a equipe, mas só o administrador muda papéis, apps e acessos.</p>
+      <div class="equipe-filtros">
+        <input type="search" id="equipeBusca" class="mini-busca" placeholder="Buscar por nome, e-mail ou cargo…" aria-label="Buscar pessoa" autocomplete="off" />
+        <div class="filtros-papel" role="toolbar" aria-label="Filtrar por papel">
+          <button type="button" class="chip ativo" data-papel-filtro="" aria-pressed="true">Todos</button>
+          <button type="button" class="chip" data-papel-filtro="admin" aria-pressed="false">Administradores</button>
+          <button type="button" class="chip" data-papel-filtro="gestor" aria-pressed="false">Gestores</button>
+          <button type="button" class="chip" data-papel-filtro="atendente" aria-pressed="false">Atendentes</button>
+          <button type="button" class="chip" data-papel-filtro="agenda" aria-pressed="false">Agenda</button>
+        </div>
+        <select id="equipeFiltroTime" class="mini-select" aria-label="Filtrar por equipe"><option value="">Todas as equipes</option></select>
+        <select id="equipeFiltroSituacao" class="mini-select" aria-label="Filtrar por situação">
+          <option value="ativos">Com acesso</option>
+          <option value="desativados">Desativados</option>
+          <option value="pendentes">Ainda não entraram</option>
+          <option value="todos">Todos</option>
+        </select>
+      </div>
+      <div id="gradeEquipe" class="grade-equipe" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- ---------- ABA: AUDITORIA (admin) ---------- -->
+  <section class="aba" id="aba-auditoria">
+    <div class="conteudo">
+      <header class="pagina-topo">
+        <div>
+          <h1>Auditoria</h1>
+          <p>Quem mudou o quê, e quando — papéis, acessos, valores, exclusões e configurações.</p>
+        </div>
+        <button type="button" class="btn btn-ghost sm" id="btnAuditoriaCsv">⬇ Exportar CSV</button>
+      </header>
+      <form class="auditoria-filtros" id="formAuditoria">
+        <label>Pessoa<select id="audPessoa" class="mini-select"><option value="">Todas</option></select></label>
+        <label>Onde<select id="audTabela" class="mini-select">
+          <option value="">Tudo</option>
+          <option value="perfis">Equipe e acessos</option>
+          <option value="leads">Leads (CRM)</option>
+          <option value="clientes">Clientes</option>
+          <option value="conversas">Conversas</option>
+          <option value="agendamentos">Agenda</option>
+          <option value="ia_acoes">Ações da IA</option>
+          <option value="codewords_config">Configuração do WhatsApp</option>
+          <option value="auditoria">Exportações</option>
+        </select></label>
+        <label>Ação<select id="audAcao" class="mini-select">
+          <option value="">Todas</option>
+          <option value="update">Mudou (no banco)</option>
+          <option value="delete">Apagou</option>
+          <option value="equipe.convidar">Convidou</option>
+          <option value="equipe.editar">Mudou papel/apps</option>
+          <option value="equipe.desativar">Desativou</option>
+          <option value="equipe.reativar">Reativou</option>
+          <option value="equipe.redefinir_senha">Senha temporária</option>
+          <option value="conversa.transferir">Transferiu conversa</option>
+          <option value="conversa.distribuir">Rodízio</option>
+          <option value="tarefa.criar">Criou tarefa</option>
+          <option value="auditoria.exportar">Exportou</option>
+          <option value="ia.executar">IA executou</option>
+        </select></label>
+        <label>De<input type="date" id="audDe" class="mini-select" /></label>
+        <label>Até<input type="date" id="audAte" class="mini-select" /></label>
+        <button type="button" class="btn btn-ghost sm" id="btnAudLimpar">Limpar</button>
+      </form>
+      <div id="linhaAuditoria" class="linha-tempo" aria-live="polite"></div>
+      <div class="paginacao" id="audPaginacao" hidden>
+        <button type="button" class="btn btn-ghost sm" id="audAnterior">‹ Anteriores</button>
+        <span id="audPaginaTxt"></span>
+        <button type="button" class="btn btn-ghost sm" id="audProxima">Mais antigos ›</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ---------- ABA: CONFIGURAÇÕES ---------- -->
   <section class="aba" id="aba-config">
     <div class="conteudo">
@@ -704,18 +910,27 @@
       <!-- ---------- Minha conta ---------- -->
       <div class="config-secao ativa" id="config-conta">
         <div class="cartoes">
-          <div class="cartao">
+          <div class="cartao" id="cartaoPerfil">
             <h3>Meu perfil</h3>
-            <p class="cartao-sub">Seu nome aparece nas conversas e nos relatórios. O e-mail e a função só o administrador altera.</p>
+            <p class="cartao-sub">Seu nome e sua cor aparecem nas conversas, nas tarefas e nos relatórios. E-mail e papel só o administrador muda.</p>
             <form id="formPerfil" class="form-vertical">
-              <label>Nome<input id="perfilNome" placeholder="Seu nome" /></label>
+              <div class="perfil-previa">
+                <span class="avatar avatar-grande" id="perfilAvatarPrevia">?</span>
+                <div class="cores-avatar" id="coresAvatar" role="radiogroup" aria-label="Cor do avatar"></div>
+              </div>
+              <label>Nome<input id="perfilNome" placeholder="Seu nome" maxlength="80" autocomplete="name" /></label>
+              <div class="campos-2">
+                <label>Cargo<input id="perfilCargo" placeholder="Ex.: Consultor" maxlength="60" /></label>
+                <label>Telefone<input id="perfilTelefone" placeholder="(12) 99999-8888" maxlength="20" inputmode="tel" autocomplete="tel" /></label>
+              </div>
               <label>E-mail<input id="perfilEmail" disabled /></label>
-              <label>Função<input id="perfilPapel" disabled /></label>
+              <label>Papel<input id="perfilPapel" disabled /></label>
+              <p class="perfil-apps" id="perfilApps"></p>
               <button type="submit" class="btn btn-primary sm">Salvar</button>
             </form>
           </div>
 
-          <div class="cartao">
+          <div class="cartao" id="cartaoSenha">
             <h3>Trocar minha senha</h3>
             <p class="cartao-sub">Escolha uma senha nova de pelo menos 8 caracteres. Vale só para o seu acesso — ninguém mais vê.</p>
             <form id="formSenha" class="form-vertical">
@@ -746,6 +961,40 @@
               <button type="button" class="btn btn-ghost sm" id="btnTestarAviso">Testar aviso</button>
               <div style="flex:1"></div>
               <button type="button" class="btn btn-ghost sm" id="btnVerAtalhosTeclado">⌨ Atalhos de teclado</button>
+            </div>
+          </div>
+
+          <div class="cartao" id="cartaoMfa">
+            <h3>Verificação em duas etapas</h3>
+            <p class="cartao-sub">Além da senha, pede um código do aplicativo do seu celular. Se alguém descobrir a sua senha, ainda assim não entra.</p>
+            <div class="mfa-estado" id="mfaEstado"><span class="selo">verificando…</span></div>
+            <div class="int-acoes">
+              <div style="flex:1"></div>
+              <button type="button" class="btn btn-ghost sm" id="btnMfaDesligar" hidden>Desligar</button>
+              <button type="button" class="btn btn-primary sm" id="btnMfaLigar" hidden>Ligar</button>
+            </div>
+          </div>
+
+          <div class="cartao" id="cartaoPrefs">
+            <h3>Avisos dentro do sistema</h3>
+            <p class="cartao-sub">O que entra no sino 🔔. Vale para todos os aparelhos em que você entrar.</p>
+            <label class="switch"><input type="checkbox" data-pref="tarefa" checked /><span>Tarefa nova para mim</span></label>
+            <label class="switch"><input type="checkbox" data-pref="conversa" checked /><span>Conversa passada para mim</span></label>
+            <label class="switch"><input type="checkbox" data-pref="aguardando" checked /><span>Cliente aguardando consultor</span></label>
+            <label class="switch"><input type="checkbox" data-pref="lead" checked /><span>Lead passado para mim (CRM)</span></label>
+            <label class="switch"><input type="checkbox" data-pref="espera" checked /><span>Cliente esperando há muito tempo (gestor)</span></label>
+            <label class="switch"><input type="checkbox" data-pref="resumo_dia" checked /><span>Resumo do dia</span></label>
+            <label class="switch"><input type="checkbox" data-pref="som" /><span>Som discreto quando chegar aviso</span></label>
+          </div>
+
+          <div class="cartao" id="cartaoSessao">
+            <h3>Sessão</h3>
+            <p class="cartao-sub">Esqueceu o sistema aberto em outro computador ou perdeu o celular? Saia de todos de uma vez.</p>
+            <p class="sessao-info" id="sessaoInfo"></p>
+            <div class="int-acoes">
+              <button type="button" class="btn btn-ghost sm" id="btnLimparAparelho">Limpar rascunhos deste aparelho</button>
+              <div style="flex:1"></div>
+              <button type="button" class="btn btn-excluir sm" id="btnSairTodos">Sair de todos os aparelhos</button>
             </div>
           </div>
         </div>
@@ -805,41 +1054,9 @@
 
         <div class="cartao">
           <h3>Equipe</h3>
-          <p class="cartao-sub">Quem tem acesso ao atendimento, ao CRM e à agenda —
-            é o mesmo login nos três.</p>
-          <div id="listaEquipe" class="equipe"></div>
-
-          <div id="blocoCadastro" hidden>
-            <h4 class="sub-titulo">Cadastrar funcionário</h4>
-            <p class="aviso">Você cria a conta e entrega o e-mail e a senha para a pessoa.
-              Ela já entra funcionando, sem e-mail de confirmação. Peça para trocar a senha depois.</p>
-            <form id="formNovoMembro" class="form-vertical">
-              <label>Nome
-                <input name="nome" required maxlength="80" placeholder="Ex.: Leonardo Alves" autocomplete="off" />
-              </label>
-              <label>E-mail
-                <input name="email" type="email" required maxlength="160"
-                       placeholder="leonardo@indycartaubate.com" autocomplete="off" />
-              </label>
-              <label>Senha provisória
-                <input name="senha" type="password" required minlength="8" maxlength="200"
-                       placeholder="pelo menos 8 caracteres" autocomplete="new-password" />
-                <small class="mascara">Entregue essa senha para a pessoa e peça para trocar.</small>
-              </label>
-              <label>Função
-                <select name="papel">
-                  <option value="atendente">Atendente — vê conversas, funil e agenda</option>
-                  <option value="admin">Administrador — também mexe nas configurações e relatórios</option>
-                </select>
-              </label>
-              <div class="int-acoes">
-                <div style="flex:1"></div>
-                <button type="submit" class="btn btn-primary sm" id="btnNovoMembro">Cadastrar</button>
-              </div>
-            </form>
-          </div>
-
-          <p class="aviso" id="avisoCadastro" hidden>Só o administrador cadastra novos funcionários.</p>
+          <p class="cartao-sub">Convites, papéis, apps permitidos e acessos agora ficam numa tela só.</p>
+          <div id="listaEquipe" class="equipe" hidden></div>
+          <button type="button" class="btn btn-primary sm" id="btnIrEquipe">Abrir a tela Equipe →</button>
         </div>
         </div>
       </div>
@@ -1105,8 +1322,258 @@
   </div>
 </div>
 
+<!-- ============ RODADA 3: perfil, sino, equipe, tarefas ============ -->
+<!-- Menu do perfil (abre no avatar) -->
+<div class="menu-perfil" id="menuPerfil" role="menu" aria-label="Meu perfil" hidden>
+  <div class="mp-topo">
+    <span class="avatar" id="mpAvatar">?</span>
+    <div class="mp-quem">
+      <strong id="mpNome">—</strong>
+      <small id="mpEmail">—</small>
+      <span class="papel-selo" id="mpPapel">—</span>
+    </div>
+  </div>
+  <button type="button" role="menuitem" class="mp-item" data-mp="perfil">👤 <span>Meu perfil</span></button>
+  <button type="button" role="menuitem" class="mp-item" data-mp="senha">🔑 <span>Trocar senha</span></button>
+  <button type="button" role="menuitem" class="mp-item" data-mp="mfa">🛡 <span>Verificação em duas etapas</span><em id="mpMfaSelo"></em></button>
+  <button type="button" role="menuitem" class="mp-item" data-mp="avisos">🔔 <span>Preferências de aviso</span></button>
+  <button type="button" role="menuitem" class="mp-item" data-mp="tema">🌓 <span id="mpTemaTxt">Tema claro</span></button>
+  <div class="mp-sep" role="separator"></div>
+  <button type="button" role="menuitem" class="mp-item" data-mp="sair">↩ <span>Sair</span></button>
+  <button type="button" role="menuitem" class="mp-item perigo" data-mp="sair-todos">⏏ <span>Sair de todos os aparelhos</span></button>
+</div>
+
+<!-- Painel do sino -->
+<div class="painel-sino" id="painelSino" role="dialog" aria-label="Notificações" hidden>
+  <div class="ps-topo">
+    <strong>Notificações</strong>
+    <div class="ps-acoes">
+      <button type="button" class="link" id="btnSinoTodas">Marcar todas como lidas</button>
+    </div>
+  </div>
+  <div class="ps-abas" role="tablist">
+    <button type="button" role="tab" class="seg ativo" data-sino-ver="nao" aria-selected="true">Não lidas</button>
+    <button type="button" role="tab" class="seg" data-sino-ver="todas" aria-selected="false">Todas</button>
+  </div>
+  <div class="ps-lista" id="sinoLista"></div>
+  <div class="ps-rodape"><button type="button" class="link" id="btnSinoTarefas">Ver minhas tarefas →</button></div>
+</div>
+
+<!-- Sair: escolher se limpa o que ficou guardado neste aparelho -->
+<div class="modal-bg" id="modalSairBg">
+  <div class="modal modal-estreito">
+    <button class="modal-x" data-fechar="modalSairBg">×</button>
+    <h3>Sair do Atendimento?</h3>
+    <p class="modal-sub" id="sairResumo">Seu login sai deste navegador.</p>
+    <label class="caixinha caixinha-bloco"><input type="checkbox" id="sairLimpar" />
+      <span><b>Apagar o que ficou guardado neste aparelho</b><br><small id="sairLimparDetalhe">rascunhos de mensagem, fila sem internet, preferências e arquivos do app</small></span></label>
+    <p class="alerta" id="sairFilaAviso" hidden></p>
+    <div class="modal-acoes">
+      <button type="button" class="btn btn-ghost sm" data-fechar="modalSairBg">Cancelar</button>
+      <button type="button" class="btn btn-primary sm" id="btnConfirmarSair">Sair</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirmação genérica (desativar pessoa, sair de todos…) -->
+<div class="modal-bg" id="modalConfirmarBg">
+  <div class="modal modal-estreito">
+    <button class="modal-x" data-fechar="modalConfirmarBg">×</button>
+    <h3 id="confirmarTitulo">Tem certeza?</h3>
+    <p class="modal-sub" id="confirmarTexto"></p>
+    <label class="caixinha caixinha-bloco" id="confirmarCaixaRotulo" hidden><input type="checkbox" id="confirmarCaixa" /> <span id="confirmarCaixaTexto"></span></label>
+    <div class="modal-acoes">
+      <button type="button" class="btn btn-ghost sm" data-fechar="modalConfirmarBg">Cancelar</button>
+      <button type="button" class="btn btn-excluir sm" id="btnConfirmarOk">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ligar a verificação em duas etapas (QR + código) -->
+<div class="modal-bg" id="modalMfaBg">
+  <div class="modal modal-estreito">
+    <button class="modal-x" data-fechar="modalMfaBg">×</button>
+    <h3>Ligar a verificação em duas etapas</h3>
+    <ol class="passos-mfa">
+      <li>Instale um aplicativo autenticador no celular (Google Authenticator, Microsoft Authenticator ou Authy).</li>
+      <li>No aplicativo, toque em <b>+</b> e leia este QR:</li>
+    </ol>
+    <div class="mfa-qr" id="mfaQr"><span class="girando"></span></div>
+    <p class="mfa-segredo">Sem câmera? Digite a chave: <code id="mfaSegredo">—</code>
+      <button type="button" class="link" id="btnCopiarSegredo">copiar</button></p>
+    <form id="formMfaLigar" class="form-vertical">
+      <label>3. Digite o código de 6 dígitos que aparece
+        <input id="mfaLigarCodigo" class="codigo-mfa" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" required />
+      </label>
+      <div class="alerta" id="mfaLigarErro" hidden role="alert"></div>
+      <div class="modal-acoes">
+        <button type="button" class="btn btn-ghost sm" data-fechar="modalMfaBg">Cancelar</button>
+        <button type="submit" class="btn btn-primary sm" id="btnMfaConfirmar">Ligar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Convidar pessoa: em passos -->
+<div class="modal-bg" id="modalConviteBg">
+  <div class="modal modal-convite">
+    <button class="modal-x" data-fechar="modalConviteBg">×</button>
+    <h3>Convidar para a equipe</h3>
+    <ol class="convite-passos" id="convitePassos" aria-label="Passos do convite">
+      <li class="ativo" data-passo="1"><b>1</b><span>Quem</span></li>
+      <li data-passo="2"><b>2</b><span>Papel</span></li>
+      <li data-passo="3"><b>3</b><span>Apps</span></li>
+      <li data-passo="4"><b>4</b><span>Pronto</span></li>
+    </ol>
+    <form id="formConvite" class="form-vertical" novalidate>
+      <div class="passo-corpo" data-corpo="1">
+        <label>Nome<input name="nome" maxlength="80" placeholder="Ex.: Leonardo Alves" autocomplete="off" required /></label>
+        <label>E-mail<input name="email" type="email" maxlength="160" placeholder="leonardo@indycartaubate.com" autocomplete="off" required /></label>
+        <div class="campos-2">
+          <label>Cargo <small>(opcional)</small><input name="cargo" maxlength="60" placeholder="Consultor" autocomplete="off" /></label>
+          <label>Telefone <small>(opcional)</small><input name="telefone" maxlength="20" inputmode="tel" placeholder="(12) 99999-8888" autocomplete="off" /></label>
+        </div>
+      </div>
+      <div class="passo-corpo" data-corpo="2" hidden>
+        <div class="papeis-cartoes" id="convitePapeis" role="radiogroup" aria-label="Papel"></div>
+        <label>Equipe <small>(opcional)</small><select name="equipe_id" id="conviteEquipe"><option value="">Sem equipe</option></select></label>
+      </div>
+      <div class="passo-corpo" data-corpo="3" hidden>
+        <p class="modal-sub">Quais sistemas essa pessoa abre? Dá para mudar depois.</p>
+        <div class="apps-chips" id="conviteApps"></div>
+        <div class="convite-revisao" id="conviteRevisao"></div>
+      </div>
+      <div class="passo-corpo" data-corpo="4" hidden>
+        <div class="senha-temp-caixa" id="conviteResultado"></div>
+      </div>
+      <div class="alerta" id="conviteErro" hidden role="alert"></div>
+      <div class="modal-acoes">
+        <button type="button" class="btn btn-ghost sm" id="btnConviteVoltar">Voltar</button>
+        <div style="flex:1"></div>
+        <button type="submit" class="btn btn-primary sm" id="btnConviteAvancar">Continuar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Uma pessoa da equipe: papel, apps, equipe, acesso -->
+<div class="modal-bg" id="modalPessoaBg">
+  <div class="modal modal-pessoa">
+    <button class="modal-x" data-fechar="modalPessoaBg">×</button>
+    <div class="pessoa-topo">
+      <span class="avatar avatar-grande" id="pessoaAvatar">?</span>
+      <div>
+        <h3 id="pessoaNome">—</h3>
+        <p class="modal-sub" id="pessoaSub">—</p>
+      </div>
+    </div>
+    <p class="aviso" id="pessoaTrava" hidden></p>
+    <form id="formPessoa" class="form-vertical" novalidate>
+      <fieldset class="bloco-campos">
+        <legend>Papel</legend>
+        <div class="papeis-cartoes" id="pessoaPapeis" role="radiogroup" aria-label="Papel"></div>
+      </fieldset>
+      <fieldset class="bloco-campos">
+        <legend>Apps que pode abrir</legend>
+        <div class="apps-chips" id="pessoaApps"></div>
+      </fieldset>
+      <div class="campos-2">
+        <label>Equipe<select name="equipe_id" id="pessoaEquipe"><option value="">Sem equipe</option></select></label>
+        <label>Cargo<input name="cargo" maxlength="60" autocomplete="off" /></label>
+      </div>
+      <div class="campos-2">
+        <label>Telefone<input name="telefone" maxlength="20" inputmode="tel" autocomplete="off" /></label>
+        <label class="switch switch-campo"><input type="checkbox" name="recebe_leads" /><span>Recebe clientes novos (rodízio)</span></label>
+      </div>
+      <div class="alerta" id="pessoaErro" hidden role="alert"></div>
+      <div class="modal-acoes acoes-pessoa">
+        <button type="button" class="btn btn-ghost sm" id="btnPessoaSenha">🔑 Senha temporária</button>
+        <button type="button" class="btn btn-ghost sm" id="btnPessoaMfa" hidden title="Para quem perdeu o celular">🛡 Tirar duas etapas</button>
+        <button type="button" class="btn btn-excluir sm" id="btnPessoaAtivo">Desativar</button>
+        <div style="flex:1"></div>
+        <button type="submit" class="btn btn-primary sm" id="btnPessoaSalvar">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Senha temporária: aparece UMA vez -->
+<div class="modal-bg" id="modalSenhaTempBg">
+  <div class="modal modal-estreito">
+    <button class="modal-x" data-fechar="modalSenhaTempBg">×</button>
+    <h3>Senha temporária</h3>
+    <div class="senha-temp-caixa" id="senhaTempCaixa"></div>
+  </div>
+</div>
+
+<!-- Nova tarefa -->
+<div class="modal-bg" id="modalTarefaBg">
+  <div class="modal">
+    <button class="modal-x" data-fechar="modalTarefaBg">×</button>
+    <h3 id="tarefaModalTitulo">Nova tarefa</h3>
+    <p class="modal-sub tarefa-ligada" id="tarefaLigada" hidden></p>
+    <form id="formTarefa" class="form-vertical" novalidate>
+      <label>O que precisa ser feito<input name="titulo" maxlength="140" placeholder="Ex.: Ligar confirmando o horário" required autocomplete="off" /></label>
+      <label>Detalhes <small>(opcional)</small><textarea name="descricao" rows="2" maxlength="1000" placeholder="O que a pessoa precisa saber"></textarea></label>
+      <div class="campos-2">
+        <label>Responsável<select name="responsavel_id" id="tarefaResponsavel"></select></label>
+        <label>Prazo<input type="datetime-local" name="vence_em" id="tarefaPrazo" /></label>
+      </div>
+      <div class="chips-rapidos" id="tarefaPrazosRapidos" role="group" aria-label="Prazos rápidos">
+        <button type="button" class="chip" data-prazo="hoje17">Hoje 17h</button>
+        <button type="button" class="chip" data-prazo="amanha9">Amanhã 9h</button>
+        <button type="button" class="chip" data-prazo="2dias">Em 2 dias</button>
+        <button type="button" class="chip" data-prazo="semana">Em 1 semana</button>
+        <button type="button" class="chip" data-prazo="">Sem prazo</button>
+      </div>
+      <fieldset class="bloco-campos">
+        <legend>Prioridade</legend>
+        <div class="prioridades" role="radiogroup" aria-label="Prioridade">
+          <label class="prio prio-1"><input type="radio" name="prioridade" value="1" /><span>🔴 Alta</span></label>
+          <label class="prio prio-2"><input type="radio" name="prioridade" value="2" checked /><span>🟡 Normal</span></label>
+          <label class="prio prio-3"><input type="radio" name="prioridade" value="3" /><span>⚪ Baixa</span></label>
+        </div>
+      </fieldset>
+      <div class="alerta" id="tarefaErro" hidden role="alert"></div>
+      <div class="modal-acoes">
+        <button type="button" class="btn btn-ghost sm" data-fechar="modalTarefaBg">Cancelar</button>
+        <button type="submit" class="btn btn-primary sm" id="btnSalvarTarefa">Criar tarefa</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Transferir conversa para colega, com motivo -->
+<div class="modal-bg" id="modalTransferirBg">
+  <div class="modal">
+    <button class="modal-x" data-fechar="modalTransferirBg">×</button>
+    <h3>Transferir conversa</h3>
+    <p class="modal-sub" id="transferirSub">—</p>
+    <form id="formTransferir" class="form-vertical" novalidate>
+      <div class="lista-colegas" id="transferirColegas" role="radiogroup" aria-label="Para quem"></div>
+      <label>Motivo <small>(obrigatório — a pessoa recebe junto com o aviso)</small>
+        <input name="motivo" id="transferirMotivo" maxlength="200" minlength="3" required placeholder="Ex.: fim do meu turno" autocomplete="off" />
+      </label>
+      <div class="chips-rapidos" id="transferirMotivos" role="group" aria-label="Motivos comuns">
+        <button type="button" class="chip" data-motivo="Fim do meu turno">Fim do meu turno</button>
+        <button type="button" class="chip" data-motivo="Assunto técnico — precisa de consultor">Assunto técnico</button>
+        <button type="button" class="chip" data-motivo="Cliente pediu para falar com você">Cliente pediu</button>
+        <button type="button" class="chip" data-motivo="Orçamento para fechar">Orçamento para fechar</button>
+      </div>
+      <div class="alerta" id="transferirErro" hidden role="alert"></div>
+      <div class="modal-acoes">
+        <button type="button" class="btn btn-ghost sm" data-fechar="modalTransferirBg">Cancelar</button>
+        <button type="submit" class="btn btn-primary sm" id="btnTransferirOk" disabled>Transferir</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="app.js"></script>
+<script src="acesso.js"></script>
+<script src="equipe.js"></script>
+<script src="tarefas.js"></script>
 <script src="copiloto.js" defer></script>
 <script>
   /* Registra o service worker — é o que torna o app instalável.

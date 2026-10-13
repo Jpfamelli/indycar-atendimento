@@ -1,12 +1,12 @@
 // Service Worker do IndyCar Atendimento — é o que torna o app instalável
 // e faz a casca abrir rápido mesmo com internet ruim na oficina.
 // Versão nova a cada mudança da tela: o "activate" apaga os caches antigos.
-const CACHE = 'indycar-atendimento-v12';
+const CACHE = 'indycar-atendimento-v13';
 
 /* Se QUALQUER item desta lista faltar, o addAll rejeita e o service worker
    NÃO instala — o app deixa de ser instalável sem dizer por quê. Mantenha
    aqui só o que existe de verdade (o copiloto.js/.css do painel da IA também). */
-const CORE = ['/', '/styles.css', '/app.js', '/copiloto.js', '/copiloto.css', '/manifest.json', '/logo.png',
+const CORE = ['/', '/styles.css', '/app.js', '/acesso.js', '/equipe.js', '/tarefas.js', '/copiloto.js', '/copiloto.css', '/manifest.json', '/logo.png',
               '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {
