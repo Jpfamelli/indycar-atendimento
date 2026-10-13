@@ -17,6 +17,15 @@ const CTX  = require('./lib/contexto.js');
 const IA   = require('./lib/ia-copiloto.js');
 const RD   = require('./lib/resumo-dia.js');
 const { criarRotasIA } = require('./lib/rotas-ia.js');
+// Rodada 3: segurança, acesso por app, central da equipe, auditoria, rodízio, tarefas, automações
+const SEG  = require('./lib/seguranca.js');
+const ACS  = require('./lib/acesso.js');
+const AUD  = require('./lib/auditoria.js');
+const EQP  = require('./lib/equipe.js');
+const ROD  = require('./lib/rodizio.js');
+const TAR  = require('./lib/tarefas.js');
+const AUT  = require('./lib/automacoes.js');
+const { criarRotasEquipe } = require('./lib/rotas-equipe.js');
 
 // Configuração via .env (sem depender do Registro do Windows)
 try {
@@ -61,17 +70,10 @@ const json = (res, code, data) => {
   res.end(corpo);
 };
 
+/* Corpo JSON com teto de 1 MB. JSON inválido agora é 400 (antes virava {}
+   em silêncio e a rota respondia "faltou o telefone" — pista errada). */
 function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let d = '', excedeu = false;
-    req.on('data', c => {
-      if (excedeu) return;            // drena o resto sem guardar, para a resposta 413 conseguir sair
-      d += c;
-      if (d.length > 1e6) { excedeu = true; d = ''; reject(new Error('payload grande demais')); }
-    });
-    req.on('end', () => { if (excedeu) return; try { resolve(d ? JSON.parse(d) : {}); } catch { resolve({}); } });
-    req.on('error', reject);
-  });
+  return SEG.lerCorpoJson(req, { limite: 1e6 });
 }
 
 /* Corpo GRANDE — só para o envio de arquivo (base64 incha ~33%: 21 MB de
@@ -88,21 +90,48 @@ function readBodyGrande(req, limite = 21 * 1024 * 1024) {
     });
     req.on('end', () => {
       try { resolve(JSON.parse(Buffer.concat(partes).toString('utf8') || '{}')); }
-      catch { resolve({}); }
+      catch { reject(new SEG.ErroHttp(400, 'JSON inválido no corpo da requisição.', 'json_invalido')); }
     });
     req.on('error', reject);
   });
 }
 
-function serveStatic(res, urlPath) {
-  const rel = urlPath === '/' ? 'index.html' : urlPath.slice(1);
-  const file = path.join(PUBLIC, rel);
-  if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end('acesso negado'); }
+/* CSP da interface: os <script> embutidos entram pelo hash, calculado na hora
+   em que o HTML é servido (a tela muda o index.html sem quebrar a política). */
+const CSP_CACHE = new Map();   // arquivo -> { mtime, csp }
+function cspDoHtml(file, buf) {
+  let mtime = 0;
+  try { mtime = fs.statSync(file).mtimeMs; } catch { /* sem stat: recalcula */ }
+  const c = CSP_CACHE.get(file);
+  if (c && c.mtime === mtime) return c.csp;
+  const csp = SEG.politicaCSP({ supabaseUrl: SUPABASE_URL, hashes: SEG.hashesDosScripts(buf.toString('utf8')) });
+  CSP_CACHE.set(file, { mtime, csp });
+  return csp;
+}
+
+function serveStatic(req, res, urlPath) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('método não permitido');
+  }
+  let rel;
+  try { rel = urlPath === '/' ? 'index.html' : decodeURIComponent(urlPath.slice(1)); }
+  catch { res.writeHead(400); return res.end('caminho inválido'); }
+  const file = path.resolve(PUBLIC, rel);
+  // dentro de public/ de verdade (o startsWith antigo deixava passar uma pasta "public-xyz" vizinha)
+  // e nada de arquivo escondido (.env, .git…) nem byte nulo
+  if ((file !== PUBLIC && !file.startsWith(PUBLIC + path.sep)) || /(^|[\\/])\./.test(rel) || rel.includes('\0')) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('não encontrado');
+  }
   fs.readFile(file, (err, buf) => {
-    if (err) { res.writeHead(404); return res.end('não encontrado'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
-                         'X-Content-Type-Options': 'nosniff' });
-    res.end(buf);
+    if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('não encontrado'); }
+    const ext = path.extname(file);
+    const cab = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff',
+      // HTML e service worker sempre frescos (versão nova chega na hora); o resto, 1 h com revalidação
+      'Cache-Control': ext === '.html' || /sw\.js$/.test(file) ? 'no-cache' : 'public, max-age=3600, must-revalidate' };
+    if (ext === '.html') cab['Content-Security-Policy'] = cspDoHtml(file, buf);
+    res.writeHead(200, cab);
+    res.end(req.method === 'HEAD' ? undefined : buf);
   });
 }
 
@@ -467,76 +496,22 @@ function recortarPayload(body) {
 }
 
 /* ------------------------------------------------------------
-   Porteiro: as rotas que gastam dinheiro (CodeWords, IA) só
-   funcionam para atendente LOGADO e ATIVO. Essencial quando o
-   servidor está exposto na internet por um túnel.
+   Porteiro (lib/acesso.js): TODA rota com login passa por aqui.
+   Confere token, perfil ativo, papel de equipe, o app 'atendimento'
+   em perfis.apps (admin sempre) e a verificação em duas etapas.
+   Recusa com código claro: desativado (401), sem_acesso_app (403),
+   mfa_pendente (401), sessao_invalida/sessao_expirada (401).
    ------------------------------------------------------------ */
-const CACHE_LOGIN = new Map();   // token -> { usuario, expira } | { negado:true, expira }
+const ACESSO = ACS.criarAcesso({
+  getSb: () => adminSupabase(),
+  buscarUsuario: ACS.buscarUsuarioSupabase({ url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY }),
+});
 
-/** Quando expira o próprio JWT (campo exp). Sem isso, o cache poderia
-    aceitar por mais 60s um token que já venceu. */
-function validadeDoToken(token) {
-  try {
-    const [, carga] = token.split('.');
-    const { exp } = JSON.parse(Buffer.from(carga, 'base64url').toString('utf8'));
-    return Number.isFinite(exp) ? exp * 1000 : 0;
-  } catch { return 0; }
-}
-
-async function usuarioLogado(req) {
-  const auth = req.headers['authorization'] || '';
-  // "Bearer" é case-insensitive no RFC 7235 e pode vir com espaços sobrando
-  const m = /^\s*bearer\s+(\S+)\s*$/i.exec(auth);
-  const token = m ? m[1] : null;
-  if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
-
-  const lembrado = CACHE_LOGIN.get(token);
-  if (lembrado && lembrado.expira > Date.now()) {
-    return lembrado.negado ? null : lembrado.usuario;
-  }
-
-  // Recusa de graça o que já venceu, sem gastar uma ida ao Supabase
-  const vence = validadeDoToken(token);
-  if (vence && vence <= Date.now()) return null;
-
-  // Sem a chave de servidor não dá para conferir se o atendente segue ativo.
-  // Fecha em vez de deixar passar (fail-closed).
-  const sb = adminSupabase();
-  if (!sb) return null;
-
-  const negar = () => {
-    if (CACHE_LOGIN.size > 500) CACHE_LOGIN.clear();
-    // lembra a recusa por 30s: token inválido não derruba o servidor a cada tentativa
-    CACHE_LOGIN.set(token, { negado: true, expira: Date.now() + 30_000 });
-    return null;
-  };
-
-  try {
-    // 1) O token é mesmo de alguém logado?
-    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!r.ok) return negar();
-    const usuario = await r.json();
-    if (!usuario?.id) return negar();
-
-    // 2) E o perfil ainda está ativo? (um atendente desligado perde o acesso na hora)
-    const { data: p, error } = await sb.from('perfis')
-      .select('ativo, papel').eq('id', usuario.id).maybeSingle();
-    if (error || !p?.ativo) return negar();
-    /* Papel 'agenda' (ex.: Franklin): acesso SÓ à Agenda, para marcar presença.
-       Aqui no Atendimento ele não entra — não vê conversa, não assume, não
-       fala com cliente. A trava é no servidor: esconder tela não protege. */
-    if (p.papel === 'agenda') return negar();
-    usuario.papel = p.papel;
-
-    if (CACHE_LOGIN.size > 500) CACHE_LOGIN.clear();          // nunca cresce sem limite
-    // o cache nunca sobrevive ao próprio token
-    const ate = Math.min(Date.now() + 60_000, vence || Infinity);
-    CACHE_LOGIN.set(token, { usuario, expira: ate });
-    return usuario;
-  } catch { return null; }
+/** Compatível com as rotas antigas: o usuário (com papel, apps, nome…) ou null. */
+async function usuarioLogado(req, { mfaPendenteOk = false } = {}) {
+  const r = await ACESSO.autenticar(req);
+  if (!r.ok || (r.usuario.mfaPendente && !mfaPendenteOk)) return null;
+  return r.usuario;
 }
 
 /* Liga e desliga a IA do WhatsApp (o Carlos) para UM cliente.
@@ -570,23 +545,11 @@ async function pausarCarlos(sb, telefone, pausar) {
     return { ok: false, erro: msg };
   }
 }
-
-/* Freio simples por usuário: evita que um token válido (ou um script
-   distraído) queime a cota da IA e do CodeWords em segundos. */
-const USO = new Map();   // chave -> { qtd, zeraEm }
-
-function dentroDoLimite(chave, teto, janelaMs) {
-  const agora = Date.now();
-  const atual = USO.get(chave);
-  if (!atual || atual.zeraEm <= agora) {
-    if (USO.size > 500) USO.clear();
-    USO.set(chave, { qtd: 1, zeraEm: agora + janelaMs });
-    return true;
-  }
-  if (atual.qtd >= teto) return false;
-  atual.qtd++;
-  return true;
-}
+/* Freio por usuário/IP (lib/seguranca.js): evita que um token válido (ou um
+   script distraído) queime a cota da IA e do CodeWords em segundos. Memória
+   limitada: ao encher, sai primeiro o que já venceu (antes zerava tudo). */
+const LIMITE = SEG.criarLimitador({ maxChaves: 5000 });
+const dentroDoLimite = (chave, teto, janelaMs) => LIMITE.permitir(chave, teto, janelaMs);
 
 /** Mensagem chegou do WhatsApp (via CodeWords) → vira conversa + lead aqui. */
 async function receberDoCodeWords(req, body) {
@@ -962,7 +925,7 @@ async function sincronizarRespostas({ conversaId = null, quantas = 12 } = {}) {
     : consulta.order('ultima_mensagem_em', { ascending: false, nullsFirst: false }).limit(quantas);
 
   const { data: convs, error } = await consulta;
-  if (error) return { ok: false, erro: error.message };
+  if (error) { console.error('sincronia:', error.message); return { ok: false, erro: 'Não consegui ler as conversas agora.' }; }
 
   let total = 0, falhas = 0, ultimoErro = null, tentadas = 0;
   for (const c of (convs || [])) {
@@ -1367,9 +1330,9 @@ async function classificarEtapa({ conversaId, forcar = false }) {
       .order('created_at', { ascending: false }).limit(20),
   ]);
 
-  if (conv.error)  return { ok: false, status: 500, erro: 'Não consegui ler a conversa: ' + conv.error.message };
+  if (conv.error)  { console.error('classificar:', conv.error.message); return { ok: false, status: 503, erro: 'Não consegui ler a conversa agora.' }; }
   if (!conv.data)  return { ok: false, status: 404, erro: 'Conversa não encontrada.' };
-  if (etapasResp.error) return { ok: false, status: 500, erro: 'Não consegui ler as etapas: ' + etapasResp.error.message };
+  if (etapasResp.error) { console.error('classificar:', etapasResp.error.message); return { ok: false, status: 503, erro: 'Não consegui ler as etapas agora.' }; }
 
   const conversa = conv.data;
   const etapas = etapasResp.data || [];
@@ -1476,7 +1439,8 @@ Em qual etapa esta conversa está AGORA? Responda só o JSON.`;
     }
     bruto = msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
   } catch (err) {
-    return { ok: false, status: 502, erro: err.message || 'falha ao falar com a Claude' };
+    console.error('classificar (IA):', err?.message);
+    return { ok: false, status: 502, erro: 'A IA não respondeu agora. Tente de novo em instantes.' };
   }
 
   /* ---------- (d) NUNCA confiar no texto cru ---------- */
@@ -1526,7 +1490,8 @@ Em qual etapa esta conversa está AGORA? Responda só o JSON.`;
   const { data: atualizadas, error: erroGravar } = await gravar.select('id');
 
   if (erroGravar) {
-    return { ok: false, status: 500, erro: 'Não consegui gravar a etapa: ' + erroGravar.message,
+    console.error('classificar (gravar):', erroGravar.message);
+    return { ok: false, status: 503, erro: 'Não consegui gravar a etapa agora. Tente de novo.',
              etapaAntes: nomeAtual, etapaDepois: nomeAtual, mudou: false, confianca, motivo };
   }
   if (!atualizadas || atualizadas.length === 0) {
@@ -1980,7 +1945,7 @@ async function fichaDoCliente(clienteId) {
   const { data: cliente, error } = await sb.from('clientes')
     .select('id,nome,telefone,telefone_e164,carro_modelo,placa,nascimento,aceita_mensagens,aceita_mensagens_em,aceita_mensagens_motivo')
     .eq('id', clienteId).maybeSingle();
-  if (error) return { ok: false, erro: error.message };
+  if (error) { console.error('ficha:', error.message); return { ok: false, erro: 'Não consegui ler a ficha agora.' }; }
   if (!cliente) return { ok: false, erro: 'Cliente não encontrado.' };
 
   const telefones = COM.variantesDoTelefone(cliente.telefone_e164 || cliente.telefone);
@@ -2107,13 +2072,52 @@ const ROTAS_IA = criarRotasIA({
   copiloto: new Proxy({}, { get: (_, k) => copiloto()[k] }),
   contexto: new Proxy({}, { get: (_, k) => (copiloto(), CONTEXTO)[k] }),
   resumoDoDia: (...a) => (copiloto(), RESUMO_DIA)(...a),
+  auditar: (...a) => AUDITORIA().registrar(...a),
 });
+
+/* ------------------------------------------------------------
+   Central da equipe: auditoria, equipe, rodízio, tarefas e
+   automações. Montados na hora (lazy), com o banco de serviço.
+   ------------------------------------------------------------ */
+let _AUD = null, _EQP = null, _ROD = null, _TAR = null, _AUT = null;
+function AUDITORIA() { return _AUD || (_AUD = AUD.criarAuditoria({ sb: adminSupabase() })); }
+const auditar = (...a) => AUDITORIA().registrar(...a);
+function EQUIPE() {
+  const sb = adminSupabase();
+  return _EQP || (_EQP = EQP.criarEquipe({ sb, authAdmin: sb.auth.admin, auditar, esquecerPerfil: id => ACESSO.esquecerPerfil(id) }));
+}
+function RODIZIO() { return _ROD || (_ROD = ROD.criarRodizio({ sb: adminSupabase(), auditar })); }
+function TAREFAS() { return _TAR || (_TAR = TAR.criarTarefas({ sb: adminSupabase(), auditar })); }
+function AUTOMACOES() { return _AUT || (_AUT = AUT.criarAutomacoes({ sb: adminSupabase(), rodizio: RODIZIO(), auditar })); }
+const preguicoso = fn => new Proxy({}, { get: (_, k) => fn()[k] });
+
+const ROTAS_EQUIPE = criarRotasEquipe({
+  getSb: adminSupabase, usuarioLogado, limitar: dentroDoLimite, lerCorpo: readBody,
+  equipe: preguicoso(EQUIPE), auditoria: preguicoso(AUDITORIA), tarefas: preguicoso(TAREFAS),
+  rodizio: preguicoso(RODIZIO), automacoes: preguicoso(AUTOMACOES),
+  esquecerPerfil: id => ACESSO.esquecerPerfil(id),
+});
+
+/* Rotas que respondem sem login (o resto de /api/ passa pelo porteiro). */
+const ROTAS_PUBLICAS = new Set(['/api/config', '/api/primeiro-acesso', '/api/webhook/codewords', '/api/status']);
+/* Rotas que ainda respondem com a verificação em duas etapas pendente
+   (a tela precisa saber quem é para pedir o código). */
+const LIVRES_DE_MFA = new Set(['/api/eu']);
+/* Atrás do proxy do Render (RENDER definido) o X-Forwarded-* é do proxy e vale;
+   numa máquina local (mesmo com PORT definido) ninguém confia nele. HSTS só
+   quando a conexão do navegador é https de verdade. */
+const ATRAS_DO_PROXY = !!process.env.RENDER || process.env.CONFIAR_PROXY === '1';
+const ehHttps = req => ATRAS_DO_PROXY && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+const IP_DE = req => SEG.ipDoCliente(req, { confiarProxy: ATRAS_DO_PROXY });
 
 /* ------------------------------------------------------------
    Servidor
    ------------------------------------------------------------ */
 const server = http.createServer(async (req, res) => {
   try {
+    // cabeçalhos de segurança em TODA resposta (API e arquivos)
+    SEG.aplicarCabecalhos(res, SEG.cabecalhosBase({ https: ehHttps(req) }));
+
     // Dentro do try de propósito: um Host malformado (ex.: "Host: [") faz o
     // parser de URL lançar, e fora daqui isso derrubaria o processo inteiro.
     let pathname, parametros;
@@ -2124,6 +2128,47 @@ const server = http.createServer(async (req, res) => {
     } catch {
       return json(res, 400, { erro: 'requisição malformada' });
     }
+
+    if (pathname.startsWith('/api/')) {
+      // CORS só para os apps do ecossistema, em todas as rotas de API
+      SEG.aplicarCabecalhos(res, SEG.cabecalhosCors(req.headers.origin));
+      if (req.method === 'OPTIONS') {
+        const cors = SEG.cabecalhosCors(req.headers.origin, { preflight: true });
+        res.writeHead(cors['Access-Control-Allow-Origin'] ? 204 : 403, { ...cors, 'Content-Length': 0, 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+      const ip = IP_DE(req);
+      // teto geral por IP (uma aba aberta faz bem menos que isso)
+      if (!dentroDoLimite(`ip:${ip}`, 900, 60_000)) {
+        res.setHeader('Retry-After', String(LIMITE.espera(`ip:${ip}`)));
+        return json(res, 429, { erro: 'Muitas requisições deste endereço. Espere um minuto.', codigo: 'muitas_tentativas' });
+      }
+      // porteiro: quem manda token passa pela conferência completa
+      if (!ROTAS_PUBLICAS.has(pathname) && ACS.tokenDe(req)) {
+        // token inválido repetido do mesmo IP (tentativa de adivinhar) → freio
+        if (LIMITE.quantas(`falha-login:${ip}`) >= 30) {
+          res.setHeader('Retry-After', String(LIMITE.espera(`falha-login:${ip}`)));
+          return json(res, 429, { erro: 'Muitas tentativas de acesso inválidas. Espere alguns minutos.', codigo: 'muitas_tentativas' });
+        }
+        const a = await ACESSO.autenticar(req);
+        if (!a.ok) {
+          if (a.status === 401) LIMITE.contar(`falha-login:${ip}`, 10 * 60_000);
+          return json(res, a.status, { erro: a.erro, codigo: a.codigo, ...(a.apps ? { apps: a.apps } : {}) });
+        }
+        if (a.usuario.mfaPendente && !LIVRES_DE_MFA.has(pathname)) {
+          return json(res, 401, { erro: 'Falta confirmar o código da verificação em duas etapas.', codigo: 'mfa_pendente' });
+        }
+        ACESSO.marcarAcesso(a.usuario);
+      }
+    }
+
+    // Saúde mínima do processo (para o vigia/Render): nada interno sai daqui
+    if (pathname === '/api/status' && req.method === 'GET') {
+      return json(res, 200, { ok: true, app: 'atendimento', versao: require('./package.json').version, agora: new Date().toISOString() });
+    }
+
+    // ---- Central da equipe: eu, equipe, auditoria, tarefas, rodízio (lib/rotas-equipe.js) ----
+    if (await ROTAS_EQUIPE(req, res, pathname, parametros)) return;
 
     // A interface precisa saber onde fica o Supabase (a anon key é pública por design)
     if (pathname === '/api/config' && req.method === 'GET') {
@@ -2220,7 +2265,15 @@ const server = http.createServer(async (req, res) => {
 
       const { error: erroGravar } = await sb.from('conversas')
         .update(campos).eq('id', conversaId);
-      if (erroGravar) return json(res, 500, { erro: erroGravar.message });
+      if (erroGravar) { console.error('assumir:', erroGravar.message); return json(res, 503, { erro: 'Não consegui gravar agora. Tente de novo.' }); }
+
+      // a conversa mudou de mão: o lead em aberto do cliente acompanha (se não for de outra pessoa) e fica registrado
+      if (assumir && conversa.atribuida_a !== quem.id) {
+        const c2 = await sb.from('conversas').select('cliente_id').eq('id', conversaId).maybeSingle();
+        const lead = await RODIZIO().leadAcompanha({ clienteId: c2.data?.cliente_id, de: conversa.atribuida_a || null, para: quem.id });
+        await auditar({ perfil: quem.id, acao: 'conversa.assumir', tabela: 'conversas', registro: conversaId,
+          detalhes: { de: conversa.atribuida_a || null, forcado: !!(conversa.atribuida_a && bruto.forcar), carlos_pausado: carlos.ok, leads_movidos: lead.movidos } });
+      }
 
       return json(res, 200, {
         ok: true, assumido: assumir, atendente: quem.papel ? quem.id : null,
@@ -2253,7 +2306,7 @@ const server = http.createServer(async (req, res) => {
       if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
 
       // Sem login para chegar aqui, então o freio é o IP
-      const ip = req.socket?.remoteAddress || 'desconhecido';
+      const ip = IP_DE(req);
       if (!dentroDoLimite(`primeiro:${ip}`, 5, 600_000)) {
         return json(res, 429, { erro: 'Muitas tentativas. Espere alguns minutos.' });
       }
@@ -2280,201 +2333,18 @@ const server = http.createServer(async (req, res) => {
       const { data, error } = await sb.auth.admin.createUser({
         email, password: senha, email_confirm: true, user_metadata: { nome },
       });
-      if (error) return json(res, 400, { erro: error.message });
+      if (error) { console.error('primeiro acesso:', error.message); return json(res, 400, { erro: 'Não consegui criar a conta. Confira o e-mail e tente de novo.' }); }
 
       /* O gatilho do banco já marca o primeiro como admin. Reforçado aqui
          porque uma corrida entre dois cadastros simultâneos poderia deixar
          o dono como atendente no próprio sistema. */
-      await sb.from('perfis').update({ nome, papel: 'admin', ativo: true }).eq('id', data.user.id);
+      await sb.from('perfis').update({ nome, papel: 'admin', ativo: true, apps: ACS.APPS, precisa_trocar_senha: false }).eq('id', data.user.id);
+      await auditar({ perfil: data.user.id, acao: 'equipe.primeiro_acesso', tabela: 'perfis', registro: data.user.id, detalhes: { email } });
       return json(res, 201, { ok: true, email });
     }
 
-    /* ---- Nomes da equipe, para a plaquinha de dono ----
-       Pelo servidor de propósito. O RLS de `perfis` só deixa admin ler todo
-       mundo; um atendente lendo direto do navegador enxergaria só a si mesmo,
-       e aí a plaquinha do colega apareceria sem nome e o menu "passar para"
-       listaria uma pessoa só — justamente o que a plaquinha veio resolver.
-       Devolve o mínimo: nome, papel e ativo. E-mail não sai daqui. */
-    if (pathname === '/api/equipe/nomes' && req.method === 'GET') {
-      const quem = await usuarioLogado(req);
-      if (!quem) return json(res, 401, { erro: 'Faça login.' });
-      const sb = adminSupabase();
-      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
-      const { data, error } = await sb.from('perfis')
-        .select('id,nome,papel,ativo,recebe_leads').order('nome');
-      if (error) return json(res, 500, { erro: 'Não consegui ler a equipe: ' + error.message });
-      return json(res, 200, { ok: true, equipe: data || [] });
-    }
-
-    /* ---- Entrar ou sair do rodízio de clientes novos ----
-       Pelo servidor porque o RLS de `perfis` só permite editar a PRÓPRIA
-       linha: nem admin altera a de outra pessoa pelo navegador. O update
-       pegaria 0 linhas, o PostgREST responderia 204 e o painel diria
-       "pronto" sem ter mudado nada — sucesso falso, que é pior que erro. */
-    if (pathname === '/api/equipe/rodizio' && req.method === 'POST') {
-      const quem = await usuarioLogado(req);
-      if (!quem) return json(res, 401, { erro: 'Faça login.' });
-      if (quem.papel !== 'admin') {
-        return json(res, 403, { erro: 'Só o administrador define quem recebe clientes novos.' });
-      }
-      const bruto = await readBody(req);
-      const id = texto1(bruto.id, 60);
-      const recebe = bruto.recebe === true;
-      if (!ehUuid(id)) return json(res, 400, { erro: 'Informe quem você quer alterar.' });
-
-      const sb = adminSupabase();
-      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
-
-      /* Tirar a última pessoa do rodízio faz o cliente novo nascer sem dono e
-         voltar a ficar na fila de ninguém — o problema que o rodízio veio
-         resolver. */
-      if (!recebe) {
-        const { count } = await sb.from('perfis')
-          .select('id', { count: 'exact', head: true })
-          .eq('ativo', true).eq('recebe_leads', true);
-        const { data: alvo } = await sb.from('perfis')
-          .select('recebe_leads, ativo').eq('id', id).maybeSingle();
-        if (alvo?.recebe_leads && alvo.ativo && (count ?? 0) <= 1) {
-          return json(res, 409, {
-            erro: 'É a única pessoa recebendo clientes. Coloque outra antes de tirar esta, '
-                + 'senão o cliente novo chega sem responsável.' });
-        }
-      }
-
-      const { data, error } = await sb.from('perfis')
-        .update({ recebe_leads: recebe }).eq('id', id).select('id').single();
-      if (error) return json(res, 500, { erro: error.message });
-      if (!data) return json(res, 404, { erro: 'Não achei essa pessoa.' });
-      return json(res, 200, { ok: true, recebe });
-    }
-
-    /* ---- Trocar a função de alguém ---- */
-    if (pathname === '/api/equipe/papel' && req.method === 'POST') {
-      const quem = await usuarioLogado(req);
-      if (!quem) return json(res, 401, { erro: 'Faça login.' });
-      if (quem.papel !== 'admin') {
-        return json(res, 403, { erro: 'Só o administrador muda a função da equipe.' });
-      }
-      const bruto = await readBody(req);
-      const id    = texto1(bruto.id, 60);
-      // 'agenda' = só marca presença na Agenda (não entra aqui no Atendimento)
-      const papel = ['admin', 'agenda'].includes(bruto.papel) ? bruto.papel : 'atendente';
-      if (!id) return json(res, 400, { erro: 'Informe quem.' });
-
-      const sb = adminSupabase();
-      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
-
-      /* Rebaixar o último admin tranca todo mundo para fora: ninguém mais
-         cadastra ninguém, ninguém reconecta o WhatsApp, e a rota de primeiro
-         acesso não reabre porque ainda existem perfis. */
-      if (papel !== 'admin') {
-        /* Confere a função do ALVO antes de contar. Sem isso, rebaixar
-           alguém que já era atendente, num sistema com um só admin, era
-           recusado com "este é o único administrador" — recado errado para
-           a situação, e a pessoa fica sem entender o que fazer. */
-        const { data: alvo } = await sb.from('perfis')
-          .select('papel, ativo').eq('id', id).maybeSingle();
-        if (alvo?.papel === 'admin' && alvo.ativo) {
-          const { count } = await sb.from('perfis')
-            .select('id', { count: 'exact', head: true }).eq('papel', 'admin').eq('ativo', true);
-          if ((count ?? 0) <= 1) {
-            return json(res, 409, {
-              erro: 'Este é o único administrador. Promova outra pessoa antes de rebaixar esta.' });
-          }
-        }
-      }
-
-      const { error } = await sb.from('perfis').update({ papel }).eq('id', id);
-      if (error) return json(res, 400, { erro: error.message });
-      return json(res, 200, { ok: true, papel });
-    }
-
-    if (pathname === '/api/equipe' && req.method === 'POST') {
-      const quem = await usuarioLogado(req);
-      if (!quem) return json(res, 401, { erro: 'Faça login para cadastrar alguém.' });
-      if (quem.papel !== 'admin') {
-        return json(res, 403, { erro: 'Só o administrador cadastra a equipe.' });
-      }
-      if (!dentroDoLimite(`equipe:${quem.id}`, 10, 60_000)) {
-        return json(res, 429, { erro: 'Muitos cadastros seguidos. Espere um minuto.' });
-      }
-
-      const bruto = await readBody(req);
-      const nome  = texto1(bruto.nome, 80).trim();
-      const email = texto1(bruto.email, 160).trim().toLowerCase();
-      const senha = texto1(bruto.senha, 200);
-      const papel = bruto.papel === 'admin' ? 'admin' : 'atendente';
-
-      if (!nome)  return json(res, 400, { erro: 'Informe o nome da pessoa.' });
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
-        return json(res, 400, { erro: 'Esse e-mail não parece válido.' });
-      }
-      if (senha.length < 8) {
-        return json(res, 400, { erro: 'A senha precisa ter pelo menos 8 caracteres.' });
-      }
-
-      const sb = adminSupabase();
-      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
-
-      // email_confirm: já entra valendo, sem depender de e-mail de confirmação
-      const { data, error } = await sb.auth.admin.createUser({
-        email, password: senha, email_confirm: true,
-        user_metadata: { nome },
-      });
-
-      if (error) {
-        const jaExiste = /already been registered|already exists/i.test(error.message);
-        return json(res, jaExiste ? 409 : 400, {
-          erro: jaExiste ? 'Já existe alguém cadastrado com esse e-mail.' : error.message });
-      }
-
-      // o gatilho cria o perfil; aqui só acertamos nome e papel
-      const { error: erroPerfil } = await sb.from('perfis')
-        .update({ nome, papel, ativo: true }).eq('id', data.user.id);
-      if (erroPerfil) {
-        return json(res, 200, { ok: true, id: data.user.id, nome, email, papel,
-          aviso: 'Usuário criado, mas não consegui ajustar o perfil: ' + erroPerfil.message });
-      }
-      return json(res, 201, { ok: true, id: data.user.id, nome, email, papel });
-    }
-
-    /* ---- Equipe: ligar/desligar o acesso de alguém ---- */
-    if (pathname === '/api/equipe/ativo' && req.method === 'POST') {
-      const quem = await usuarioLogado(req);
-      if (!quem) return json(res, 401, { erro: 'Faça login.' });
-      if (quem.papel !== 'admin') return json(res, 403, { erro: 'Só o administrador faz isso.' });
-
-      const bruto = await readBody(req);
-      const id = texto1(bruto.id, 60);
-      if (!ehUuid(id)) return json(res, 400, { erro: 'Informe quem você quer alterar.' });
-      if (id === quem.id) {
-        return json(res, 400, { erro: 'Você não pode desligar o próprio acesso.' });
-      }
-      const sb = adminSupabase();
-      if (!sb) return json(res, 503, { erro: 'Servidor sem a chave do banco configurada.' });
-
-      /* Tirar o acesso do último administrador tranca o sistema para todo
-         mundo: ninguém cadastra ninguém, ninguém reconecta o WhatsApp, e a
-         tela de primeiro acesso não reabre porque perfis continuam existindo.
-         A regra de "não desligar a si mesmo" acima não cobre isto — dois
-         admins podem se desligar em sequência. */
-      if (bruto.ativo !== true) {
-        const { data: alvo } = await sb.from('perfis').select('papel').eq('id', id).maybeSingle();
-        if (alvo?.papel === 'admin') {
-          const { count } = await sb.from('perfis')
-            .select('id', { count: 'exact', head: true }).eq('papel', 'admin').eq('ativo', true);
-          if ((count ?? 0) <= 1) {
-            return json(res, 409, {
-              erro: 'Este é o único administrador ativo. Promova outra pessoa antes de tirar o acesso desta.' });
-          }
-        }
-      }
-
-      const { error } = await sb.from('perfis')
-        .update({ ativo: bruto.ativo === true }).eq('id', id);
-      if (error) return json(res, 500, { erro: error.message });
-      return json(res, 200, { ok: true, ativo: bruto.ativo === true });
-    }
+    /* As rotas de equipe (nomes, rodízio, papel, cadastro, ativo) moraram aqui até a
+       rodada 3; agora ficam em lib/rotas-equipe.js, com auditoria e as regras novas. */
 
     if (pathname === '/api/ia/classificar' && req.method === 'POST') {
       const quem = await usuarioLogado(req);
@@ -2548,7 +2418,10 @@ const server = http.createServer(async (req, res) => {
       }
       let bruto;
       try { bruto = await readBodyGrande(req); }
-      catch { return json(res, 413, { erro: 'Arquivo grande demais (máximo 15 MB).' }); }
+      catch (e) {
+        if (e instanceof SEG.ErroHttp) return json(res, e.status, { erro: e.erro, codigo: e.codigo });
+        return json(res, 413, { erro: 'Arquivo grande demais (máximo 15 MB).' });
+      }
 
       const telefone   = texto1(bruto.telefone, 40);
       const nomeArq    = (texto1(bruto.nome_arquivo, 150) || 'documento').replace(/[\\/:*?"<>|]/g, '_');
@@ -2645,9 +2518,10 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/conversas/excluir' && req.method === 'POST') {
       const quem = await usuarioLogado(req);
       if (!quem) return json(res, 401, { erro: 'Faça login.' });
-      if (quem.papel !== 'admin') {
-        return json(res, 403, { erro: 'Só o administrador pode excluir conversas.' });
+      if (!['admin', 'gestor'].includes(quem.papel)) {
+        return json(res, 403, { erro: 'Só o gestor ou o administrador pode excluir conversas.', codigo: 'so_gestor' });
       }
+      if (!dentroDoLimite(`excluir:${quem.id}`, 20, 60_000)) return json(res, 429, { erro: 'Muitas exclusões seguidas. Espere um minuto.' });
       const bruto = await readBody(req);
       const id = texto1(bruto.conversaId, 60);
       if (!ehUuid(id)) return json(res, 400, { erro: 'Informe a conversa.' });
@@ -2661,7 +2535,7 @@ const server = http.createServer(async (req, res) => {
          cliente que o servidor não conseguiu nem ler. */
       const { data: conv, error: erroConv } = await sb.from('conversas')
         .select('id, nome, telefone').eq('id', id).maybeSingle();
-      if (erroConv) return json(res, 500, { erro: 'Não consegui ler a conversa: ' + erroConv.message });
+      if (erroConv) { console.error('excluir conversa:', erroConv.message); return json(res, 503, { erro: 'Não consegui ler a conversa agora; nada foi apagado.' }); }
       if (!conv) return json(res, 404, { erro: 'Essa conversa já não existe.' });
 
       const { data: msgs, error: erroMsgs } = await sb.from('whatsapp_mensagens')
@@ -2697,8 +2571,10 @@ const server = http.createServer(async (req, res) => {
          falhasse, as mensagens já tinham ido embora e o painel dizia que a
          exclusão não aconteceu. */
       const { error } = await sb.from('conversas').delete().eq('id', id);
-      if (error) return json(res, 500, { erro: error.message });
+      if (error) { console.error('excluir conversa:', error.message); return json(res, 503, { erro: 'Não consegui apagar agora (a cópia de segurança ficou gravada). Tente de novo.' }); }
 
+      await auditar({ perfil: quem.id, acao: 'conversa.excluir', tabela: 'conversas', registro: id,
+        detalhes: { mensagens: (msgs || []).length, telefone_final: String(conv.telefone || '').slice(-4) } });
       return json(res, 200, { ok: true, apagadas: (msgs || []).length });
     }
 
@@ -2711,9 +2587,10 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/mensagens/excluir' && req.method === 'POST') {
       const quem = await usuarioLogado(req);
       if (!quem) return json(res, 401, { erro: 'Faça login.' });
-      if (quem.papel !== 'admin') {
-        return json(res, 403, { erro: 'Só o administrador pode apagar mensagens.' });
+      if (!['admin', 'gestor'].includes(quem.papel)) {
+        return json(res, 403, { erro: 'Só o gestor ou o administrador pode apagar mensagens.', codigo: 'so_gestor' });
       }
+      if (!dentroDoLimite(`excluir:${quem.id}`, 20, 60_000)) return json(res, 429, { erro: 'Muitas exclusões seguidas. Espere um minuto.' });
       const bruto = await readBody(req);
       const ids = Array.isArray(bruto.ids) ? bruto.ids.filter(ehUuid).slice(0, 200) : [];
       if (!ids.length) return json(res, 400, { erro: 'Escolha ao menos uma mensagem.' });
@@ -2723,7 +2600,7 @@ const server = http.createServer(async (req, res) => {
 
       const { data: msgs, error: erroLer } = await sb.from('whatsapp_mensagens')
         .select('id, conversa_id, telefone, corpo, direcao, created_at').in('id', ids);
-      if (erroLer) return json(res, 500, { erro: 'Não consegui ler as mensagens: ' + erroLer.message });
+      if (erroLer) { console.error('apagar mensagens:', erroLer.message); return json(res, 503, { erro: 'Não consegui ler as mensagens agora; nada foi apagado.' }); }
       if (!msgs?.length) return json(res, 404, { erro: 'Essas mensagens já não existem.' });
 
       // cópia primeiro, e conferida: sem ela, nada é apagado
@@ -2738,7 +2615,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       const { error } = await sb.from('whatsapp_mensagens').delete().in('id', ids);
-      if (error) return json(res, 500, { erro: error.message });
+      if (error) { console.error('apagar mensagens:', error.message); return json(res, 503, { erro: 'Não consegui apagar agora (a cópia de segurança ficou gravada). Tente de novo.' }); }
+      await auditar({ perfil: quem.id, acao: 'mensagem.excluir', tabela: 'whatsapp_mensagens', registro: msgs[0].conversa_id || null,
+        detalhes: { quantas: msgs.length, ids: msgs.map(x => x.id).slice(0, 50) } });
 
       /* A prévia e a data da conversa vinham da mensagem apagada. Sem
          recalcular, a lista mostraria texto de mensagem que já não existe. */
@@ -2802,6 +2681,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, 429, { erro: 'Espere alguns minutos antes de pedir outro código.' });
       }
       const r = await gerarCodigoDePareamento();
+      await auditar({ perfil: quem.id, acao: 'whatsapp.parear', tabela: 'codewords_config', detalhes: { ok: !!r.ok } });
       return json(res, r.ok ? 200 : 502, r);
     }
 
@@ -2814,6 +2694,7 @@ const server = http.createServer(async (req, res) => {
       }
       await readBody(req);
       const r = await reinscreverNoFluxo();
+      await auditar({ perfil: quem.id, acao: 'whatsapp.reinscrever', tabela: 'codewords_config', detalhes: { ok: !!r.ok } });
       return json(res, r.ok ? 200 : 502, r);
     }
 
@@ -2869,6 +2750,9 @@ const server = http.createServer(async (req, res) => {
       }
       const bruto = await readBody(req);
       const r = await salvarChaveCodeWords(texto1(bruto.chave, 300), { testar: bruto.testar !== false });
+      // a chave nunca entra na auditoria — só se deu certo e onde gravou
+      await auditar({ perfil: quem.id, acao: 'config.codewords_chave', tabela: 'codewords_config',
+        detalhes: { ok: !!r.ok, testada: bruto.testar !== false, avisos: (r.avisos || []).length } });
       return json(res, r.ok ? 200 : 400, r);
     }
 
@@ -2886,6 +2770,7 @@ const server = http.createServer(async (req, res) => {
         corpo: '🏁 Teste de conexão do painel de atendimento da IndyCar.',
         nome: 'Teste',
       });
+      await auditar({ perfil: quem.id, acao: 'whatsapp.testar_envio', tabela: 'codewords_config', detalhes: { ok: !!r.ok } });
       return json(res, r.ok ? 200 : 502, r);
     }
 
@@ -2896,8 +2781,8 @@ const server = http.createServer(async (req, res) => {
       // Só admin: o relatório usa a chave de servidor (ignora o RLS) e mostra o
       // desempenho de CADA atendente — nome, quantas resolveu, quanto demora a
       // responder. Pelo navegador, um atendente comum nem enxerga o perfil do colega.
-      if (quem.papel !== 'admin') {
-        return json(res, 403, { erro: 'Só o administrador vê os relatórios da equipe.' });
+      if (!['admin', 'gestor'].includes(quem.papel)) {
+        return json(res, 403, { erro: 'Só o gestor ou o administrador vê os relatórios da equipe.', codigo: 'so_gestor' });
       }
       if (!dentroDoLimite(`relatorios:${quem.id}`, 40, 60_000)) {
         return json(res, 429, { erro: 'Muitos relatórios seguidos. Espere um minuto.' });
@@ -2921,7 +2806,7 @@ const server = http.createServer(async (req, res) => {
         const r = await montarRelatorio(de, ate);
         return json(res, r.ok ? 200 : 503, r);
       } catch (err) {
-        return json(res, 500, { ok: false, erro: err.message || 'falha ao montar o relatório' });
+        return json(res, 500, { ok: false, ...SEG.erroSeguro(err) });
       }
     }
 
@@ -2930,20 +2815,24 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname.startsWith('/api/')) return json(res, 404, { erro: 'rota não encontrada' });
 
-    serveStatic(res, pathname);
+    serveStatic(req, res, pathname);
   } catch (err) {
-    // corpo acima do limite não é defeito do servidor: é 413, com JSON legível
+    if (res.headersSent) { try { res.end(); } catch { /* já fechou */ } return; }
+    // JSON inválido (400) e corpo acima do limite (413) não são defeito do servidor
+    if (err instanceof SEG.ErroHttp) return json(res, err.status, { erro: err.erro, codigo: err.codigo });
     if (/grande demais/i.test(err?.message || '')) {
-      return json(res, 413, { erro: 'Conteúdo grande demais para esta rota.' });
+      return json(res, 413, { erro: 'Conteúdo grande demais para esta rota.', codigo: 'corpo_grande' });
     }
-    json(res, 500, { erro: err.message || 'erro interno' });
+    // nada de detalhe interno (mensagem do banco, pilha) para fora: só um código para o suporte
+    json(res, 500, SEG.erroSeguro(err));
   }
 });
 
 /* Com SO_FUNCOES=1 o arquivo só exporta as funções (para scripts de conferência
    contra o banco real, sem abrir porta). Em produção nada muda: `node server.js`. */
 module.exports = { lerSaude, fichaDoCliente, testarChaveCodeWords, lerChaveMascarada, salvarChaveCodeWords, server,
-                   copiloto, criarClienteIA, sugerirResposta, montarRelatorio, PERSONA };
+                   copiloto, criarClienteIA, sugerirResposta, montarRelatorio, PERSONA,
+                   ACESSO, LIMITE, AUDITORIA, EQUIPE, RODIZIO, TAREFAS, AUTOMACOES };
 if (process.env.SO_FUNCOES !== '1') server.listen(PORT, HOST, () => {
   console.log(`\n💬 IndyCar Atendimento em http://localhost:${PORT}`);
   console.log(SUPABASE_URL && SUPABASE_ANON_KEY
@@ -2954,5 +2843,10 @@ if (process.env.SO_FUNCOES !== '1') server.listen(PORT, HOST, () => {
     : '   ⚠️  Sem ANTHROPIC_API_KEY — a aba de IA fica desativada');
   console.log(HOST === '127.0.0.1' ? '   (acessível só neste computador)\n' : `   exposto em ${HOST}\n`);
   // Puxa do aparelho o que o Carlos respondeu — o webhook não recebe isso
-  if (adminSupabase()) ligarSincronizacaoPeriodica();
+  // SINCRONIA=0 desliga a sincronia com o aparelho (testes e conferências locais só de leitura)
+  if (adminSupabase() && process.env.SINCRONIA !== '0') ligarSincronizacaoPeriodica();
+  /* Automações (alerta de espera, resumo do dia, dono inválido, limpeza):
+     só na nuvem (Render) ou com AUTOMACOES=1 — nunca sozinhas num teste local. */
+  const ligarAutomacoes = process.env.AUTOMACOES === '1' || (!!process.env.RENDER && process.env.AUTOMACOES !== '0');
+  if (adminSupabase() && ligarAutomacoes) { AUTOMACOES().ligar(); console.log('   🤖 Automações ligadas (a cada 5 min)'); }
 });

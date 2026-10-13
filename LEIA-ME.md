@@ -10,14 +10,13 @@ App de atendimento por WhatsApp, ligado ao mesmo banco do CRM e da Agenda.
 http://localhost:3200
 ```
 
-| | |
-|---|---|
-| **E-mail** | `gerente@indycartaubate.com` |
-| **Senha** | `IndyCar@2026` |
+Entre com o seu e-mail e senha. Quem ainda não tem acesso pede ao
+administrador, que convida pela tela **Equipe** (o sistema gera uma senha
+temporária, mostrada uma vez só, e pede uma senha nova no primeiro acesso).
 
-> ⚠️ **Troque essa senha no primeiro acesso.** Ela está escrita aqui neste
-> arquivo, então vale só como acesso inicial.
-> Para trocar: Supabase → Authentication → Users → o usuário → *Reset password*.
+> 🔒 Senha não fica escrita em arquivo nenhum (a varredura `npm run segredos`
+> recusa). Até 13/10/2026 havia uma senha inicial anotada aqui — se ela ainda
+> valer em algum login, troque.
 
 ## ▶️ Rodar
 
@@ -208,18 +207,21 @@ ative *"Check against HaveIBeenPwned"*.
 
 ---
 
-## 👥 Adicionar mais atendentes
+## 👥 Equipe (a central de pessoas do ecossistema)
 
-Pelo painel do Supabase:
-**Authentication → Users → Add user** → marque *Auto Confirm User*.
+O Atendimento é onde o **admin gerencia as pessoas** de todos os apps IndyCar
+(o gestor só vê). Na tela **Equipe**: convidar (senha temporária gerada pelo
+servidor, mostrada **uma vez**), mudar papel / apps / equipe / cargo / rodízio,
+desativar (derruba o acesso na hora) e reativar, gerar senha nova, tirar a
+verificação em duas etapas de quem perdeu o celular, ver último acesso e quem
+tem verificação em duas etapas. Tudo fica na **auditoria**.
 
-O perfil é criado sozinho. O primeiro usuário do sistema vira **admin**;
-os demais entram como **atendente** (não veem as configurações do WhatsApp).
+Papéis: `admin` (tudo), `gestor` (vê equipe, relatórios, carga, sem dono;
+apaga conversa), `atendente`, `agenda` (só a Agenda — aqui não entra).
+Cada pessoa só entra nos apps marcados em `perfis.apps` (admin entra em todos).
 
-Para promover alguém a admin, rode no SQL Editor:
-```sql
-update public.perfis set papel = 'admin' where email = 'pessoa@exemplo.com';
-```
+> ⚠️ O papel `gestor` depende de uma troca na base (`perfis_papel_check` ainda
+> não aceita 'gestor'): proposta em `scripts/sql/2026-10-13_PROPOSTA_base_rodizio_e_gestor.sql`.
 
 ---
 
@@ -231,6 +233,12 @@ update public.perfis set papel = 'admin' where email = 'pessoa@exemplo.com';
 - A **chave da IA nunca vai para o navegador** — fica no servidor
 - Configurações sensíveis (token do WhatsApp) só para quem é **admin**
 - O `.env` está no `.gitignore`
+- **Servidor (rodada 3):** porteiro em toda rota (ativo + papel de equipe + app
+  Atendimento + verificação em duas etapas), CSP com hash dos scripts, HSTS na
+  nuvem, CORS só para os apps IndyCar, limites por IP e por pessoa, JSON inválido
+  = 400, erro sem detalhe interno (só um código para o suporte), auditoria das
+  ações sensíveis, `npm run segredos` (arquivos versionados) e
+  `npm run segredos:historico` (todo o histórico do Git), `npm audit` sem alertas.
 
 ---
 
@@ -337,3 +345,71 @@ dia, e ficam registrados em `ia_acoes`. `/api/relatorios` ganhou o bloco `copilo
 | `public/copiloto.js` / `copiloto.css` | O painel (pluga no `#copilotoSlot`; sem ele, vira botão flutuante) |
 | `test/*.test.js` | `npm test` — banco e IA de mentira, nada sai para a rede |
 | `test/apoio/servidor-copiloto.js` | Bancada do painel: `node test/apoio/servidor-copiloto.js --servir 3212` → `/bancada` |
+
+---
+
+## 🛡️ Rodada 3 (13/10/2026) — central da equipe, acesso e segurança do servidor
+
+### Porteiro (vale para TODA rota com login)
+Token do Supabase em `Authorization: Bearer <access_token>`. Respostas de recusa:
+
+| Situação | HTTP | `codigo` |
+|---|---|---|
+| sem token | 401 | `sem_login` |
+| token vencido / de ninguém | 401 | `sessao_expirada` / `sessao_invalida` |
+| perfil desativado | 401 | `desativado` |
+| papel `agenda` ou sem `'atendimento'` em `perfis.apps` (admin sempre entra) | 403 | `sem_acesso_app` (+ `apps:[{app,nome,link}]` que a pessoa pode usar) |
+| tem verificação em duas etapas e o token ainda é `aal1` | 401 | `mfa_pendente` (só `GET /api/eu` responde) |
+| token inválido 30× do mesmo IP em 10 min | 429 | `muitas_tentativas` (+ `Retry-After`) |
+
+Último acesso: `perfis.ultimo_acesso_em`/`ultimo_app='atendimento'` gravados no máximo a cada 5 min.
+Desativar alguém derruba o acesso em até 60 s (cache do porteiro esquecido na hora neste servidor).
+
+### Rotas novas (contrato completo no relatório da rodada e em `lib/rotas-equipe.js`)
+| Rota | Papel | Para quê |
+|---|---|---|
+| `GET /api/eu` · `PATCH /api/eu` · `POST /api/eu/senha-trocada` | qualquer da equipe | meu perfil, preferências, fim da troca obrigatória |
+| `GET /api/equipe` | admin, gestor | lista com último acesso/login, apps, MFA, situação, carga |
+| `GET /api/equipe/nomes` | equipe | nomes para a plaquinha (sem e-mail/telefone) |
+| `POST /api/equipe` | admin | convidar → `senha_temporaria` (uma vez) |
+| `PATCH /api/equipe/:id` | admin | papel, apps, equipe, cargo, telefone, rodízio |
+| `POST /api/equipe/:id/desativar` · `/reativar` · `/senha` · `/mfa/remover` | admin | acesso, senha temporária, tirar MFA |
+| `GET /api/auditoria` · `GET /api/auditoria/exportar` | admin | filtros + paginação · CSV (auditado) |
+| `GET /api/tarefas/equipe[?pessoa=]` · `POST /api/tarefas` | gestor (carga) · equipe | carga da equipe · criar tarefa |
+| `GET /api/rodizio` · `GET /api/conversas/sem-dono` | admin, gestor | próximo da fila · conversas sem dono |
+| `POST /api/conversas/:id/distribuir` · `/transferir` | equipe | dar dono pelo rodízio · passar com motivo |
+| `POST /api/automacoes/rodar` | admin | rodar agora: espera, resumo, donos, limpeza |
+| `GET /api/status` | público | `{ok, app, versao, agora}` (nada interno) |
+
+As rotas antigas `POST /api/equipe/papel|ativo|rodizio` continuam aceitas (mesmas regras novas).
+Excluir conversa/mensagens e Relatórios agora valem também para o **gestor**.
+
+### Rodízio
+Recebe cliente quem está ativo, no rodízio, com papel de equipe e o app Atendimento,
+fora de férias (`preferencias.ausente_ate`) — de preferência dentro do horário dele
+(`preferencias.expediente`; sem isso, seg–sáb 8h–17h30). Ganha quem tem **menos conversas
+abertas**; empate → quem recebeu há mais tempo. Quando a conversa muda de mão (assumir,
+transferir, distribuir), os leads abertos do cliente **acompanham o novo dono** — só os
+que estavam sem responsável ou com o dono antigo.
+
+### Automações (só no Render ou com `AUTOMACOES=1`; a cada 5 min)
+- Cliente esperando resposta há **30+ min** no horário da oficina → notificação para
+  gestores/admin e para o dono da conversa (uma por mensagem; nada vai por WhatsApp).
+- **Resumo do dia** às 17h40 (seg–sáb) → notificação para gestores/admin.
+- **Dono inválido**: conversa nova que caiu com quem não pode atender volta ao rodízio.
+- **Limpeza** diária: notificações lidas há 60+ dias, eventos do CodeWords com 120+ dias
+  (cópias de segurança de exclusão nunca saem) e rascunhos da IA nunca usados há 30+ dias.
+Preferências respeitadas: `preferencias.notificacoes.espera` / `.resumo_dia` = false desliga.
+
+### Copiloto: `criar_tarefa`
+A IA pode propor uma tarefa (título, responsável pelo nome da equipe, prazo, prioridade).
+Na autonomia `automatico`, cria sozinha só a tarefa do dono da conversa; para outra pessoa
+sempre pede clique. Desfazer = tarefa cancelada.
+
+### Variáveis novas
+`SINCRONIA=0` (não sincroniza com o aparelho — testes locais) · `AUTOMACOES=1|0` ·
+`CONFIAR_PROXY=1` (fora do Render, atrás de outro proxy).
+
+### Scripts
+`npm run segredos` · `npm run segredos:historico` · `npm run auditar-deps` · `npm run verificar`
+(sintaxe + segredos + audit + testes) · `node scripts/conferir-equipe-real.mjs` (só leitura).

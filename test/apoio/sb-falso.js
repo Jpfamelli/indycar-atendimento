@@ -3,17 +3,30 @@
 'use strict';
 const crypto = require('node:crypto');
 
+/** Padrão do LIKE (% e _; barra invertida escapa) → RegExp sem diferenciar maiúsculas. */
+const escRe = c => c.replace(/[.*+?^${}()|[\]\\]/g, m => '\\' + m);
+function comoLike(p) {
+  let re = '';
+  const s = String(p);
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '\\' && i + 1 < s.length) { re += escRe(s[++i]); continue; }
+    re += ch === '%' ? '.*' : ch === '_' ? '.' : escRe(ch);
+  }
+  return new RegExp('^' + re + '$', 'is');
+}
+
 function criarSbFalso(tabelas = {}, { falhas = {}, rpc = {}, relogio = null } = {}) {
   const db = {};
   for (const [k, v] of Object.entries(tabelas)) db[k] = v.map(x => ({ ...x }));
   const log = [];
 
   function consulta(tabela) {
-    const st = { op: 'select', filtros: [], ordem: [], limite: null, dados: null, retorna: false, unico: null };
+    const st = { op: 'select', filtros: [], ordem: [], limite: null, dados: null, retorna: false, unico: null, contar: false, cabeca: false, faixa: null };
     const linhas = () => (db[tabela] = db[tabela] || []);
     const passa = r => st.filtros.every(f => f(r));
     const q = {
-      select() { if (st.op !== 'select') st.retorna = true; return q; },
+      select(_cols, opc = {}) { if (st.op !== 'select') st.retorna = true; if (opc.count) st.contar = true; if (opc.head) st.cabeca = true; return q; },
       insert(d) { st.op = 'insert'; st.dados = d; return q; },
       update(d) { st.op = 'update'; st.dados = d; return q; },
       upsert(d) { st.op = 'upsert'; st.dados = d; return q; },
@@ -26,7 +39,13 @@ function criarSbFalso(tabelas = {}, { falhas = {}, rpc = {}, relogio = null } = 
       lte(c, v) { st.filtros.push(r => r[c] != null && String(r[c]) <= String(v)); return q; },
       lt(c, v) { st.filtros.push(r => r[c] != null && String(r[c]) < String(v)); return q; },
       is(c, v) { st.filtros.push(r => (r[c] ?? null) === v); return q; },
-      not(c, op, v) { const l = String(v).replace(/[()"]/g, '').split(','); st.filtros.push(r => !l.includes(String(r[c]))); return q; },
+      not(c, op, v) {
+        if (op === 'is') { st.filtros.push(r => (r[c] ?? null) !== v); return q; }
+        if (op === 'ilike') { const re = comoLike(v); st.filtros.push(r => !re.test(String(r[c] ?? ''))); return q; }
+        const l = String(v).replace(/[()"]/g, '').split(','); st.filtros.push(r => !l.includes(String(r[c]))); return q;
+      },
+      ilike(c, v) { const re = comoLike(v); st.filtros.push(r => r[c] != null && re.test(String(r[c]))); return q; },
+      range(a, b) { st.faixa = [a, b]; return q; },
       order(c, o = {}) { st.ordem.push([c, o.ascending !== false]); return q; },
       limit(n) { st.limite = n; return q; },
       maybeSingle() { st.unico = 'maybe'; return q; },
@@ -55,12 +74,15 @@ function criarSbFalso(tabelas = {}, { falhas = {}, rpc = {}, relogio = null } = 
         for (const [c, asc] of [...st.ordem].reverse()) out = out.slice().sort((a, b) => (String(a[c] ?? '') < String(b[c] ?? '') ? -1 : String(a[c] ?? '') > String(b[c] ?? '') ? 1 : 0) * (asc ? 1 : -1));
         if (st.limite != null) out = out.slice(0, st.limite);
       }
+      const total = out.length;
+      if (st.op === 'select' && st.faixa) out = out.slice(st.faixa[0], st.faixa[1] + 1);
+      if (st.cabeca) return { data: null, error: null, count: total };
       out = out.map(x => ({ ...x }));
       if (st.unico) {
         if (st.unico === 'one' && out.length !== 1) return { data: null, error: { message: 'não achou exatamente uma linha' } };
         return { data: out[0] || null, error: null };
       }
-      return { data: (st.op === 'select' || st.retorna) ? out : null, error: null };
+      return { data: (st.op === 'select' || st.retorna) ? out : null, error: null, ...(st.contar ? { count: total } : {}) };
     }
     return q;
   }

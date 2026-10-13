@@ -1,12 +1,16 @@
 {
   "name": "indycar-atendimento",
-  "version": "0.2.0",
-  "description": "Central de atendimento WhatsApp da IndyCar — conversas, IA e integração com CRM, Agenda e Comunicar",
+  "version": "0.3.0",
+  "description": "Central de atendimento WhatsApp da IndyCar — conversas, IA, equipe e integração com CRM, Agenda e Comunicar",
   "private": true,
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "mock": "node scripts/mock-server.mjs"
+    "mock": "node scripts/mock-server.mjs",
+    "segredos": "node scripts/segredos.mjs",
+    "segredos:historico": "node scripts/segredos.mjs --historico",
+    "auditar-deps": "npm audit --audit-level=high",
+    "verificar": "node --check server.js && node scripts/segredos.mjs && npm audit --audit-level=high && node --test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",

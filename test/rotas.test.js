@@ -20,6 +20,7 @@ async function subir({ roteiro = [usa(['classificar', { intencao: 'agendar', tem
   const copiloto = IA.criarCopiloto({ sb, contexto, criarIA: async () => ia, agora: () => AGORA });
   const resumoDoDia = RD.criarResumoDoDia({ sb, criarIA: async () => ia, copiloto, agora: () => AGORA });
   const usos = new Map();
+  const auditados = [];
   const tratar = criarRotasIA({
     getSb: () => (semBanco ? null : sb),
     usuarioLogado: async req => {
@@ -28,7 +29,7 @@ async function subir({ roteiro = [usa(['classificar', { intencao: 'agendar', tem
     },
     dentroDoLimite: (chave, teto) => { const n = (usos.get(chave) || 0) + 1; usos.set(chave, n); return n <= teto; },
     readBody: req => new Promise(r => { let d = ''; req.on('data', c => (d += c)); req.on('end', () => { try { r(d ? JSON.parse(d) : {}); } catch { r({}); } }); }),
-    copiloto, resumoDoDia, contexto,
+    copiloto, resumoDoDia, contexto, auditar: async a => { auditados.push(a); return { ok: true }; },
   });
   const server = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
@@ -42,7 +43,7 @@ async function subir({ roteiro = [usa(['classificar', { intencao: 'agendar', tem
     let j = null; try { j = await r.json(); } catch { /* sem corpo */ }
     return { status: r.status, j, h: r.headers };
   };
-  return { sb, ia, chamar, fechar: () => new Promise(r => server.close(r)) };
+  return { sb, ia, chamar, auditados, fechar: () => new Promise(r => server.close(r)) };
 }
 
 test('todas as rotas exigem login (401 em JSON)', async () => {
@@ -237,4 +238,20 @@ test('variantesComNove cobre o 9º dígito', () => {
   assert.ok(v.includes('12988887777') && v.includes('5512988887777') && v.includes('1288887777'));
   assert.ok(variantesComNove('12988887777').includes('1288887777'));
   assert.deepEqual(variantesComNove(''), []);
+});
+
+test('auditoria: executar e desfazer ação da IA e mudar a configuração da IA ficam registrados (recusar não)', async () => {
+  const s = await subir();
+  try {
+    const r = await s.chamar('POST', '/api/ia/copiloto', { corpo: { conversaId: ID.conversa } });
+    const a = r.j.acoes.find(x => x.tipo === 'mover_etapa');
+    assert.equal((await s.chamar('POST', `/api/ia/acoes/${a.id}/executar`)).status, 200);
+    assert.equal((await s.chamar('POST', `/api/ia/acoes/${a.id}/desfazer`)).status, 200);
+    assert.deepEqual(s.auditados.map(x => x.acao), ['ia.executar', 'ia.desfazer']);
+    assert.equal(s.auditados[0].detalhes.tipo, 'mover_etapa');
+    assert.equal(s.auditados[0].registro, a.id);
+    await s.chamar('PUT', '/api/ia/config', { papel: 'admin', corpo: { autonomia: 'sugerir', segredo: 'x' } });
+    const c = s.auditados.find(x => x.acao === 'config.ia');
+    assert.deepEqual(c.detalhes.campos, ['autonomia'], 'só os campos conhecidos, nunca valores livres');
+  } finally { await s.fechar(); }
 });
