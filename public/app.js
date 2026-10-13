@@ -239,6 +239,9 @@ async function entrarNoApp(user) {
   $('#btnExcluirConversa').hidden = naoApaga;
   $('#btnSelecionarMsgs').hidden  = naoApaga;
   if ($('#btnApagarLead')) $('#btnApagarLead').hidden = naoApaga;
+  /* Relatórios são de gestor/admin (o servidor devolve 403 ao atendente): a aba nem aparece. */
+  const navRel = document.querySelector('.nav-item[data-aba="relatorios"]');
+  if (navRel) navRel.hidden = naoApaga;
   $('#btnSoMinhas')?.classList.toggle('ativo', soMinhas);
   vigiarConexao();   // acende a tarja se o WhatsApp estiver fora do ar
 

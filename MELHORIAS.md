@@ -585,3 +585,4 @@ nos 4 scripts; `npm test` (162 passando — nada do servidor quebrou).
 
 ## Coordenador
 1. Coluna whatsapp_mensagens.enviado_por (padrão auth.uid()): o nome de quem mandou aparece nas mensagens reais.
+2. Aba Relatórios escondida para atendente (o servidor já recusava com 403; o teste de ponta a ponta pegou).
