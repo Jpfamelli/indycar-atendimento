@@ -134,3 +134,78 @@ test('server.js: token inválido repetido do mesmo IP leva 429 (freio contra adi
 test('server.js exporta a central (para scripts de conferência)', () => {
   for (const k of ['ACESSO', 'LIMITE', 'AUDITORIA', 'EQUIPE', 'RODIZIO', 'TAREFAS', 'AUTOMACOES']) assert.ok(app[k], k);
 });
+
+/* ---------------- rodada 4: confiabilidade e velocidade ---------------- */
+const zlibT = require('node:zlib');
+const http = require('node:http');
+/** GET cru (o fetch do Node descomprime sozinho e esconde o Content-Encoding). */
+function getCru(base, caminho, cab = {}) {
+  return new Promise((ok, ko) => {
+    http.get(base + caminho, { headers: cab }, r => {
+      const partes = []; r.on('data', c => partes.push(c)); r.on('end', () => ok({ status: r.statusCode, h: r.headers, corpo: Buffer.concat(partes) }));
+    }).on('error', ko);
+  });
+}
+
+test('server.js: toda resposta leva X-IndyCar-App (a tela distingue do 503 do Render)', async () => {
+  await comServidor(async base => {
+    for (const c of ['/', '/app.js', '/api/status', '/api/nao-existe', '/nada.txt']) {
+      const r = await fetch(base + c);
+      assert.equal(r.headers.get('x-indycar-app'), 'atendimento', c);
+    }
+    const sem = await fetch(base + '/api/eu');
+    assert.equal(sem.headers.get('x-indycar-app'), 'atendimento');
+  });
+});
+
+test('server.js: estáticos em brotli/gzip com ETag e 304; vendor do Supabase servido daqui', async () => {
+  await comServidor(async base => {
+    const br = await getCru(base, '/app.js', { 'accept-encoding': 'gzip, deflate, br' });
+    assert.equal(br.status, 200); assert.equal(br.h['content-encoding'], 'br');
+    const original = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'));
+    assert.ok(br.corpo.length < original.length / 3, 'app.js comprimido a menos de 1/3');
+    assert.deepEqual(zlibT.brotliDecompressSync(br.corpo), original);
+    const gz = await getCru(base, '/styles.css', { 'accept-encoding': 'gzip' });
+    assert.equal(gz.h['content-encoding'], 'gzip'); assert.match(gz.h.vary, /Accept-Encoding/);
+    const cru = await getCru(base, '/app.js');
+    assert.equal(cru.h['content-encoding'], undefined); assert.equal(cru.corpo.length, original.length);
+    const etag = br.h.etag; assert.match(etag, /^"/);
+    const nm = await getCru(base, '/app.js', { 'if-none-match': etag });
+    assert.equal(nm.status, 304); assert.equal(nm.corpo.length, 0);
+    const v = await getCru(base, '/vendor/supabase.js', { 'accept-encoding': 'br' });
+    assert.equal(v.status, 200); assert.match(v.h['content-type'], /javascript/); assert.match(v.h['cache-control'], /max-age=86400/);
+    assert.match(zlibT.brotliDecompressSync(v.corpo).toString('utf8').slice(0, 5000), /supabase/i);
+    // nada além do vendor listado sai do node_modules
+    assert.equal((await getCru(base, '/vendor/../package.json')).status, 404);
+    assert.equal((await getCru(base, '/node_modules/@supabase/supabase-js/package.json')).status, 404);
+    const html = await getCru(base, '/', { 'accept-encoding': 'gzip' });
+    assert.equal(html.h['content-encoding'], 'gzip'); assert.ok(html.h['content-security-policy']);
+  });
+});
+
+test('server.js: JSON grande sai em gzip; pequeno cru', async () => {
+  await comServidor(async base => {
+    const peq = await getCru(base, '/api/status', { 'accept-encoding': 'gzip' });
+    assert.equal(peq.h['content-encoding'], undefined);
+    assert.equal(JSON.parse(peq.corpo).app, 'atendimento');
+  });
+});
+
+test('index.html: rede.js antes de tudo, Supabase local com reserva da CDN, casca.js e sw v14 com tudo no CORE', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const iRede = html.indexOf('<script src="rede.js"></script>'), iSb = html.indexOf('<script src="/vendor/supabase.js"></script>'), iApp = html.indexOf('<script src="app.js"></script>');
+  assert.ok(iRede > 0 && iRede < iSb && iSb < iApp);
+  assert.match(html, /supabase-js@2\.112\.0/);
+  // a reserva da CDN escreve um <script> dentro de outro: o fechamento TEM de ir escapado
+  const reserva = html.split('\n').find(l => l.includes('document.write'));
+  assert.ok(reserva.includes('<' + String.fromCharCode(92) + '/script>'), 'fechamento escapado na reserva da CDN');
+  assert.equal(reserva.split('</script>').length, 2, 'só o fechamento do script embutido');
+  assert.match(html, /<script src="casca\.js" defer><\/script>/);
+  const sw = fs.readFileSync(path.join(__dirname, '..', 'public', 'sw.js'), 'utf8');
+  const core = JSON.parse(/const CORE = (\[[\s\S]*?\]);/.exec(sw)[1].replace(/'/g, '"'));
+  for (const f of core) {
+    const arq = f === '/' ? 'index.html' : f.startsWith('/vendor/') ? null : f.slice(1);
+    if (arq) assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', arq)), `CORE ${f} existe`);
+  }
+  assert.ok(core.includes('/rede.js') && core.includes('/vendor/supabase.js') && core.includes('/casca.js'));
+});

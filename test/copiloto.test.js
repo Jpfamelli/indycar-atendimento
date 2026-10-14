@@ -64,14 +64,14 @@ test('deslocamento de São Paulo é -3 h', () => {
 
 /* ---------------- o laço com a IA ---------------- */
 test('rodar: classifica, resume, sugere resposta, grava tudo em ia_acoes com tokens e modelo', async () => {
-  const { cop, ia, db } = montar([usa(...basico, ['responder', { texto: 'Opa, Camila! Bora trazer o Corolla? Quinta às 14h ou sexta às 10h?' }]), fim]);
+  const { cop, ia, db } = montar([usa(...basico, ['responder', { texto: 'Opa, Camila! Bora trazer o Corolla: quinta às 14h ou sexta às 10h?' }]), fim]);
   const r = await cop.rodar({ conversaId: ID.conversa, perfil: PERFIL });
   assert.equal(r.ok, true);
   assert.equal(r.intencao, 'agendar');
   assert.equal(r.temperatura, 'quente');
   assert.match(r.resumo, /suspensão/);
   assert.deepEqual(r.pendencias, ['Confirmar horário']);
-  assert.match(r.resposta_sugerida, /Quinta às 14h/);
+  assert.match(r.resposta_sugerida, /quinta às 14h/i);
   assert.ok(r.resposta_acao_id);
   assert.equal(r.acoes.length, 0, 'informativas não viram cartão');
   assert.equal(r.horarios_sugeridos.length, 2);
@@ -116,7 +116,7 @@ test('segurança: prompt sem valores, conversa só dentro da cerca aleatória, i
 test('responder com preço volta como erro para a IA reescrever; a segunda versão vale', async () => {
   const { cop, ia } = montar([
     usa(...basico, ['responder', { texto: 'O alinhamento fica R$ 120, pode vir?' }]),
-    usa(['responder', { texto: 'Bora fazer o diagnóstico gratuito? Quinta 14h ou sexta 10h?' }]), fim]);
+    usa(['responder', { texto: 'Bora fazer o diagnóstico gratuito: quinta 14h ou sexta 10h?' }]), fim]);
   const r = await cop.rodar({ conversaId: ID.conversa });
   const erro = ia.chamadas[1].params.messages.at(-1).content.find(b => b.is_error);
   assert.match(erro.content, /cita preço/);
@@ -454,7 +454,7 @@ test('recusa da IA (stop_reason refusal) não quebra', async () => {
 });
 
 test('listarAcoes, usoDoDia e salvarConfig', async () => {
-  const { cop } = montar([usa(...basico, ['mover_etapa', { etapa: 'Agendado' }]), fim]);
+  const { cop } = montar([usa(...basico, ['mover_etapa', { etapa: 'Agendado' }], ['responder', { texto: 'Opa! Fica melhor quinta às 14h ou sexta às 10h?' }]), fim]);
   await cop.rodar({ conversaId: ID.conversa, perfil: PERFIL });
   const l = await cop.listarAcoes(ID.conversa);
   assert.equal(l.ok, true);
@@ -494,4 +494,60 @@ test('resumoCopiloto conta chamadas, aceite, desfeitas e automáticas', () => {
   assert.equal(r.aceite, 75);
   assert.equal(r.duracaoMediaMs, 2000);
   assert.equal(r.porTipo.agendar.recusadas, 1);
+});
+
+/* ---------------- rodada 4: qualidade da sugestão (avaliação com 10 conversas reais) ---------------- */
+test('rodada 4: contarPerguntas e tirarApresentacaoRepetida (só quando a loja já falou)', () => {
+  assert.equal(IA.contarPerguntas('Oi? Tudo?? Bora'), 2);
+  assert.equal(IA.contarPerguntas('Quinta às 8h ou sexta às 9h?'), 1);
+  assert.equal(IA.tirarApresentacaoRepetida('Opa, Marcus! Aqui é o atendimento da IndyCar. Desculpa a demora 🙏', true), 'Opa, Marcus! Desculpa a demora 🙏');
+  assert.equal(IA.tirarApresentacaoRepetida('Opa! Aqui é o atendimento da IndyCar 🏎 Passando pra saber', true), 'Opa! 🏎 Passando pra saber');
+  assert.equal(IA.tirarApresentacaoRepetida('Opa! Aqui é o atendimento da IndyCar.', false), 'Opa! Aqui é o atendimento da IndyCar.');
+  assert.equal(IA.tirarApresentacaoRepetida('Bom dia!\nAqui é a equipe da Indy Car!\nTudo certo?', true), 'Bom dia!\nTudo certo?');
+});
+
+test('rodada 4: duas perguntas voltam para a IA reescrever; a versão com uma vale', async () => {
+  const { cop, ia } = montar([
+    usa(...basico, ['responder', { texto: 'Opa! Qual o carro? E quando pode vir?' }]),
+    usa(['responder', { texto: 'Opa! Fica melhor quinta às 14h ou sexta às 10h?' }]), fim]);
+  const r = await cop.rodar({ conversaId: ID.conversa });
+  const erro = ia.chamadas[1].params.messages.at(-1).content.find(b => b.is_error);
+  assert.match(erro.content, /2 perguntas/);
+  assert.equal(r.resposta_sugerida, 'Opa! Fica melhor quinta às 14h ou sexta às 10h?');
+  assert.equal(r.resposta_aviso, null);
+});
+
+test('rodada 4: IA insiste nas duas perguntas → a sugestão vem mesmo assim, com aviso para revisar', async () => {
+  const { cop } = montar([usa(...basico, ['responder', { texto: 'Qual o carro? Quando pode vir?' }]), fim]);
+  const r = await cop.rodar({ conversaId: ID.conversa });
+  assert.equal(r.resposta_sugerida, 'Qual o carro? Quando pode vir?');
+  assert.match(r.resposta_aviso, /mais de uma pergunta/);
+});
+
+test('rodada 4: loja já falou → a apresentação some da sugestão; o prompt leva a SITUAÇÃO calculada com hora de Brasília', async () => {
+  const { cop, ia } = montar([usa(...basico, ['responder', { texto: 'Opa, Camila! Aqui é o atendimento da IndyCar. Fica melhor quinta às 14h ou sexta às 10h?' }]), fim]);
+  const r = await cop.rodar({ conversaId: ID.conversa });
+  assert.equal(r.resposta_sugerida, 'Opa, Camila! Fica melhor quinta às 14h ou sexta às 10h?');
+  const prompt = ia.chamadas[0].params.messages[0].content;
+  assert.match(prompt, /SITUAÇÃO DA CONVERSA/);
+  assert.match(prompt, /NÃO se apresente de novo/);
+  assert.match(prompt, /\[2026-10-14 09:50\] Cliente/, 'hora da mensagem em Brasília (12:50 UTC = 09:50)');
+  assert.match(ia.chamadas[0].params.system[0].text, /UMA pergunta só/);
+});
+
+test('rodada 4: cliente esperando e a IA terminou sem "responder" → cobra uma vez e a resposta vem', async () => {
+  const { cop, ia } = montar([usa(...basico), fim, usa(['responder', { texto: 'Opa! Fica melhor quinta às 14h ou sexta às 10h?' }]), fim]);
+  const r = await cop.rodar({ conversaId: ID.conversa });
+  assert.equal(r.resposta_sugerida, 'Opa! Fica melhor quinta às 14h ou sexta às 10h?');
+  const cobranca = ia.chamadas[2].params.messages.at(-1).content.find(b => b.type === 'text');
+  assert.match(cobranca.text, /Faltou a ferramenta "responder"/);
+  // a volta "vazia" da IA não vai com bloco de texto vazio (a API recusa)
+  const assist = ia.chamadas[2].params.messages.at(-2);
+  assert.equal(assist.role, 'assistant');
+  assert.ok(assist.content.every(b => b.type !== 'text' || b.text.trim()));
+  // cobra uma vez só: IA que insiste em não responder não vira laço
+  const { cop: cop2, ia: ia2 } = montar([usa(...basico), fim]);
+  const r2 = await cop2.rodar({ conversaId: ID.conversa });
+  assert.equal(r2.resposta_sugerida, null);
+  assert.equal(ia2.chamadas.length, 3);
 });

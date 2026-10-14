@@ -71,12 +71,51 @@ async function authCabecalhos() {
    ============================================================ */
 let CONFIG = null;   // guardada fora: o botão de copiar o webhook precisa da chave publicável
 
+/* Rodada 4: a configuração pública (endereço do Supabase + chave publicável,
+   que é pública por design) fica guardada no aparelho. Com o servidor dormindo
+   (503 do Render), a tela abre com ela e o atendente continua lendo e
+   respondendo — as conversas vêm direto do Supabase. Sem cópia guardada
+   (primeira vez neste aparelho), espera o servidor acordar com a faixa. */
+const CFG_KEY = 'indycar_cfg_publica';
+function lerConfigGuardada() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CFG_KEY) || 'null');
+    return c && c.supabaseUrl && c.supabaseAnonKey ? c : null;
+  } catch { return null; }
+}
+function guardarConfig(c) {
+  try {
+    localStorage.setItem(CFG_KEY, JSON.stringify({ supabaseUrl: c.supabaseUrl, supabaseAnonKey: c.supabaseAnonKey,
+      configurado: true, iaConfigurada: !!c.iaConfigurada, modeloIA: c.modeloIA || '', guardadaEm: new Date().toISOString() }));
+  } catch { /* aparelho sem espaço: segue sem a cópia */ }
+}
+async function obterConfig() {
+  const guardada = lerConfigGuardada();
+  try {
+    /* Com cópia guardada não espera nada (tetoMs 0): abre já e o servidor
+       acorda por trás. Sem cópia, rede.js insiste por até 3 min. */
+    const r = await fetch('/api/config', guardada ? { tetoMs: 0 } : {});
+    const j = await r.json();
+    if (r.ok && j && typeof j.configurado === 'boolean') {
+      if (j.configurado) guardarConfig(j);
+      return j;
+    }
+  } catch { /* sem resposta: cai na cópia */ }
+  if (guardada) { window.Rede?.vigiarAteVoltar(); return { ...guardada, doAparelho: true }; }
+  return null;
+}
+
 async function iniciar() {
   let cfg;
-  try {
-    cfg = CONFIG = await (await fetch('/api/config')).json();
-  } catch {
-    return mostrarErroLogin('Não consegui falar com o servidor. Ele está rodando?');
+  $('#loginEspera')?.removeAttribute('hidden');
+  cfg = CONFIG = await obterConfig();
+  $('#loginEspera')?.setAttribute('hidden', '');
+  if (!cfg) {
+    mostrarErroLogin('O sistema não respondeu. Ele pode estar acordando (leva até 1 minuto) — esta tela tenta de novo sozinha.');
+    // quando o servidor voltar (a faixa confere sozinha), recomeça
+    const parar = window.Rede?.aoMudar(d => { if (d.voltou) { parar?.(); $('#loginErro').hidden = true; iniciar(); } });
+    window.Rede?.vigiarAteVoltar();
+    return;
   }
 
   if (!cfg.configurado) {
@@ -233,7 +272,11 @@ async function entrarNoApp(user) {
   $('#perfilEmail').value = perfil.email;
   $('#perfilPapel').value = rotuloPapel(perfil.papel);
   aplicarPapelConfig();
-  await carregarNomesDaEquipe();      // a plaquinha de dono precisa dos nomes
+  /* Rodada 4: os nomes da equipe vêm do NOSSO servidor (que pode estar
+     acordando): começam pela cópia do aparelho e chegam por trás — a lista
+     de conversas não espera por eles. */
+  restaurarNomesGuardados();
+  const nomesDaEquipe = carregarNomesDaEquipe().then(() => { if (jaCarregouConversas) renderConversas(); });
   /* Apagar é só de gestor/admin (o banco recusa o resto): o botão nem aparece. */
   const naoApaga = !ehGestorAqui();
   $('#btnExcluirConversa').hidden = naoApaga;
@@ -245,26 +288,32 @@ async function entrarNoApp(user) {
   $('#btnSoMinhas')?.classList.toggle('ativo', soMinhas);
   vigiarConexao();   // acende a tarja se o WhatsApp estiver fora do ar
 
-  // as etapas vêm ANTES das conversas: são elas que desenham as plaquinhas
-  await carregarEtapas();
-  await carregarConfigFunil();
+  // as etapas vêm ANTES das conversas: são elas que desenham as plaquinhas (as duas em paralelo)
+  await Promise.all([carregarEtapas(), carregarConfigFunil()]);
   restaurarPreferenciasDaLista();     // filtro, dono e ordem da última vez (ou ?filtro= do link)
   await carregarConversas();
+  void nomesDaEquipe;
   ligarTempoReal();
+  Recuperador.buscar('boot');           // marca o ponto de partida para recuperar o que chegar com o tempo real fora
   abrirPeloEndereco();                // ?conversa=<uuid> ou ?tel=<telefone> (links da Agenda, CRM, Comunicar)
   publicarApiIndyCar();
   filaOfflineProcessar();
+  setTimeout(() => Entregas.retomar('boot'), 2500);   // entregas que ficaram pela metade na última vez
   carregarEquipe();
   carregarWhatsappConfig();
-  await carregarApoio();      // serviços e consultores (usados no agendamento)
-  await carregarAtalhos();    // atalhos do "/"
+  await Promise.all([carregarApoio(), carregarAtalhos()]);   // serviços/consultores (agendamento) e atalhos do "/"
   carregarCodeWords();
   carregarFluxos();
   prepararRelatorios();       // só acerta as datas; o relatório vem ao abrir a aba
   Acesso.depoisDeEntrar();     // menu do perfil, último acesso, vigia de desativação
   Tarefas.iniciar();           // sino, minhas tarefas, presença na conversa
   Equipe.iniciar();            // telas Equipe e Auditoria (gestor/admin)
+  // rodada 4: primeira vez (ou papel novo)? tour curto de boas-vindas
+  setTimeout(() => { if (!modalAberto()) window.Ajuda?.iniciarTour(); }, 1200);
 }
+/* Para os módulos de fora (ajuda.js): quem está logado e o cliente do banco. */
+function perfilAtual() { return perfil; }
+function clienteSupabase() { return sb; }
 
 /* Rótulos de papel em português, iguais em todo o ecossistema. */
 const ROTULO_PAPEL = { admin: 'Administrador', gestor: 'Gestor', atendente: 'Atendente', agenda: 'Agenda' };
@@ -868,8 +917,11 @@ async function abrirConversa(id, { focarCampo = false } = {}) {
   if (trocou) {
     conversaRenderizada = null;          // conversa nova: a rolagem vai para o fim
     fecharBuscaNaConversa();
-    MENSAGENS = [];
-    $('#mensagens').innerHTML = esqueletoMensagens();
+    /* Rodada 4: voltou para uma conversa vista há pouco? mostra na hora o que
+       já tinha (memória desta aba) e atualiza por trás — sem esqueleto piscando. */
+    const doCache = CACHE_MSGS.get(conv.id);
+    if (doCache?.length) { MENSAGENS = doCache.slice(); renderMensagens({ forcarFim: true }); }
+    else { MENSAGENS = []; $('#mensagens').innerHTML = esqueletoMensagens(); }
     avisarConversaAberta(conv);           // evento indycar:conversa + endereço da página
   }
   $('#pillNovas').hidden = true;
@@ -906,6 +958,8 @@ async function abrirConversa(id, { focarCampo = false } = {}) {
 let syncAbertaTimer = null;
 
 async function sincronizarConversaAberta(id) {
+  // servidor acordando: não empilha um pedido a cada 15 s (o tempo real e o Recuperador cobrem)
+  if (window.Rede && window.Rede.estado !== 'ok') return;
   try {
     const r = await (await fetch('/api/conversas/sincronizar', {
       method: 'POST', headers: await authCabecalhos(),
@@ -924,6 +978,13 @@ async function sincronizarConversaAberta(id) {
    o cliente acabou de dizer) simplesmente não aparecia. "Carregar anteriores"
    busca mais 300 para trás sem pular a leitura. */
 const PAGINA_MSGS = 300;
+/* Memória curta das últimas 12 conversas abertas (só nesta aba; some ao fechar). */
+const CACHE_MSGS = new Map();
+function guardarMsgsEmMemoria(id, lista) {
+  CACHE_MSGS.delete(id);
+  CACHE_MSGS.set(id, lista.filter(m => !m._local).slice(-PAGINA_MSGS));
+  while (CACHE_MSGS.size > 12) CACHE_MSGS.delete(CACHE_MSGS.keys().next().value);
+}
 let limiteMsgs = PAGINA_MSGS;
 let temMsgsAnteriores = false;
 let geracaoMsgs = 0;
@@ -942,6 +1003,8 @@ async function carregarMensagens({ anteriores = false } = {}) {
     if (minha !== geracaoMsgs || conversaAtual?.id !== convId) return;   // trocou de conversa no meio
     temMsgsAnteriores = (data || []).length >= limiteMsgs;
     MENSAGENS = (data || []).slice().reverse();
+    MENSAGENS.forEach(m => Recuperador.marcar(m));
+    guardarMsgsEmMemoria(convId, MENSAGENS);
     renderMensagens({ manterTopo: anteriores });
   } catch (err) {
     if (minha !== geracaoMsgs) return;
@@ -1013,7 +1076,9 @@ function corpoHtml(texto, termo = '') {
 function statusDaMensagem(m) {
   if (m.direcao === 'entrada') return '';
   const st = m._local || m.status;
-  if (st === 'enviando') return '<span class="msg-st st-enviando" title="Enviando…">⏳</span>';
+  if (st === 'enviando') return window.Rede?.estado === 'acordando'
+    ? '<span class="msg-st st-enviando st-acordando" title="O sistema está acordando — sai sozinha assim que ele responder">⏳ esperando o sistema</span>'
+    : '<span class="msg-st st-enviando" title="Enviando…">⏳</span>';
   if (st === 'na_fila') return '<span class="msg-st st-fila" title="Sem internet — sai sozinha quando a conexão voltar">🕓 na fila</span>';
   if (st === 'enviado') return '<span class="msg-st st-ok" title="Entregue ao WhatsApp">✓</span>';
   if (st === 'falhou') {
@@ -1022,6 +1087,10 @@ function statusDaMensagem(m) {
   }
   // 'pendente': recém-enviada ainda está a caminho; antiga ficou sem confirmação
   const idade = Date.now() - new Date(m.created_at).getTime();
+  // rodada 4: anotada para sair quando o servidor acordar (mesmo que já tenha passado de 2 min)
+  if (window.Rede?.estado !== 'ok' && Entregas.ler().some(x => x.mensagemId === m.id)) {
+    return '<span class="msg-st st-enviando st-acordando" title="O sistema está acordando — sai sozinha assim que ele responder">⏳ esperando o sistema</span>';
+  }
   return idade < 120_000 ? '<span class="msg-st st-enviando" title="Enviando…">⏳</span>'
     : '<span class="msg-st st-sem" title="Registrada aqui, sem confirmação de entrega">•</span>';
 }
@@ -1601,6 +1670,15 @@ async function entregarMensagem(conv, texto, { linhaExistente = null } = {}) {
     }
     if (conversaAtual?.id === conv.id) renderMensagens({ forcarFim: true });
   } catch (err) {
+    /* Rodada 4: caiu a rede no meio (wi-fi da oficina piscou) → em vez de
+       "não saiu", vai para a fila e sai sozinha quando a conexão voltar. */
+    if (local && ehFalhaDeRede(err)) {
+      tirarLocal(conv.id, local._idLocal);
+      filaOfflineAdicionar({ conversaId: conv.id, telefone: conv.telefone, nome: conv.nome, clienteId: conv.cliente_id, corpo: texto });
+      if (conversaAtual?.id === conv.id) renderMensagens({ forcarFim: true });
+      toast('🕓 A conexão piscou — a mensagem ficou na fila e sai sozinha quando voltar.');
+      return false;
+    }
     // nem chegou ao banco: fica na tela como "não saiu", com o texto para tentar de novo
     if (local) { local._local = 'falhou'; local.erro = err.message; }
     if (conversaAtual?.id === conv.id) renderMensagens({ forcarFim: true });
@@ -1609,13 +1687,23 @@ async function entregarMensagem(conv, texto, { linhaExistente = null } = {}) {
   }
 
   // Entrega de verdade no WhatsApp, via CodeWords.
+  /* Rodada 4: o pedido leva o id da linha (o servidor não manda duas vezes) e
+     fica anotado no aparelho até ter resposta — se o servidor estiver acordando,
+     rede.js insiste por até 3 min; se a página fechar no meio, a entrega é
+     retomada ao abrir de novo (Entregas.retomar). */
   let ok = false, erro = '';
+  Entregas.anotar({ mensagemId: linha.id, conversaId: conv.id, telefone: conv.telefone, nome: conv.nome, corpo: texto, criada: linha.created_at });
   try {
-    const r = await (await fetch('/api/enviar', {
-      method: 'POST', headers: await authCabecalhos(),
-      body: JSON.stringify({ telefone: conv.telefone, corpo: texto, nome: conv.nome, conversaId: conv.id }),
-    })).json();
+    const resp = await fetch('/api/enviar', {
+      method: 'POST', headers: { ...(await authCabecalhos()), 'X-Idempotente': '1' },
+      body: JSON.stringify({ telefone: conv.telefone, corpo: texto, nome: conv.nome, conversaId: conv.id, mensagemId: linha.id }),
+    });
+    const r = await resp.json();
     ok = !!r.ok;
+    // o servidor não respondeu a tempo: fica anotada e sai sozinha quando ele voltar (até 15 min)
+    if (r.codigo === 'servidor_acordando') Entregas.marcarEsperando(linha.id);
+    else Entregas.tirar(linha.id);
+    if (r.codigo === 'ja_saindo') { linha._local = 'enviando'; if (conversaAtual?.id === conv.id) renderMensagens(); return false; }
     if (!ok) {
       erro = r.erro || 'o WhatsApp não confirmou';
       toast('⚠️ Registrado aqui, mas não saiu no WhatsApp: ' + erro);
@@ -1624,7 +1712,9 @@ async function entregarMensagem(conv, texto, { linhaExistente = null } = {}) {
     }
   } catch (err) {
     // A mensagem já está salva; o que falhou foi a entrega. Avisa, para
-    // ninguém achar que o cliente recebeu.
+    // ninguém achar que o cliente recebeu. Fica anotada: sai sozinha quando a
+    // conexão/servidor voltar (dentro de 15 min).
+    Entregas.marcarEsperando(linha.id);
     erro = err.message || 'falha de rede';
     toast('⚠️ Registrado aqui, mas não saiu no WhatsApp: ' + erro);
   }
@@ -2249,8 +2339,9 @@ function statusDoTempoReal(status) {
     if (realtimeCaiu) {
       realtimeCaiu = false;
       carregarConversas();
-      if (conversaAtual) carregarMensagens();
-      toast('✅ Tempo real de volta');
+      /* Rodada 4: busca o que chegou ENQUANTO estava fora (não só recarrega a
+         conversa aberta) e diz quantas mensagens foram recuperadas. */
+      Recuperador.buscar('reconectou').then(n => toast(n ? `✅ Tempo real de volta — ${n} mensage${n > 1 ? 'ns chegaram' : 'm chegou'} enquanto estava fora` : '✅ Tempo real de volta'));
     }
     if (pill) pill.hidden = true;
     return;
@@ -2271,6 +2362,7 @@ function ligarTempoReal() {
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'whatsapp_mensagens' },
       async payload => {
         const m = payload.new || {};
+        Recuperador.marcar(m);
         const aberta = conversaAtual && m.conversa_id === conversaAtual.id;
         const olhando = aberta && document.visibilityState === 'visible';
         if (aberta) {
@@ -2323,7 +2415,81 @@ function agendarRecargaLista() {
   recargaListaTimer = setTimeout(() => carregarConversas(), 600);
 }
 // Voltou a ter rede: não espera o próximo intervalo, religa já.
-window.addEventListener('online', () => { if (sb && realtimeCaiu) ligarTempoReal(); });
+window.addEventListener('online', () => { if (sb && realtimeCaiu) ligarTempoReal(); if (sb && usuario) Recuperador.buscar('online'); });
+
+/* ---------------- Rodada 4: recuperar o que chegou com o tempo real fora ----------------
+   O WebSocket do tempo real às vezes morre calado (notebook dormiu, 4G trocou
+   de antena) e nenhuma pílula acende. Três redes de segurança:
+   1. ao religar / voltar a internet / voltar para a aba depois de 30 s fora:
+      busca no banco as mensagens criadas depois da última vista;
+   2. a cada 60 s com a aba visível: uma consulta de 1 linha confere se existe
+      mensagem mais nova que a última vista (e, se o canal não está de pé, religa);
+   3. tudo entra na conversa aberta sem duplicar (confere pelo id). */
+const Recuperador = (() => {
+  let ultima = 0;                       // created_at (ms) da mensagem mais nova vista
+  const vistos = new Set();
+  let buscando = null;
+  const marcar = m => {
+    if (!m) return;
+    if (m.id) { vistos.add(m.id); if (vistos.size > 3000) vistos.clear(); }
+    const t = new Date(m.created_at || 0).getTime();
+    if (t > ultima) ultima = t;
+  };
+  async function buscar(motivo = '') {
+    if (!sb || !usuario) return 0;
+    if (buscando) return buscando;
+    if (!ultima) {
+      // ponto de partida pelo relógio do BANCO (o do computador pode estar adiantado)
+      try {
+        const { data } = await sb.from('whatsapp_mensagens').select('id,created_at').order('created_at', { ascending: false }).limit(1);
+        if (data?.[0]) marcar(data[0]); else ultima = Date.now();
+      } catch { /* tenta de novo na próxima */ }
+      return 0;
+    }
+    buscando = (async () => {
+      const desde = new Date(ultima - 15_000).toISOString();     // folga para relógio diferente
+      const { data, error } = await sb.from('whatsapp_mensagens').select('*').gt('created_at', desde)
+        .order('created_at', { ascending: true }).limit(200);
+      if (error || !data?.length) return 0;
+      let novasEntrada = 0, mexeuNaAberta = false;
+      for (const m of data) {
+        const jaVisto = vistos.has(m.id);
+        marcar(m);
+        if (jaVisto) continue;
+        if (conversaAtual && m.conversa_id === conversaAtual.id && !MENSAGENS.some(x => x.id === m.id)) {
+          MENSAGENS.push(m); mexeuNaAberta = true;
+          avisarMensagem(m.conversa_id, m.direcao, m.id);
+        }
+        if (m.direcao === 'entrada') novasEntrada++;
+      }
+      if (mexeuNaAberta) { MENSAGENS.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)); renderMensagens(); }
+      if (novasEntrada || mexeuNaAberta) agendarRecargaLista();
+      return novasEntrada;
+    })().catch(() => 0).finally(() => { buscando = null; });
+    return buscando;
+  }
+  async function conferir() {
+    if (!sb || !usuario || document.hidden || navigator.onLine === false) return;
+    // canal caído sem avisar: religa
+    if (canalRealtime && !['joined', 'joining'].includes(canalRealtime.state) && !realtimeCaiu) { realtimeCaiu = true; ligarTempoReal(); }
+    try {
+      const { data } = await sb.from('whatsapp_mensagens').select('id,created_at').order('created_at', { ascending: false }).limit(1);
+      const m = data?.[0];
+      if (m && !vistos.has(m.id) && new Date(m.created_at).getTime() > ultima) {
+        const n = await buscar('conferencia');
+        if (n) toast(`📥 ${n} mensage${n > 1 ? 'ns novas recuperadas' : 'm nova recuperada'} (o tempo real atrasou)`);
+      }
+    } catch { /* tenta no próximo minuto */ }
+  }
+  let escondidaEm = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { escondidaEm = Date.now(); return; }
+    if (escondidaEm && Date.now() - escondidaEm > 30_000) buscar('voltou-aba').then(n => { if (n) toast(`📥 ${n} mensage${n > 1 ? 'ns chegaram' : 'm chegou'} enquanto a aba estava fechada`); });
+    escondidaEm = 0;
+  });
+  setInterval(conferir, 60_000);
+  return { marcar, buscar, conferir, get ultima() { return ultima; } };
+})();
 
 /* ============================================================
    NOVA CONVERSA
@@ -3081,15 +3247,24 @@ let soMinhas = localStorage.getItem('indycar_so_minhas') === '1';
 /* Vem do servidor, não do Supabase direto: o RLS de `perfis` só deixa admin
    ler todo mundo, então um atendente lendo do navegador enxergaria só a si
    mesmo — e a plaquinha do colega ficaria sem nome. */
+/** Cópia dos nomes (só nome/cor/equipe — nada de e-mail ou telefone) para abrir sem o servidor. */
+function restaurarNomesGuardados() {
+  if (EQUIPE.size) return;
+  try {
+    const l = JSON.parse(localStorage.getItem('indycar_equipe_nomes') || '[]');
+    if (Array.isArray(l) && l.length) EQUIPE = new Map(l.filter(p => p && p.id).map(p => [p.id, p]));
+  } catch { /* ignora */ }
+}
 async function carregarNomesDaEquipe() {
   try {
     const r = await (await fetch('/api/equipe/nomes', { headers: await authCabecalhos() })).json();
     if (!r.ok || !Array.isArray(r.equipe)) throw new Error(r.erro || 'resposta inesperada');
     EQUIPE = new Map(r.equipe.map(p => [p.id, p]));
+    if (!Acesso.saindoSozinho) try { localStorage.setItem('indycar_equipe_nomes', JSON.stringify(r.equipe.map(p => ({ id: p.id, nome: p.nome, avatar_cor: p.avatar_cor || null, equipe_id: p.equipe_id || null, papel: p.papel || null })))); } catch { /* ignora */ }
   } catch (err) {
     /* Falha passageira não apaga a lista que já estava boa. Só avisa quando
        a tela ficaria realmente cega. */
-    if (!EQUIPE.size) toast('⚠️ Não consegui ler a equipe: ' + err.message);
+    if (!EQUIPE.size && window.Rede?.estado === 'ok') toast('⚠️ Não consegui ler a equipe: ' + err.message);
   }
 }
 
@@ -4766,6 +4941,7 @@ function mostrarSaude(s) {
 async function verSaude() {
   try {
     const r = await fetch('/api/saude', { headers: await authCabecalhos() });
+    if (r.headers.get('x-indycar-sintetica')) return;   // servidor acordando: quem avisa é a faixa do rede.js
     if (r.status === 401) { await sessaoMorreu(); return; }
     const s = await r.json();
     mostrarSaude(s);
@@ -4791,6 +4967,11 @@ async function verConexao({ silencioso = true } = {}) {
   let est;
   try {
     const r = await fetch('/api/whatsapp/status', { headers: await authCabecalhos() });
+    // servidor acordando: não dá para saber do WhatsApp — não acende alarme nenhum
+    if (r.headers.get('x-indycar-sintetica')) {
+      if (!silencioso && texto) { texto.textContent = 'O sistema está acordando — confiro já já.'; if (bolinha) bolinha.className = 'conexao-bolinha'; }
+      return;
+    }
     /* 401 aqui quase sempre é sessão órfã: o token ainda não venceu, mas o
        Supabase já apagou a sessão. O painel abria inteiro, bonito, e nenhuma
        ação funcionava — sem dizer o porquê. Como esta função roda no login e
@@ -4930,12 +5111,15 @@ function vigiarConexao() {
   verSaude();
   clearInterval(conexaoTimer);
   conexaoTimer = setInterval(() => {
-    if (document.visibilityState === 'visible') { verConexao(); verSaude(); }
+    // servidor acordando: a faixa do rede.js já está conferindo; não empilha pedidos
+    if (document.visibilityState === 'visible' && (!window.Rede || window.Rede.estado === 'ok')) { verConexao(); verSaude(); }
   }, 120000);
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') { verConexao(); verSaude(); }
+  if (document.visibilityState === 'visible' && (!window.Rede || window.Rede.estado === 'ok')) { verConexao(); verSaude(); }
 });
+// o servidor voltou: confere WhatsApp e saúde na hora (a tarja pode ter ficado velha)
+window.Rede?.aoMudar(d => { if (d.voltou && usuario) { verConexao(); verSaude(); } });
 
 /* ============================================================
    ECOSSISTEMA INDYCAR — o seletor da barra lateral
@@ -5952,6 +6136,59 @@ document.addEventListener('keydown', ev => {
   if (ev.key === 'Escape' && !$('#menuMaisAcoes')?.hidden) { ev.stopPropagation(); fecharMenuMais({ focar: true }); }
 }, true);
 
+/* ---------------- Rodada 4: entregas que não se perdem ----------------
+   Mensagem já gravada no banco cuja entrega no WhatsApp não terminou (servidor
+   acordando, aba fechada no meio, rede caiu). Fica anotada no aparelho e é
+   retomada: ao abrir a página, quando o servidor volta (evento de rede.js) e
+   quando a internet volta. O servidor não manda duas vezes (lib/entrega.js).
+   Depois de 15 min não insiste sozinha: fica "não saiu" com Tentar de novo
+   (mensagem que chega muito atrasada confunde o cliente). */
+function ehFalhaDeRede(err) {
+  return navigator.onLine === false || /failed to fetch|networkerror|load failed|network request|sem conexão|fetch/i.test(String(err?.message || err || ''));
+}
+const Entregas = (() => {
+  const CHAVE = 'indycar_entregas_pendentes';
+  const JANELA_MS = 15 * 60_000;
+  const ler = () => { try { return JSON.parse(localStorage.getItem(CHAVE) || '[]'); } catch { return []; } };
+  const gravar = l => { try { localStorage.setItem(CHAVE, JSON.stringify(l.slice(-50))); } catch { /* ignora */ } };
+  let retomando = false;
+  return {
+    ler,
+    anotar(it) { gravar([...ler().filter(x => x.mensagemId !== it.mensagemId), { ...it, anotada: Date.now(), esperando: false }]); },
+    tirar(id) { gravar(ler().filter(x => x.mensagemId !== id)); },
+    marcarEsperando(id) { gravar(ler().map(x => x.mensagemId === id ? { ...x, esperando: true } : x)); },
+    async retomar(motivo = '') {
+      if (retomando || !sb || navigator.onLine === false) return 0;
+      const lista = ler();
+      if (!lista.length) return 0;
+      retomando = true;
+      let saiu = 0;
+      try {
+        const agora = Date.now();
+        for (const it of lista) {
+          const criada = new Date(it.criada || it.anotada).getTime();
+          // anotada há pouco e não marcada como esperando: ainda pode estar saindo nesta aba
+          if (!it.esperando && agora - it.anotada < 20_000 && motivo !== 'boot') continue;
+          if (agora - criada > JANELA_MS) { this.tirar(it.mensagemId); continue; }
+          const { data: linha } = await sb.from('whatsapp_mensagens').select('*').eq('id', it.mensagemId).maybeSingle();
+          if (!linha || ['enviado', 'entregue', 'lido'].includes(linha.status)) { this.tirar(it.mensagemId); continue; }
+          const daTela = conversaAtual?.id === linha.conversa_id ? MENSAGENS.find(m => m.id === linha.id) : null;
+          const ok = await entregarMensagem({ id: linha.conversa_id, telefone: it.telefone || linha.telefone, nome: it.nome || linha.nome,
+            cliente_id: linha.cliente_id }, linha.corpo, { linhaExistente: daTela || linha });
+          if (ok) saiu++;
+        }
+      } finally { retomando = false; }
+      if (saiu) toast(`📤 ${saiu} mensage${saiu > 1 ? 'ns que estavam esperando saíram' : 'm que estava esperando saiu'}`);
+      return saiu;
+    },
+  };
+})();
+// o servidor acordou: o que estava esperando sai agora
+window.Rede?.aoMudar(d => { if (d.voltou) Entregas.retomar('voltou'); });
+// a bolha "⏳ esperando o sistema" acompanha o estado do servidor
+let estadoRedeVisto = 'ok';
+window.Rede?.aoMudar(d => { if (d.estado !== estadoRedeVisto) { estadoRedeVisto = d.estado; if (conversaAtual) renderMensagens(); } });
+
 /* ---------------- Sem internet: faixa e fila de envio ---------------- */
 const FILA_KEY = 'indycar_fila_envio';
 function lerFila() { try { return JSON.parse(localStorage.getItem(FILA_KEY) || '[]'); } catch { return []; } }
@@ -6000,7 +6237,7 @@ function pintarFaixaOffline() {
     : `Enviando ${n} mensage${n > 1 ? 'ns' : 'm'} da fila…`;
 }
 window.addEventListener('offline', pintarFaixaOffline);
-window.addEventListener('online', () => { pintarFaixaOffline(); filaOfflineProcessar(); agendarRecargaLista(); });
+window.addEventListener('online', () => { pintarFaixaOffline(); filaOfflineProcessar(); agendarRecargaLista(); Entregas.retomar('online'); });
 pintarFaixaOffline();
 
 /* ---------------- Modais: Esc, foco preso e foco de volta ---------------- */
@@ -6073,13 +6310,15 @@ const TECLAS = [
   ['Alt + Z', 'Modo foco (só chat e ficha)'],
   ['Alt + N', 'Nova conversa'],
   ['Esc', 'Fechar menu, busca, gaveta ou modal'],
-  ['?', 'Esta lista'],
+  ['?', 'Ajuda: como faço… e esta lista'],
 ];
 function abrirAjudaTeclado() {
   const etapas = etapasAtivas().slice(0, 9).map((e, i) => `Alt+${i + 1} ${e.nome}`).join(' · ');
   $('#listaTeclas').innerHTML = TECLAS.map(([k, d]) =>
     `<dt>${k.split('  ').map(p => `<kbd>${esc(p.trim())}</kbd>`).join(' ')}</dt><dd>${esc(d)}</dd>`).join('')
     + (etapas ? `<dt><kbd>Etapas</kbd></dt><dd>${esc(etapas)}</dd>` : '');
+  if (window.__preenchendoTeclas) return;          // a Ajuda só pediu a lista
+  if (window.Ajuda) return window.Ajuda.abrir('teclas');
   abrirModal('modalAjudaBg');
 }
 const digitando = el => !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
@@ -6104,7 +6343,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault(); irParaAbaConversas(); fecharConversaNoCelular(); $('#buscaConversa').focus(); $('#buscaConversa').select(); return;
   }
   if (!noCampo && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    if (e.key === '?') { e.preventDefault(); return abrirAjudaTeclado(); }
+    if (e.key === '?') { e.preventDefault(); return window.Ajuda ? window.Ajuda.abrir('como') : abrirAjudaTeclado(); }
     if (e.key === '/' && abaVisivel('conversas')) { e.preventDefault(); fecharConversaNoCelular(); $('#buscaConversa').focus(); return; }
   }
   if (!e.altKey || e.ctrlKey || e.metaKey) return;

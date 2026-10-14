@@ -2017,3 +2017,73 @@ button.app-chip:not(:disabled):hover{border-color:var(--vermelho);color:var(--te
 @media (max-width:900px){ .usuario-txt{display:none !important} }
 .form-vertical .switch-campo{flex-direction:row !important;align-items:center;gap:10px !important;font-family:var(--fonte) !important;font-weight:500 !important}
 .form-vertical .switch-campo input{width:18px !important;height:18px;padding:0 !important;flex:none;accent-color:var(--vermelho)}
+
+/* ============================================================
+   RODADA 4 — servidor acordando (rede.js), casca em cache, tour e ajuda
+   ============================================================ */
+.faixa-servidor{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:400;display:flex;align-items:center;gap:12px;
+  width:max-content;max-width:min(94vw,640px);padding:10px 12px 10px 14px;border-radius:14px;
+  background:#2a1f05;color:#fff7e6;border:1px solid #a16207;box-shadow:var(--sombra-pop);font-size:.86rem;line-height:1.3}
+.faixa-servidor.parado{background:#3a0d10;border-color:#b00710}
+.faixa-servidor.voltou{background:#0f2e1b;border-color:#166534}
+.faixa-servidor .fs-textos{display:flex;flex-direction:column;gap:2px;min-width:0}
+.faixa-servidor .fs-titulo{font-weight:700}
+.faixa-servidor .fs-sub{opacity:.88;font-size:.8rem}
+.faixa-servidor .fs-btn{flex:none;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);color:inherit;
+  border-radius:9px;padding:7px 11px;font:inherit;font-weight:700;cursor:pointer;min-height:36px}
+.faixa-servidor .fs-btn:hover{background:rgba(255,255,255,.16)}
+.faixa-servidor .fs-btn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.faixa-servidor .fs-giro{flex:none;width:18px;height:18px;border-radius:50%;border:2.5px solid rgba(255,255,255,.25);
+  border-top-color:#fbbf24;animation:fsGiro .9s linear infinite}
+.faixa-servidor.parado .fs-giro{border-top-color:#ff8a90;animation-duration:2.4s}
+.faixa-servidor.voltou .fs-giro{display:none}
+@keyframes fsGiro{to{transform:rotate(360deg)}}
+@media (max-width:600px){
+  .faixa-servidor{top:auto;bottom:calc(76px + env(safe-area-inset-bottom,0px));width:calc(100vw - 20px);max-width:none;padding:9px 10px}
+  .faixa-servidor .fs-sub{font-size:.76rem}
+}
+@media (prefers-reduced-motion:reduce){ .faixa-servidor .fs-giro{animation:none;border-top-color:#fbbf24} }
+.pill-versao{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:390;display:flex;align-items:center;gap:10px;
+  padding:8px 8px 8px 14px;border-radius:999px;background:var(--pop-solid);color:var(--texto);border:1px solid var(--linha);
+  box-shadow:var(--sombra-pop);font-size:.86rem;max-width:calc(100vw - 20px)}
+.pill-versao .pv-ok{border:0;border-radius:999px;background:var(--vermelho);color:#fff;font:inherit;font-weight:700;padding:7px 14px;cursor:pointer;min-height:34px}
+.pill-versao .pv-x{border:0;background:transparent;color:var(--cinza);font-size:1.2rem;cursor:pointer;width:34px;height:34px;border-radius:50%}
+.pill-versao button:focus-visible{outline:2px solid var(--vermelho);outline-offset:2px}
+@media (max-width:600px){ .pill-versao{bottom:calc(76px + env(safe-area-inset-bottom,0px))} }
+.login-espera{display:flex;align-items:center;gap:8px;justify-content:center;margin:6px 0}
+.fs-giro.mini{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--linha);border-top-color:var(--vermelho);animation:fsGiro .9s linear infinite}
+@media (prefers-reduced-motion:reduce){ .fs-giro.mini{animation:none} }
+
+/* ---------- Ajuda (rodada 4) ---------- */
+.modal-ajuda{max-width:620px;width:min(620px,calc(100vw - 24px))}
+.ajuda-abas{display:flex;gap:6px;margin:4px 0 12px;border-bottom:1px solid var(--linha)}
+.ajuda-aba{border:0;background:transparent;color:var(--cinza);font:inherit;font-weight:700;padding:9px 12px;cursor:pointer;
+  border-bottom:2px solid transparent;margin-bottom:-1px;min-height:40px}
+.ajuda-aba.ativa{color:var(--texto);border-bottom-color:var(--vermelho)}
+.ajuda-aba:focus-visible{outline:2px solid var(--vermelho);outline-offset:2px;border-radius:6px}
+.ajuda-busca{width:100%;margin-bottom:10px}
+.ajuda-lista{display:flex;flex-direction:column;gap:6px;max-height:min(52vh,460px);overflow:auto;padding-right:2px}
+.ajuda-item{border:1px solid var(--linha);border-radius:10px;background:var(--superficie);padding:0 12px}
+.ajuda-item summary{cursor:pointer;padding:11px 0;font-weight:700;color:var(--texto);list-style-position:inside}
+.ajuda-item summary:focus-visible{outline:2px solid var(--vermelho);outline-offset:2px;border-radius:6px}
+.ajuda-item p{margin:0 0 12px;color:var(--texto-suave);line-height:1.5}
+.ajuda-nada{color:var(--cinza);text-align:center;padding:14px 0}
+.ajuda-rodape{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--linha)}
+.ajuda-versao{color:var(--cinza-2)}
+.mp-item em{margin-left:auto;font-style:normal;color:var(--cinza-2);font-size:.78rem;border:1px solid var(--linha);border-radius:5px;padding:0 6px}
+
+/* ---------- Tour de boas-vindas (rodada 4) ---------- */
+.tour-fundo{position:fixed;inset:0;z-index:420;background:rgba(4,4,5,.62)}
+.tour-fundo.com-buraco{background:transparent}
+.tour-buraco{position:fixed;z-index:421;border-radius:12px;pointer-events:none;display:none;
+  box-shadow:0 0 0 3px var(--vermelho),0 0 0 9999px rgba(4,4,5,.62);transition:left .25s var(--ease),top .25s var(--ease),width .25s var(--ease),height .25s var(--ease)}
+.tour-card{position:fixed;z-index:422;background:var(--pop-solid);color:var(--texto);border:1px solid var(--linha);border-radius:16px;
+  box-shadow:var(--sombra-pop);padding:16px 16px 12px;max-width:calc(100vw - 24px)}
+.tour-card h4{margin:2px 0 6px;font-family:var(--fonte-cond);font-size:1.35rem;letter-spacing:.2px}
+.tour-card p{margin:0 0 14px;color:var(--texto-suave);line-height:1.5;font-size:.92rem}
+.tour-passo{font-size:.74rem;color:var(--vermelho-txt);font-weight:700;text-transform:uppercase;letter-spacing:.6px}
+.tour-botoes{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.tour-dir{display:flex;gap:6px}
+.tour-card .link{background:none;border:0;color:var(--cinza);font:inherit;cursor:pointer;padding:8px 2px;text-decoration:underline;white-space:nowrap}
+.tour-card button:focus-visible{outline:2px solid var(--vermelho);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){ .tour-buraco{transition:none} }

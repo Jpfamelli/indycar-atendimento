@@ -26,6 +26,8 @@ const ROD  = require('./lib/rodizio.js');
 const TAR  = require('./lib/tarefas.js');
 const AUT  = require('./lib/automacoes.js');
 const { criarRotasEquipe } = require('./lib/rotas-equipe.js');
+// Rodada 4: entrega que não duplica quando a tela tenta de novo (servidor acordando)
+const { criarEntregador } = require('./lib/entrega.js');
 
 // Configuração via .env (sem depender do Registro do Windows)
 try {
@@ -60,13 +62,21 @@ const MIME = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf
                '.webmanifest':'application/manifest+json' };
 
 const json = (res, code, data) => {
-  const corpo = JSON.stringify(data);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8',
-                        'Content-Length': Buffer.byteLength(corpo),
-                        // resposta de API nunca fica em cache (conversa muda a cada minuto)
-                        // e o navegador não pode "adivinhar" outro tipo de conteúdo
-                        'Cache-Control': 'no-store',
-                        'X-Content-Type-Options': 'nosniff' });
+  let corpo = Buffer.from(JSON.stringify(data));
+  const cab = { 'Content-Type': 'application/json; charset=utf-8',
+                // resposta de API nunca fica em cache (conversa muda a cada minuto)
+                // e o navegador não pode "adivinhar" outro tipo de conteúdo
+                'Cache-Control': 'no-store',
+                'X-Content-Type-Options': 'nosniff' };
+  /* Rodada 4: resposta grande (ficha, relatórios, equipe, auditoria) sai em gzip
+     quando o navegador aceita — menos espera no 4G da oficina. Pequena vai crua. */
+  if (corpo.length > 2048 && /gzip/.test(String(res.req?.headers?.['accept-encoding'] || ''))) {
+    corpo = require('node:zlib').gzipSync(corpo, { level: 6 });
+    cab['Content-Encoding'] = 'gzip';
+    cab.Vary = 'Accept-Encoding';
+  }
+  cab['Content-Length'] = corpo.length;
+  res.writeHead(code, cab);
   res.end(corpo);
 };
 
@@ -109,29 +119,80 @@ function cspDoHtml(file, buf) {
   return csp;
 }
 
+/* Rodada 4 — velocidade: arquivos da tela saem comprimidos (brotli ou gzip,
+   conforme o navegador aceita), com ETag (volta 304 sem corpo quando nada
+   mudou) e guardados em memória já comprimidos (o Render free tem disco lento
+   ao acordar). A biblioteca do Supabase sai daqui mesmo (/vendor/supabase.js,
+   do node_modules, versão travada no package-lock): sem depender da CDN e o
+   service worker consegue guardá-la — a casca abre mesmo com o servidor fora. */
+const zlib = require('node:zlib');
+const crypto = require('node:crypto');
+const VENDOR = {
+  '/vendor/supabase.js': path.join(__dirname, 'node_modules', '@supabase', 'supabase-js', 'dist', 'umd', 'supabase.js'),
+};
+const COMPRIMIVEL = /^(text\/|application\/(json|javascript|manifest\+json)|image\/svg)/;
+const ESTATICO_CACHE = new Map();   // arquivo -> { mtime, buf, etag, br, gz }
+
+function codificacaoAceita(req) {
+  const ae = String(req.headers['accept-encoding'] || '');
+  if (/\bbr\b/.test(ae)) return 'br';
+  if (/\bgzip\b/.test(ae)) return 'gzip';
+  return '';
+}
+
+function lerEstatico(file, cb) {
+  fs.stat(file, (eStat, st) => {
+    if (eStat || !st.isFile()) return cb(eStat || new Error('não é arquivo'));
+    const c = ESTATICO_CACHE.get(file);
+    if (c && c.mtime === st.mtimeMs) return cb(null, c);
+    fs.readFile(file, (err, buf) => {
+      if (err) return cb(err);
+      const item = { mtime: st.mtimeMs, buf, etag: '"' + crypto.createHash('sha1').update(buf).digest('base64url').slice(0, 20) + '"' };
+      if (ESTATICO_CACHE.size > 80) ESTATICO_CACHE.clear();
+      ESTATICO_CACHE.set(file, item);
+      cb(null, item);
+    });
+  });
+}
+function corpoComprimido(item, cod) {
+  if (cod === 'br') return item.br || (item.br = zlib.brotliCompressSync(item.buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } }));
+  if (cod === 'gzip') return item.gz || (item.gz = zlib.gzipSync(item.buf, { level: 9 }));
+  return item.buf;
+}
+
 function serveStatic(req, res, urlPath) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('método não permitido');
   }
-  let rel;
-  try { rel = urlPath === '/' ? 'index.html' : decodeURIComponent(urlPath.slice(1)); }
-  catch { res.writeHead(400); return res.end('caminho inválido'); }
-  const file = path.resolve(PUBLIC, rel);
-  // dentro de public/ de verdade (o startsWith antigo deixava passar uma pasta "public-xyz" vizinha)
-  // e nada de arquivo escondido (.env, .git…) nem byte nulo
-  if ((file !== PUBLIC && !file.startsWith(PUBLIC + path.sep)) || /(^|[\\/])\./.test(rel) || rel.includes('\0')) {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('não encontrado');
+  let file, rel;
+  if (VENDOR[urlPath]) { file = VENDOR[urlPath]; rel = urlPath; }
+  else {
+    try { rel = urlPath === '/' ? 'index.html' : decodeURIComponent(urlPath.slice(1)); }
+    catch { res.writeHead(400); return res.end('caminho inválido'); }
+    file = path.resolve(PUBLIC, rel);
+    // dentro de public/ de verdade (o startsWith antigo deixava passar uma pasta "public-xyz" vizinha)
+    // e nada de arquivo escondido (.env, .git…) nem byte nulo
+    if ((file !== PUBLIC && !file.startsWith(PUBLIC + path.sep)) || /(^|[\/])\./.test(rel) || rel.includes('\0')) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('não encontrado');
+    }
   }
-  fs.readFile(file, (err, buf) => {
+  lerEstatico(file, (err, item) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('não encontrado'); }
     const ext = path.extname(file);
-    const cab = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff',
-      // HTML e service worker sempre frescos (versão nova chega na hora); o resto, 1 h com revalidação
-      'Cache-Control': ext === '.html' || /sw\.js$/.test(file) ? 'no-cache' : 'public, max-age=3600, must-revalidate' };
-    if (ext === '.html') cab['Content-Security-Policy'] = cspDoHtml(file, buf);
+    const tipo = MIME[ext] || 'application/octet-stream';
+    const cab = { 'Content-Type': tipo, 'X-Content-Type-Options': 'nosniff', ETag: item.etag, Vary: 'Accept-Encoding',
+      // HTML e service worker sempre frescos (versão nova chega na hora); vendor travado = 1 dia; o resto, 1 h com revalidação
+      'Cache-Control': ext === '.html' || /sw\.js$/.test(file) ? 'no-cache'
+        : VENDOR[urlPath] ? 'public, max-age=86400' : 'public, max-age=3600, must-revalidate' };
+    if (ext === '.html') cab['Content-Security-Policy'] = cspDoHtml(file, item.buf);
+    if (req.headers['if-none-match'] === item.etag) { res.writeHead(304, cab); return res.end(); }
+    const cod = COMPRIMIVEL.test(tipo) && item.buf.length > 1024 ? codificacaoAceita(req) : '';
+    const corpo = corpoComprimido(item, cod);
+    if (cod) cab['Content-Encoding'] = cod;
+    cab['Content-Length'] = corpo.length;
     res.writeHead(200, cab);
-    res.end(req.method === 'HEAD' ? undefined : buf);
+    res.end(req.method === 'HEAD' ? undefined : corpo);
   });
 }
 
@@ -2098,6 +2159,8 @@ const ROTAS_EQUIPE = criarRotasEquipe({
   esquecerPerfil: id => ACESSO.esquecerPerfil(id),
 });
 
+const ENTREGADOR = criarEntregador({ banco: () => adminSupabase(), enviar: d => enviarPeloCodeWords(d) });
+
 /* Rotas que respondem sem login (o resto de /api/ passa pelo porteiro). */
 const ROTAS_PUBLICAS = new Set(['/api/config', '/api/primeiro-acesso', '/api/webhook/codewords', '/api/status']);
 /* Rotas que ainda respondem com a verificação em duas etapas pendente
@@ -2117,6 +2180,10 @@ const server = http.createServer(async (req, res) => {
   try {
     // cabeçalhos de segurança em TODA resposta (API e arquivos)
     SEG.aplicarCabecalhos(res, SEG.cabecalhosBase({ https: ehHttps(req) }));
+    /* Rodada 4: marca de que a resposta veio DESTE app (e não do roteador do
+       Render dizendo 503 "hibernate-wake-error"). A tela (public/rede.js) usa
+       isso para saber quando tentar de novo sozinha. */
+    res.setHeader('X-IndyCar-App', 'atendimento');
 
     // Dentro do try de propósito: um Host malformado (ex.: "Host: [") faz o
     // parser de URL lançar, e fora daqui isso derrubaria o processo inteiro.
@@ -2400,7 +2467,10 @@ const server = http.createServer(async (req, res) => {
       if (digitosEnvio.length < 10 || digitosEnvio.length > 11) {
         return json(res, 400, { ok: false, erro: 'Telefone inválido: precisa de DDD + número (10 ou 11 dígitos).' });
       }
-      const r = await enviarPeloCodeWords(dados);
+      /* Com mensagemId (a linha já gravada em whatsapp_mensagens), repetir o
+         pedido não manda duas vezes — ver lib/entrega.js. */
+      const r = await ENTREGADOR.entregar(dados, bruto.mensagemId ? texto1(bruto.mensagemId, 60) : null);
+      if (r.status === 400 || r.status === 409) return json(res, r.status, r);
       // "desligado" não é erro: a mensagem fica registrada aqui mesmo assim
       return json(res, r.ok || r.desligado ? 200 : 502, r);
     }
@@ -2830,7 +2900,7 @@ const server = http.createServer(async (req, res) => {
 
 /* Com SO_FUNCOES=1 o arquivo só exporta as funções (para scripts de conferência
    contra o banco real, sem abrir porta). Em produção nada muda: `node server.js`. */
-module.exports = { lerSaude, fichaDoCliente, testarChaveCodeWords, lerChaveMascarada, salvarChaveCodeWords, server,
+module.exports = { ENTREGADOR, lerSaude, fichaDoCliente, testarChaveCodeWords, lerChaveMascarada, salvarChaveCodeWords, server,
                    copiloto, criarClienteIA, sugerirResposta, montarRelatorio, PERSONA,
                    ACESSO, LIMITE, AUDITORIA, EQUIPE, RODIZIO, TAREFAS, AUTOMACOES };
 if (process.env.SO_FUNCOES !== '1') server.listen(PORT, HOST, () => {

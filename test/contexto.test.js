@@ -150,3 +150,19 @@ test('textoDoCatalogo separa fazemos e não fazemos e lista as janelas', () => {
   assert.match(t, /❌ Retífica de motor/);
   assert.match(t, /Seg–Sex 08:00–11:00/);
 });
+
+/* ---------------- rodada 4: situação da conversa ---------------- */
+test('situacaoDaConversa: quem falou por último, espera em horas/dias e se a loja já se apresentou', () => {
+  const agora = new Date('2026-10-14T22:00:00Z');
+  const s = CTX.situacaoDaConversa([{ direcao: 'saida', corpo: 'oi', created_at: '2026-10-14T19:00:00Z' }, { direcao: 'entrada', corpo: 'x', created_at: '2026-10-14T20:00:00Z' }], agora);
+  assert.equal(s.semResposta, true); assert.equal(Math.round(s.horasEsperando), 2); assert.equal(s.lojaJaFalou, true);
+  const t = CTX.textoDaSituacao(s);
+  assert.match(t, /sem resposta há 2 hora/); assert.doesNotMatch(t, /demora/); assert.match(t, /NÃO se apresente/);
+  const nova = CTX.textoDaSituacao(CTX.situacaoDaConversa([{ direcao: 'entrada', corpo: 'oi', created_at: '2026-10-01T12:00:00Z' }], agora));
+  assert.match(nova, /13 dia/); assert.match(nova, /reconhecendo a demora/); assert.match(nova, /parada há mais de uma semana/); assert.match(nova, /pode se apresentar/);
+  const loja = CTX.textoDaSituacao(CTX.situacaoDaConversa([{ direcao: 'saida', corpo: 'Bom dia', created_at: '2026-10-14T21:00:00Z' }], agora));
+  assert.match(loja, /última mensagem é da LOJA/);
+  assert.match(CTX.textoDaSituacao(CTX.situacaoDaConversa([], agora)), /sem mensagens/);
+  assert.equal(CTX.horaDeBrasilia('2026-10-14T02:30:00Z'), '2026-10-13 23:30');
+  assert.equal(CTX.horaDeBrasilia('lixo'), '');
+});

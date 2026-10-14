@@ -534,7 +534,7 @@ const roda = (nome) => !FILTRO || nome.includes(FILTRO);
     await Promise.all([p.waitForNavigation({ waitUntil: 'networkidle0' }).catch(() => {}), clicar(p, '#btnConfirmarSair')]);
     await espera(600);
     const ls = await p.evaluate(() => ({ chaves: Object.keys(localStorage).filter(k => k.startsWith('indycar_')), sess: sessionStorage.getItem('indycar_rascunho_x') }));
-    ok('sair + limpar: rascunhos, filtros e preferências somem (fica só o tema)', ls.sess === null && ls.chaves.join(',') === 'indycar_tema', JSON.stringify(ls));
+    ok('sair + limpar: rascunhos, filtros e preferências somem (fica só o tema e a configuração pública)', ls.sess === null && ls.chaves.filter(k => !['indycar_cfg_publica', 'indycar_equipe_nomes'].includes(k)).join(',') === 'indycar_tema', JSON.stringify(ls));
     await p.ctx.close();
 
     p = await abrir('admin', 1440);

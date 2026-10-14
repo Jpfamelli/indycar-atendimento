@@ -212,6 +212,7 @@
             <div class="cop-resposta">
               <p class="cop-rot">Resposta sugerida</p>
               <p class="cop-resposta-txt">${esc(r.resposta_sugerida).replace(/\n/g, '<br>')}</p>
+              ${r.resposta_aviso ? `<p class="cop-aviso" role="note">⚠ ${esc(r.resposta_aviso)}</p>` : ''}
               <div class="cop-acao-botoes">
                 <button type="button" class="cop-btn cop-btn-sim" data-acao="usar">Usar no campo</button>
                 <button type="button" class="cop-btn" data-acao="copiar">Copiar</button>

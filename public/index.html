@@ -69,6 +69,7 @@
           <input type="checkbox" id="loginManter" checked /> <span>Manter conectado</span></label>
       </div>
       <div id="loginErro" class="alerta" hidden role="alert"></div>
+      <p class="aviso suave login-espera" id="loginEspera" hidden role="status"><span class="fs-giro mini" aria-hidden="true"></span> Conectando ao sistema…</p>
       <button type="submit" class="btn btn-primary full" id="btnEntrar">Entrar</button>
       <button type="button" class="link link-centro" id="btnEsqueci">Esqueci a senha</button>
     </form>
@@ -1313,12 +1314,27 @@
   </div>
 </div>
 
-<!-- "?" : atalhos de teclado -->
+<!-- "?" : ajuda curta (como faço…, atalhos de teclado, tour) — rodada 4 -->
 <div class="modal-bg" id="modalAjudaBg">
-  <div class="modal modal-ajuda">
-    <button class="modal-x" data-fechar="modalAjudaBg">×</button>
-    <h3>Atalhos de teclado</h3>
-    <dl class="teclas" id="listaTeclas"></dl>
+  <div class="modal modal-ajuda" role="dialog" aria-modal="true" aria-labelledby="ajudaTitulo">
+    <button class="modal-x" data-fechar="modalAjudaBg" aria-label="Fechar a ajuda">×</button>
+    <h3 id="ajudaTitulo">Ajuda</h3>
+    <div class="ajuda-abas" role="tablist" aria-label="Partes da ajuda">
+      <button type="button" role="tab" class="ajuda-aba ativa" data-ajuda-aba="como" aria-selected="true" aria-controls="ajudaComo" id="abaAjudaComo">Como faço…</button>
+      <button type="button" role="tab" class="ajuda-aba" data-ajuda-aba="teclas" aria-selected="false" aria-controls="ajudaTeclas" id="abaAjudaTeclas" tabindex="-1">Atalhos</button>
+    </div>
+    <div class="ajuda-parte" id="ajudaComo" role="tabpanel" aria-labelledby="abaAjudaComo">
+      <input type="search" class="ajuda-busca" id="ajudaBusca" placeholder="Procure: agendar, áudio, passar…" aria-label="Procurar na ajuda" autocomplete="off" />
+      <div class="ajuda-lista" id="ajudaLista"></div>
+      <p class="ajuda-nada" id="ajudaNada" hidden>Nada com essa palavra. Tente outra, ou fale com o gestor.</p>
+    </div>
+    <div class="ajuda-parte" id="ajudaTeclas" role="tabpanel" aria-labelledby="abaAjudaTeclas" hidden>
+      <dl class="teclas" id="listaTeclas"></dl>
+    </div>
+    <div class="ajuda-rodape">
+      <button type="button" class="btn btn-ghost sm" id="btnReverTour">▶ Rever o tour de boas-vindas</button>
+      <small class="ajuda-versao" id="ajudaVersao"></small>
+    </div>
   </div>
 </div>
 
@@ -1338,6 +1354,7 @@
   <button type="button" role="menuitem" class="mp-item" data-mp="mfa">🛡 <span>Verificação em duas etapas</span><em id="mpMfaSelo"></em></button>
   <button type="button" role="menuitem" class="mp-item" data-mp="avisos">🔔 <span>Preferências de aviso</span></button>
   <button type="button" role="menuitem" class="mp-item" data-mp="tema">🌓 <span id="mpTemaTxt">Tema claro</span></button>
+  <button type="button" role="menuitem" class="mp-item" data-mp="ajuda">❓ <span>Ajuda e atalhos</span><em>?</em></button>
   <div class="mp-sep" role="separator"></div>
   <button type="button" role="menuitem" class="mp-item" data-mp="sair">↩ <span>Sair</span></button>
   <button type="button" role="menuitem" class="mp-item perigo" data-mp="sair-todos">⏏ <span>Sair de todos os aparelhos</span></button>
@@ -1569,17 +1586,18 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- rede.js primeiro: ele fica na frente de toda chamada ao servidor (novas tentativas
+     quando o Render está acordando). A biblioteca do Supabase vem do próprio servidor
+     (versão travada, guardada pelo service worker); a CDN é só reserva. -->
+<script src="rede.js"></script>
+<script src="/vendor/supabase.js"></script>
+<script>window.supabase || document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.0/dist/umd/supabase.js"><\/script>');</script>
 <script src="app.js"></script>
 <script src="acesso.js"></script>
 <script src="equipe.js"></script>
 <script src="tarefas.js"></script>
+<script src="ajuda.js"></script>
 <script src="copiloto.js" defer></script>
-<script>
-  /* Registra o service worker — é o que torna o app instalável.
-     Falha silenciosa de propósito: sem ele o app funciona igual, só deixa
-     de aparecer o botão de instalar. */
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-</script>
+<script src="casca.js" defer></script>
 </body>
 </html>

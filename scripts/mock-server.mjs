@@ -517,7 +517,14 @@ function consultar(op, quem) {
 }
 
 // ---------------------------------------------------------------- servidor
-const json = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+const json = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-IndyCar-App': 'atendimento' }); res.end(JSON.stringify(obj)); };
+/* Rodada 4 — Render dormindo de mentira: ?dormir=20 faz TODA rota /api/ (menos o
+   dublê do banco, que é o "Supabase" e não dorme) responder 503 em HTML, SEM o
+   cabeçalho do app, por 20 s a partir do carregamento da página — igual ao
+   "hibernate-wake-error" do Render. POST /api/_dormir {segundos} faz o mesmo. */
+let DORMINDO_ATE = 0;
+const dormindo = () => Date.now() < DORMINDO_ATE;
+const ENVIOS_FEITOS = [];   // mensagemId de cada /api/enviar que "saiu" (o teste confere que não duplica)
 let SAUDE_OK = false, SEM_ROTAS = false;
 const ehUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || ''));
 /* Token do login de mentira: "mock-<id>" (nível 1) ou "mock-<id>.aal2" (depois do código das duas etapas). */
@@ -581,11 +588,20 @@ http.createServer(async (req, res) => {
       const papel = url.searchParams.get('papel') || 'admin';
       const eu = papel === 'deslogado' ? null : perfilPorId(PAPEL_PERFIL[papel] || U.admin);
       SAUDE_OK = url.searchParams.get('saude') === 'ok';
+      /* Tour de boas-vindas (rodada 4): no mock, todo mundo já "viu" — senão ele
+         cobriria a tela nos roteiros antigos. ?tour=1 faz a pessoa nunca ter visto. */
+      const tourNovo = url.searchParams.get('tour') === '1';
+      for (const x of DB.perfis) {
+        x.preferencias = { ...(x.preferencias || {}) };
+        if (tourNovo) delete x.preferencias.tour_visto;
+        else x.preferencias.tour_visto = `v1-${['admin', 'gestor'].includes(x.papel) ? x.papel : 'atendente'}`;
+      }
+      if (url.searchParams.get('dormir')) DORMINDO_ATE = Date.now() + Number(url.searchParams.get('dormir')) * 1000;
       SEM_ROTAS = url.searchParams.get('sem_rotas') === '1';
       if (url.searchParams.get('envio') === 'ok') ultimoEnvio401 = false;
       const cfg = { perfil: eu && { id: eu.id, email: eu.email, nome: eu.nome, mfa_ativo: !!eu.mfa_ativo }, recuperar: url.searchParams.get('recuperar') === '1' };
       let html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')
-        .replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase[^"]*"><\/script>/, () => DUBLE_SUPABASE.replace('__CFG__', JSON.stringify(cfg)))
+        .replace(/<script src="\/vendor\/supabase\.js"><\/script>/, () => DUBLE_SUPABASE.replace('__CFG__', JSON.stringify(cfg)))
         .replace(/<link href="https:\/\/fonts\.googleapis\.com[^>]*>/, '');   // sem fonte externa no teste
       /* As duas tags do copiloto são do outro agente; se ainda não estiverem no
          index.html, o mock põe — assim dá para testar o contrato desde já. */
@@ -611,6 +627,12 @@ http.createServer(async (req, res) => {
   let body = {};
   if (m !== 'GET') { let b = ''; for await (const c of req) b += c; try { body = JSON.parse(b || '{}'); } catch {} }
   if (p === '/api/_mock') return json(res, 200, consultar(body, quemDoToken(req)));
+  if (p === '/api/_dormir') { DORMINDO_ATE = Date.now() + Number(body.segundos || 0) * 1000; return json(res, 200, { ok: true }); }
+  if (p === '/api/_envios') return json(res, 200, { envios: ENVIOS_FEITOS });
+  if (dormindo()) {
+    res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'x-render-routing': 'hibernate-wake-error' });
+    return res.end('<html><body><h1>Service Unavailable</h1></body></html>');
+  }
   await new Promise(r => setTimeout(r, 180));            // latência de verdade, para ver esqueletos
   let mm;
 
@@ -643,7 +665,10 @@ http.createServer(async (req, res) => {
       muda.telefone = t || null;
     }
     if (body.avatar_cor !== undefined) { if (!/^#[0-9a-f]{6}$/i.test(String(body.avatar_cor))) return erro(res, 400, 'invalido', 'Cor inválida (use #RRGGBB).'); muda.avatar_cor = String(body.avatar_cor).toLowerCase(); }
-    if (body.preferencias !== undefined) {
+    if (body.preferencias?.tour_visto !== undefined && body.preferencias.notificacoes === undefined) {
+      if (body.preferencias.tour_visto !== null && !/^v[0-9]{1,2}-(atendente|gestor|admin)$/.test(String(body.preferencias.tour_visto))) return erro(res, 400, 'invalido', 'tour_visto inválido.');
+      muda.preferencias = { ...(quem.preferencias || {}), tour_visto: body.preferencias.tour_visto };
+    } else if (body.preferencias !== undefined) {
       const n = body.preferencias?.notificacoes;
       if (!n || typeof n !== 'object') return erro(res, 400, 'invalido', 'notificacoes precisa ser um objeto.');
       const out = {};
@@ -886,6 +911,13 @@ http.createServer(async (req, res) => {
   if (p === '/api/enviar') {
     if (ultimoEnvio401) return json(res, 502, { ok: false, codigo: 'codewords-401', status: 401,
       erro: 'WhatsApp parado: a chave do CodeWords foi recusada (401). Troque em Configurações › Integrações' });
+    // igual ao lib/entrega.js: o mesmo mensagemId não sai duas vezes
+    if (body.mensagemId && ENVIOS_FEITOS.includes(body.mensagemId)) return json(res, 200, { ok: true, jaEnviada: true });
+    if (body.mensagemId) {
+      ENVIOS_FEITOS.push(body.mensagemId);
+      const linha = DB.whatsapp_mensagens?.find(x => x.id === body.mensagemId);
+      if (linha) linha.status = 'enviado';
+    }
     return json(res, 200, { ok: true, resposta: '{"status":"sent"}' });
   }
   if (p === '/api/conversas/sincronizar') return json(res, 200, { ok: true, novas: 0 });

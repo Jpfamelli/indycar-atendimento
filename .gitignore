@@ -6,3 +6,7 @@ node_modules/
 # tinha uma chave de API que alguém mandou por WhatsApp — o scanner do GitHub
 # barrou o push, com razão. Dado de cliente não vai para repositório.
 backups/
+
+# Capturas dos roteiros de navegador e saídas da avaliação da IA (podem ter conversa real)
+scripts/shots-tela/
+scripts/avaliacao-saida/
