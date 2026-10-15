@@ -733,3 +733,4 @@ tamanho médio 351 → 297 caracteres; preço 0/10 e vocabulário proibido 0/10 
 109. "Sair e limpar o aparelho" também apaga as entregas anotadas e a cópia dos nomes (tudo que começa com `indycar_`, menos o tema) — conferido no roteiro antigo.
 110. Ajuda é um diálogo com título ligado (aria-labelledby) e "×" com nome ("Fechar a ajuda"); lista de atalhos diz que "?" abre a Ajuda.
 111. Envio pendente não se repete em outra aba ao mesmo tempo: a retomada espera 20 s depois da anotação (a aba que enviou ainda pode estar esperando a resposta) e o servidor trava pelo id.
+112. ETag fraca (`W/"…"`, como a borda do Render/Cloudflare devolve) e lista de ETags também dão 304 — achado conferindo em produção; com teste.

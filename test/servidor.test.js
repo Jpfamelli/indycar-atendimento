@@ -172,6 +172,10 @@ test('server.js: estáticos em brotli/gzip com ETag e 304; vendor do Supabase se
     const etag = br.h.etag; assert.match(etag, /^"/);
     const nm = await getCru(base, '/app.js', { 'if-none-match': etag });
     assert.equal(nm.status, 304); assert.equal(nm.corpo.length, 0);
+    // ETag fraca (a borda do Render/Cloudflare marca W/) e lista também valem
+    assert.equal((await getCru(base, '/app.js', { 'if-none-match': 'W/' + etag })).status, 304);
+    assert.equal((await getCru(base, '/app.js', { 'if-none-match': '"outra", ' + etag })).status, 304);
+    assert.equal((await getCru(base, '/app.js', { 'if-none-match': '"outra"' })).status, 200);
     const v = await getCru(base, '/vendor/supabase.js', { 'accept-encoding': 'br' });
     assert.equal(v.status, 200); assert.match(v.h['content-type'], /javascript/); assert.match(v.h['cache-control'], /max-age=86400/);
     assert.match(zlibT.brotliDecompressSync(v.corpo).toString('utf8').slice(0, 5000), /supabase/i);

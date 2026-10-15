@@ -186,7 +186,10 @@ function serveStatic(req, res, urlPath) {
       'Cache-Control': ext === '.html' || /sw\.js$/.test(file) ? 'no-cache'
         : VENDOR[urlPath] ? 'public, max-age=86400' : 'public, max-age=3600, must-revalidate' };
     if (ext === '.html') cab['Content-Security-Policy'] = cspDoHtml(file, item.buf);
-    if (req.headers['if-none-match'] === item.etag) { res.writeHead(304, cab); return res.end(); }
+    /* A borda do Render (Cloudflare) devolve a ETag como fraca (W/"…") quando
+       re-codifica a resposta; o navegador manda de volta assim. Compara sem o W/. */
+    const pedidas = String(req.headers['if-none-match'] || '').split(',').map(e => e.trim().replace(/^W\//, ''));
+    if (pedidas.includes(item.etag)) { res.writeHead(304, cab); return res.end(); }
     const cod = COMPRIMIVEL.test(tipo) && item.buf.length > 1024 ? codificacaoAceita(req) : '';
     const corpo = corpoComprimido(item, cod);
     if (cod) cab['Content-Encoding'] = cod;
