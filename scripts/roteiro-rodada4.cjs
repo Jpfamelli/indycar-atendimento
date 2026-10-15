@@ -48,7 +48,7 @@ const ate = async (p, fn, arg, ms = 30000) => { const t0 = Date.now(); while (Da
       const pedido = p.evaluate(async () => { const r = await fetch('/api/equipe/nomes', { headers: await authCabecalhos() }); return { status: r.status, j: await r.json() }; });
       ok(`[${w}] 503 do Render: faixa "acordando" aparece com contagem`, await ate(p, () => { const f = document.getElementById('faixaServidor'); return f && !f.hidden && /acordando/i.test(f.textContent) && /tentando de novo em \d+ s/.test(f.textContent); }, null, 6000));
       ok(`[${w}] faixa sem rolagem lateral e dentro da tela`, await p.evaluate(() => { const r = document.getElementById('faixaServidor').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 1; }) && await semRolagemX(p));
-      ok(`[${w}] faixa tem "Tentar agora" com nome e role=status`, await p.evaluate(() => { const f = document.getElementById('faixaServidor'); return f.getAttribute('role') === 'status' && /Tentar agora/.test(f.querySelector('button').textContent); }));
+      ok(`[${w}] faixa tem "Tentar agora"; leitor de tela anuncia o estado, não a contagem`, await p.evaluate(() => { const f = document.getElementById('faixaServidor'); return f.querySelector('.fs-titulo').getAttribute('role') === 'status' && f.querySelector('.fs-sub').getAttribute('aria-live') === 'off' && /Tentar agora/.test(f.querySelector('button').textContent); }));
       if (w === 1440) await p.screenshot({ path: OUT + 'acordando-1440.png' }); else await p.screenshot({ path: OUT + 'acordando-375.png' });
       const res = await pedido;
       ok(`[${w}] o pedido esperou e deu certo sozinho quando acordou (sem erro cru)`, res.status === 200 && res.j.ok === true && Date.now() - t0 >= 8000, JSON.stringify(res).slice(0, 120));
@@ -208,6 +208,21 @@ const ate = async (p, fn, arg, ms = 30000) => { const t0 = Date.now(); while (Da
     await espera(300);
     await pr.evaluate(() => document.querySelector('[data-mp="ajuda"]').click());
     ok('menu do perfil › "Ajuda e atalhos" abre a Ajuda', await ate(pr, () => document.getElementById('modalAjudaBg').classList.contains('aberto'), null, 2000));
+    await pr.keyboard.press('Escape');
+    // erro técnico vira português claro
+    const t1 = await pr.evaluate(() => { toast('⚠️ Não consegui salvar: TypeError: Failed to fetch'); return document.getElementById('toast').textContent; });
+    ok('aviso com "Failed to fetch" vira "Sem conexão…"', /^⚠️ Sem conexão/.test(t1) && !/fetch/i.test(t1), t1);
+    const t2 = await pr.evaluate(() => { toast('⚠️ new row violates row-level security policy'); return document.getElementById('toast').textContent; });
+    ok('aviso de RLS vira "Peça ao gestor"', /Peça ao gestor/.test(t2), t2);
+    const t3 = await pr.evaluate(() => { toast('✅ Salvo'); return document.getElementById('toast').textContent; });
+    ok('aviso comum continua igual', t3 === '✅ Salvo', t3);
+    ok('chat vazio ensina: atalhos e "ver o tour"', await visivel(pr, '.chat-vazio-dica') && /Ctrl/.test(await texto(pr, '.chat-vazio-dica')));
+    await pr.evaluate(() => document.getElementById('btnVazioTour').click());
+    ok('"ver o tour de novo" no chat vazio abre o tour', await ate(pr, () => !!document.querySelector('.tour-card'), null, 2000));
+    await pr.keyboard.press('Escape');
+    const teto = await pr.evaluate(() => { for (let i = 0; i < 60; i++) Entregas.anotar({ mensagemId: 'x' + i, criada: new Date().toISOString() }); const n = Entregas.ler().length; localStorage.removeItem('indycar_entregas_pendentes'); return n; });
+    ok('anotações de entrega com teto (50) — o aparelho não enche', teto === 50, String(teto));
+    ok('sem erro de console (ajuda/avisos)', pr.erros.length === 0, pr.erros.join(' | '));
     await pr.ctx.close();
   } finally {
     await dormir(0).catch(() => {});

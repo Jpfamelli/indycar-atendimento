@@ -201,11 +201,13 @@
     faixa.className = 'faixa-servidor';
     faixa.id = 'faixaServidor';
     faixa.hidden = true;
-    faixa.setAttribute('role', 'status');
-    faixa.setAttribute('aria-live', 'polite');
+    faixa.setAttribute('role', 'region');
+    faixa.setAttribute('aria-label', 'Situação do sistema');
+    /* Leitor de tela: anuncia só a MUDANÇA de estado (título); a contagem que muda
+       a cada segundo fica fora do anúncio — senão ele fala sem parar. */
     faixa.innerHTML = '<span class="fs-giro" aria-hidden="true"></span>'
-      + '<span class="fs-textos"><b class="fs-titulo">O sistema está acordando…</b>'
-      + '<span class="fs-sub">As conversas continuam aqui. Envio pelo WhatsApp e IA voltam sozinhos.</span></span>'
+      + '<span class="fs-textos"><b class="fs-titulo" role="status" aria-live="polite">O sistema está acordando…</b>'
+      + '<span class="fs-sub" aria-live="off">As conversas continuam aqui. Envio pelo WhatsApp e IA voltam sozinhos.</span></span>'
       + '<button type="button" class="fs-btn">Tentar agora</button>';
     faixa.querySelector('.fs-btn').addEventListener('click', tentarAgora);
     document.body.appendChild(faixa);
@@ -254,6 +256,17 @@
 
   raiz.addEventListener('online', () => { if (estado !== 'ok') { despertar(); if (!esperando) sondar(); } });
   raiz.addEventListener('offline', () => faixa && pintar({ estado }));
+
+  /* Velocidade: já abre a conexão com o Supabase (endereço da configuração guardada)
+     enquanto o resto da tela carrega — o primeiro pedido ao banco sai mais rápido. */
+  try {
+    const cfg = JSON.parse(localStorage.getItem('indycar_cfg_publica') || 'null');
+    const u = cfg && new URL(cfg.supabaseUrl);
+    if (u && u.protocol === 'https:' && document.head) {
+      const l = document.createElement('link'); l.rel = 'preconnect'; l.href = u.origin; l.crossOrigin = '';
+      document.head.appendChild(l);
+    }
+  } catch { /* sem cópia: segue normal */ }
 
   raiz.fetch = fetchComRetentativa;
   raiz.Rede = {

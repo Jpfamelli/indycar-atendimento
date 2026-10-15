@@ -2087,3 +2087,7 @@ button.app-chip:not(:disabled):hover{border-color:var(--vermelho);color:var(--te
 .tour-card .link{background:none;border:0;color:var(--cinza);font:inherit;cursor:pointer;padding:8px 2px;text-decoration:underline;white-space:nowrap}
 .tour-card button:focus-visible{outline:2px solid var(--vermelho);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){ .tour-buraco{transition:none} }
+.chat-vazio-dica{font-size:.82rem;color:var(--cinza);margin-top:6px;text-align:center;line-height:1.8}
+.chat-vazio-dica kbd{font:inherit;font-size:.76rem;border:1px solid var(--linha);border-radius:5px;padding:0 5px;background:var(--superficie)}
+.chat-vazio-dica .link{background:none;border:0;color:var(--vermelho-txt);font:inherit;cursor:pointer;text-decoration:underline;padding:4px}
+.ajuda-versao{color:var(--cinza)}

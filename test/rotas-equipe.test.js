@@ -217,3 +217,33 @@ test('validarPreferencias: só o que é conhecido passa', () => {
   assert.ok(validarPreferencias({ x: 'a'.repeat(5000) }).erro);
   assert.deepEqual(validarPreferencias({ expediente: { dias: [3, 1, 1], inicio: '08:00', fim: '12:00' } }).preferencias.expediente, { dias: [1, 3], inicio: '08:00', fim: '12:00' });
 });
+
+/* ---------------- rodada 4: preferências são de todos os apps ---------------- */
+const { mesclarPreferencias } = require('../lib/rotas-equipe.js');
+test('mesclarPreferencias: merge profundo, sem efeito colateral; valor simples/lista/null substitui', () => {
+  const base = { tema: 'claro', notificacoes: { espera: true, agenda_x: true }, agenda: { visao: 'semana' } };
+  const r = mesclarPreferencias(base, { notificacoes: { espera: false }, tour_visto: 'v1-gestor' });
+  assert.deepEqual(r, { tema: 'claro', notificacoes: { espera: false, agenda_x: true }, agenda: { visao: 'semana' }, tour_visto: 'v1-gestor' });
+  assert.deepEqual(base.notificacoes, { espera: true, agenda_x: true }, 'não mexe no original');
+  assert.deepEqual(mesclarPreferencias(null, { a: 1 }), { a: 1 });
+  assert.deepEqual(mesclarPreferencias({ a: { b: 1 } }, { a: null }), { a: null });
+  assert.deepEqual(mesclarPreferencias({ l: [1, 2] }, { l: [3] }), { l: [3] });
+  assert.deepEqual(mesclarPreferencias({ a: 1 }, 'lixo'), { a: 1 });
+});
+
+test('PATCH /api/eu: lê o valor ATUAL do banco e não apaga o que outro app guardou', async () => {
+  const s = await subir();
+  try {
+    await s.chamar('GET', '/api/eu', { quem: 'ana' });                 // porteiro guarda a cópia
+    const p = s.db.perfis.find(x => x.id === ID.ana);
+    // outro app (Agenda/CRM) grava depois da cópia do porteiro
+    p.preferencias = { tema: 'claro', agenda: { visao: 'semana' }, notificacoes: { espera: true, lead: false, chave_do_crm: true } };
+    const r = await s.chamar('PATCH', '/api/eu', { quem: 'ana', corpo: { preferencias: { notificacoes: { espera: false } } } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(p.preferencias, { tema: 'claro', agenda: { visao: 'semana' }, notificacoes: { espera: false, lead: false, chave_do_crm: true } });
+    assert.deepEqual(r.j.preferencias, p.preferencias, 'a tela recebe o valor mesclado');
+    await s.chamar('PATCH', '/api/eu', { quem: 'ana', corpo: { preferencias: { tour_visto: 'v1-atendente' } } });
+    assert.equal(p.preferencias.agenda.visao, 'semana'); assert.equal(p.preferencias.tour_visto, 'v1-atendente');
+    assert.equal(p.preferencias.notificacoes.chave_do_crm, true);
+  } finally { await s.fechar(); }
+});

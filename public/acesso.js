@@ -579,11 +579,20 @@ const Acesso = (() => {
   async function salvarPreferencias() {
     const notificacoes = {};
     $$('#cartaoPrefs [data-pref]').forEach(cx => { notificacoes[cx.dataset.pref] = cx.checked; });
-    const preferencias = { ...(perfil.preferencias || {}), notificacoes };
+    // merge profundo: o que outros apps guardaram em preferencias (e em notificacoes) continua lá
+    const mesclar = (b, p) => { const o = b && typeof b === 'object' && !Array.isArray(b) ? { ...b } : {};
+      for (const [k, x] of Object.entries(p || {})) o[k] = x && typeof x === 'object' && !Array.isArray(x) ? mesclar(o[k], x) : x; return o; };
+    let preferencias = mesclar(perfil.preferencias, { notificacoes });
     try {
       const r = await chamarEu('/api/eu', 'PATCH', { preferencias: { notificacoes } });
       if (!r.ok && r.status !== 404) throw new Error(r.j?.erro || 'o servidor recusou');
-      if (r.status === 404) { const { error } = await sb.from('perfis').update({ preferencias }).eq('id', perfil.id); if (error) throw error; }
+      if (r.ok && r.j?.preferencias) preferencias = r.j.preferencias;
+      if (r.status === 404) {
+        // servidor antigo: lê o valor ATUAL do banco antes de gravar (outro app pode ter mudado)
+        const { data: atual } = await sb.from('perfis').select('preferencias').eq('id', perfil.id).maybeSingle();
+        preferencias = mesclar(atual?.preferencias ?? perfil.preferencias, { notificacoes });
+        const { error } = await sb.from('perfis').update({ preferencias }).eq('id', perfil.id); if (error) throw error;
+      }
       perfil.preferencias = preferencias;
       toast('✅ Preferências salvas', 'ok');
     } catch (err) { toast('⚠️ Não consegui salvar: ' + err.message, 'erro'); }

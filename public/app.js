@@ -29,10 +29,27 @@ function horaCurta(iso) {
 const dataLonga = iso => !iso ? '' :
   new Date(iso).toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
 
+/* Rodada 4: erro técnico vira português claro em qualquer aviso (toast e estados de erro).
+   Quem lê é o atendente, não o programador. */
+const ERROS_TECNICOS = [
+  [/failed to fetch|networkerror|load failed|network request failed/i, 'Sem conexão. Confira a internet — tento de novo sozinho.'],
+  [/jwt expired|invalid jwt|refresh token/i, 'Sua sessão venceu. Entre de novo.'],
+  [/permission denied|row-level security|violates row-level/i, 'Você não tem permissão para isso. Peça ao gestor.'],
+  [/timeout|timed out|aborted/i, 'Demorou demais para responder. Tente de novo.'],
+  [/unexpected token .*<|is not valid json/i, 'O sistema respondeu errado (talvez acordando). Tente de novo em instantes.'],
+];
+function erroLegivel(msg) {
+  const t = String(msg ?? '');
+  for (const [re, txt] of ERROS_TECNICOS) if (re.test(t)) return txt;
+  return t;
+}
+
 let toastT;
 function toast(msg, tipo = '') {
   const t = $('#toast');
-  const texto = String(msg ?? '');
+  const cru = String(msg ?? '');
+  // aviso com erro técnico ("Failed to fetch"…) troca pela frase clara, mantendo o ⚠️ do começo
+  const texto = erroLegivel(cru) !== cru ? (/^⚠/.test(cru) ? '⚠️ ' : '') + erroLegivel(cru) : cru;
   t.textContent = texto;
   // cor da borda pelo tipo (o copiloto manda 'erro'/'ok'); sem tipo, deduz do ⚠️/✅
   const classe = tipo === 'erro' || /^⚠/.test(texto) ? 'erro' : tipo === 'ok' || /^✅/.test(texto) ? 'ok' : '';
@@ -479,7 +496,7 @@ async function carregarConversas() {
     // primeira carga falhou: em vez do esqueleto eterno, diz o que houve e oferece tentar de novo
     if (!jaCarregouConversas || !CONVERSAS.length) {
       $('#listaConversas').innerHTML = `<div class="vazio">⚠️ Não consegui carregar as conversas.<br>
-        <small>${esc(err.message || 'sem resposta do banco')}</small><br><br>
+        <small>${esc(erroLegivel(err.message) || 'sem resposta do banco')}</small><br><br>
         <button type="button" class="btn btn-ghost sm" data-acao="recarregar-lista">Tentar de novo</button></div>`;
     } else toast('⚠️ ' + err.message);
   } finally {
@@ -1010,7 +1027,7 @@ async function carregarMensagens({ anteriores = false } = {}) {
     if (minha !== geracaoMsgs) return;
     if (!MENSAGENS.length) {
       $('#mensagens').innerHTML = `<div class="vazio">⚠️ Não consegui carregar as mensagens.<br>
-        <small>${esc(err.message || '')}</small><br><br>
+        <small>${esc(erroLegivel(err.message))}</small><br><br>
         <button type="button" class="btn btn-ghost sm" data-acao="recarregar-msgs">Tentar de novo</button></div>`;
     } else toast('⚠️ ' + err.message);
   }
@@ -2028,7 +2045,7 @@ async function carregarFicha(conv) {
                 ✎ Editar
               </button>
             </div>
-          </div>`).join('') : '<div class="vazio" style="padding:14px">Nenhum serviço registrado.</div>'}
+          </div>`).join('') : '<div class="vazio" style="padding:14px">Nenhum serviço ainda. Quando a Agenda concluir um, ele aparece aqui com o valor.</div>'}
       </div>
 
       <div class="ficha-bloco">
@@ -2063,7 +2080,7 @@ async function carregarFicha(conv) {
               {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))}
               ${a.consultores?.nome ? '· ' + esc(a.consultores.nome) : ''}
               ${a.valor > 0 ? '· ' + brl(a.valor) : ''}</small>
-          </div>`).join('') : '<div class="vazio" style="padding:14px">Sem horários marcados.</div>'}
+          </div>`).join('') : '<div class="vazio" style="padding:14px">Sem horário marcado. Use <b>Agendar</b> no topo do chat — ou peça ao ✨.</div>'}
       </div>
 
       <datalist id="listaServicos">

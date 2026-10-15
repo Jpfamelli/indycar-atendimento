@@ -257,3 +257,5 @@
   raiz.Ajuda = { ...PURO, abrir, iniciarTour, terminarTour: terminar, get tourAberto() { return !!tour; } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ligarAjuda); else ligarAjuda();
 })(typeof window !== 'undefined' ? window : globalThis);
+/* "ver o tour de novo" no estado vazio do chat (rodada 4) */
+if (typeof document !== 'undefined') document.addEventListener('click', e => { if (e.target.closest?.('#btnVazioTour')) window.Ajuda?.iniciarTour({ forcar: true }); });

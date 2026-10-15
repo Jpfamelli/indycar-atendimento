@@ -34,6 +34,7 @@
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Atendimento" />
@@ -378,6 +379,8 @@
         <div class="chat-vazio" id="chatVazio">
           <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z" fill="currentColor"/></svg>
           <p>Escolha uma conversa à esquerda para começar.</p>
+          <p class="chat-vazio-dica">Dicas: <kbd>Ctrl</kbd>+<kbd>K</kbd> busca um cliente · <kbd>?</kbd> abre a ajuda ·
+            <button type="button" class="link" id="btnVazioTour">ver o tour de novo</button></p>
         </div>
 
         <div class="chat" id="chat" hidden>

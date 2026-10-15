@@ -413,3 +413,43 @@ sempre pede clique. Desfazer = tarefa cancelada.
 ### Scripts
 `npm run segredos` · `npm run segredos:historico` · `npm run auditar-deps` · `npm run verificar`
 (sintaxe + segredos + audit + testes) · `node scripts/conferir-equipe-real.mjs` (só leitura).
+
+
+---
+
+## 🌙 Rodada 4 (14/10/2026) — quando o Render dorme
+
+O plano gratuito do Render às vezes dorme e responde **503 "hibernate-wake-error"** por alguns minutos.
+O Atendimento agora aguenta isso:
+
+- **Faixa amarela "O sistema está acordando…"** com contagem e **Tentar agora**. Tudo que precisava do
+  servidor espera sozinho (até 3 min, espera crescente) e segue quando ele volta ("✅ O sistema voltou").
+- **As conversas continuam funcionando**: elas vêm direto do Supabase, que não dorme. O app abre mesmo com o
+  servidor fora (a casca fica guardada no service worker e a configuração pública no aparelho).
+- **Mensagem enviada nesse meio-tempo não se perde nem sai duas vezes**: fica "⏳ esperando o sistema" e sai
+  quando ele acorda — mesmo que a página seja fechada (é retomada ao abrir de novo, até 15 min). O servidor
+  recebe o id da mensagem e não manda duas vezes (`lib/entrega.js`).
+- **Tempo real que recupera**: se o WebSocket caiu (calado ou não), o app busca no banco o que chegou no intervalo.
+- **Tour de boas-vindas** por papel na primeira vez (atendente, gestor, admin) e **Ajuda** no `?` ou no menu
+  do seu nome (como faço…, atalhos, rever o tour).
+
+### Para quem mantém
+| O quê | Onde |
+|---|---|
+| Novas tentativas, faixa, JSON em português no lugar do HTML do Render | `public/rede.js` (regras puras testadas em `test/rede-entrega.test.js`) |
+| Marca das respostas do app (é assim que a tela distingue do roteador) | cabeçalho `X-IndyCar-App: atendimento` no `server.js` |
+| Casca em cache, versão nova | `public/sw.js` (v14), `public/casca.js` |
+| Biblioteca do Supabase local (versão travada) | `GET /vendor/supabase.js` (do `node_modules`) |
+| Entrega idempotente | `POST /api/enviar` com `mensagemId` (+ cabeçalho `X-Idempotente: 1`) |
+| Tour e ajuda | `public/ajuda.js`; marca em `perfis.preferencias.tour_visto` |
+| Preferências | `PATCH /api/eu` lê o valor atual e faz **merge profundo** — nunca apaga chave de outro app |
+| Estáticos | brotli/gzip + ETag/304; JSON > 2 KB em gzip |
+
+### Testar
+```bash
+npm test                                   # 189 testes
+PORT=3221 node scripts/mock-server.mjs     # servidor de mentira; ?dormir=20 ou POST /api/_dormir {segundos} simula o 503
+node scripts/roteiro-rodada4.cjs           # 145 conferências (1440 e 375 px)
+node scripts/roteiro-casca.cjs             # server.js real atrás de um "Render" que responde 503
+node scripts/avaliar-copiloto.mjs <ids>    # IA com conversas reais, banco SÓ LEITURA, modo "sugerir" (custa tokens)
+```

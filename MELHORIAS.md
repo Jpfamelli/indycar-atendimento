@@ -586,3 +586,150 @@ nos 4 scripts; `npm test` (162 passando — nada do servidor quebrou).
 ## Coordenador
 1. Coluna whatsapp_mensagens.enviado_por (padrão auth.uid()): o nome de quem mandou aparece nas mensagens reais.
 2. Aba Relatórios escondida para atendente (o servidor já recusava com 403; o teste de ponta a ponta pegou).
+
+
+# Rodada 4 (14/10/2026) — confiabilidade com o Render dormindo, velocidade, tour, ajuda e copiloto
+
+Motivo: em 14/10 às 19h o Render gratuito respondeu 503 "hibernate-wake-error" por ~5 min.
+Verificado com `npm test` (189 testes, 0 falhas; 27 novos), `node scripts/roteiro-rodada4.cjs` (servidor de mentira
+com o Render "dormindo" de mentira, 1440 e 375 px: **145/145**), `node scripts/roteiro-casca.cjs` (server.js DE VERDADE
+atrás de um proxy que responde 503: **13/13**), `node scripts/roteiro-tela.cjs` (roteiro antigo: **220/220**) e
+`node scripts/avaliar-copiloto.mjs` (10 conversas reais, modo "sugerir", banco só leitura — 72 escritas bloqueadas, nada gravado).
+
+### Servidor acordando (public/rede.js — novo)
+1. Toda chamada ao nosso servidor (`/api/…`) passa por uma camada que reconhece quando a resposta NÃO veio do app (502/503/504 do roteador do Render, falha de rede).
+2. Novas tentativas sozinhas com espera crescente 2, 3, 5, 8, 12, 15, 20, 25, 30 s… somando 3 min.
+3. 503 sem a marca do app (o pedido nem chegou) repete até POST; 502/504 só repetem pedido seguro (GET) ou marcado como idempotente — nada de cobrar/enviar duas vezes.
+4. Resposta do PRÓPRIO app (401, 403, 429, 502 do CodeWords, 503 "IA desligada") passa direto, sem nova tentativa.
+5. Desistiu depois de 3 min: a tela recebe JSON com erro em português ("O sistema está acordando e ainda não respondeu…") e a marca `X-IndyCar-Sintetica`, nunca o HTML do Render (antes: "Unexpected token <").
+6. Faixa "O sistema está acordando…" com contagem ("tentando de novo em 8 s (3ª tentativa)") e "As conversas continuam aqui".
+7. Botão **Tentar agora** acorda na hora todos os pedidos que estavam esperando.
+8. Aviso "✅ O sistema voltou" (com quanto tempo ficou fora, se passou de 1 min) e a faixa some sozinha.
+9. Depois de 3 min sem resposta a faixa vira "O sistema não respondeu ainda" e continua conferindo sozinha a cada 30 s (sonda leve em `/api/status`).
+10. Voltou a internet: os pedidos parados tentam na hora (sem esperar o relógio).
+11. Sem internet quem avisa é a faixa de offline que já existia — a do servidor fica quieta (sem dois avisos).
+12. Cancelar um pedido (o copiloto cancela ao trocar de conversa) interrompe a espera na hora.
+13. Cada chamada pode dizer quanto tempo insistir (`tetoMs`): a gravação do tour, por exemplo, desiste em 30 s.
+14. Faixa acessível (role=status, aria-live, botão com nome, foco visível) e sem animação para quem pede menos movimento.
+15. 375 px: a faixa cabe na tela, sem rolagem lateral.
+16. Servidor marca TODA resposta com `X-IndyCar-App: atendimento` — é como a tela distingue o app do roteador do Render.
+
+### Abrir o app com o servidor dormindo
+17. A configuração pública (endereço do Supabase + chave publicável, que é pública) fica guardada no aparelho: com o servidor fora, o app abre na hora e as conversas vêm direto do Supabase (que não dorme).
+18. Primeira vez no aparelho com o servidor dormindo: tela de entrar mostra "Conectando ao sistema…" + a faixa e entra sozinha quando ele acorda.
+19. Nomes da equipe (só nome/cor/equipe/papel — nada de e-mail ou telefone) guardados no aparelho e fora do caminho crítico: a lista não espera o servidor.
+20. Vigia de WhatsApp e faixa de saúde não acendem alarme falso enquanto o servidor dorme ("O sistema está acordando — confiro já já").
+21. Conferências periódicas (WhatsApp/saúde a cada 2 min, sincronia da conversa a cada 15 s) pausam enquanto o servidor acorda — nada de empilhar pedidos.
+22. Quando o servidor volta, confere WhatsApp e saúde na hora.
+
+### Casca em cache (service worker v14 + casca.js)
+23. Página: rede primeiro com limite de 4 s; demorou, caiu ou veio 5xx → casca do cache (antes o 503 do Render ia direto para a tela, porque fetch não falha em 503).
+24. Arquivos da tela: rede primeiro com limite de 3 s, cópia do cache quando o servidor dorme; 503/404 nunca entram no cache.
+25. Sem casca guardada e sem rede: página curta "Sem conexão com o Atendimento" que tenta de novo sozinha a cada 15 s.
+26. Instalação baixa tudo de novo do servidor (`cache: 'reload'`) — versão nova nunca mistura arquivo velho do cache HTTP.
+27. Só apaga caches do próprio app.
+28. Biblioteca do Supabase servida pelo nosso servidor (`/vendor/supabase.js`, versão travada 2.112.0 do package-lock) e guardada na casca — a casca abre sem depender da CDN.
+29. Reserva: se o arquivo local falhar, carrega a mesma versão travada da CDN (antes: `@2` sem versão fixa).
+30. Aviso "✨ Versão nova do Atendimento pronta · Atualizar" quando sai deploy — nunca recarrega sozinho no meio de uma resposta.
+31. Confere versão nova a cada 30 min com a aba visível.
+32. A Ajuda mostra qual casca está guardada.
+
+### Envio que não se perde
+33. `/api/enviar` aceita `mensagemId`: repetir o pedido não manda duas vezes (já saiu → `{ok:true, jaEnviada:true}`) — `lib/entrega.js`.
+34. Duas tentativas ao mesmo tempo (duas abas, retentativa) → a segunda recebe 409 "já está saindo"; trava velha (aba fechou no meio) expira em 2 min.
+35. O servidor grava enviado/falhou na própria linha — vale mesmo se a aba fechou no meio.
+36. Mensagem de entrada nunca é "enviada" (400); id inválido recusado.
+37. O envio vai marcado como idempotente (`X-Idempotente: 1`): pode ser repetido com segurança enquanto o servidor acorda.
+38. Cada envio fica anotado no aparelho até ter resposta; se o servidor estava dormindo ou a página fechou, é retomado ao abrir, quando o servidor volta e quando a internet volta.
+39. Retomada confere no banco antes (já saiu? tira da lista) e só reenvia até 15 min depois — mensagem muito atrasada fica "não saiu" com "Tentar de novo".
+40. Bolha "⏳ esperando o sistema" enquanto o servidor acorda (e volta a ⏳/✓ sozinha).
+41. Wi-fi piscou ao gravar a mensagem → vai para a fila offline (sai sozinha) em vez de "não saiu".
+
+### Tempo real que recupera o que perdeu (Recuperador)
+42. Ao religar o tempo real, busca no banco as mensagens criadas enquanto estava fora e diz quantas ("Tempo real de volta — 3 mensagens chegaram enquanto estava fora").
+43. A cada 60 s (aba visível, com internet) uma consulta de 1 linha confere se existe mensagem mais nova que a última vista — pega o WebSocket que morreu calado.
+44. Canal caído sem avisar é religado nessa conferência.
+45. Voltar para a aba depois de 30 s fora busca o que chegou ("chegaram enquanto a aba estava fechada").
+46. Voltou a internet → busca na hora.
+47. Ponto de partida pelo relógio do BANCO (o do computador pode estar adiantado).
+48. Mensagem recuperada entra na conversa aberta na ordem certa e sem duplicar (confere pelo id).
+
+### Velocidade
+49. Arquivos da tela comprimidos em brotli (ou gzip): os 7 maiores caem de 876 KB para ~201 KB (−77%; app.js 310 → 76 KB).
+50. ETag em todo arquivo: recarregar devolve 304 sem corpo quando nada mudou.
+51. Arquivos guardados em memória já comprimidos (o disco do Render free é lento ao acordar).
+52. Respostas JSON acima de 2 KB (ficha, relatórios, equipe, auditoria) em gzip.
+53. Biblioteca do Supabase com cache de 1 dia.
+54. Conexão com o Supabase aberta já no começo da página (preconnect pela configuração guardada).
+55. Abertura: etapas e configuração do funil em paralelo; serviços/consultores e atalhos em paralelo.
+56. Reabrir uma conversa vista há pouco mostra as mensagens na hora (memória das 12 últimas, só nesta aba) e atualiza por trás — sem esqueleto piscando.
+
+### Tour de boas-vindas por papel (public/ajuda.js — novo)
+57. Na primeira vez, tour curto: atendente 7 passos, gestor 8 (relatórios, sem dono, rodízio), administrador 10 (equipe e chave do WhatsApp).
+58. Aparece uma vez por versão e papel — quem é promovido a gestor vê os passos novos.
+59. Marcado em `perfis.preferencias.tour_visto` (vale em todo aparelho; validado no servidor: só `v1-atendente|gestor|admin`) e no aparelho (se o servidor estiver dormindo).
+60. Destaque do que está explicando e cartão sempre dentro da tela (ao lado quando o alvo é alto, como a lista).
+61. Teclado: Enter/→ avança, ← volta, Esc encerra; foco preso no cartão e devolvido no fim; aria-modal.
+62. "Rever o tour" na Ajuda e "ver o tour de novo" no chat vazio.
+
+### Ajuda curta
+63. "?" (fora do campo) abre a Ajuda; também pelo menu do seu nome › "Ajuda e atalhos".
+64. "Como faço…" com 13 respostas curtas (agendar, passar conversa, pegar cliente, não lida, resposta pronta, foto/áudio, IA, tarefa, sistema acordando, sem internet, WhatsApp parado, permissões, senha/duas etapas).
+65. Busca na Ajuda sem acento e por várias palavras ("audio", "passar colega"); sem resultado explica o que fazer.
+66. Aba "Atalhos" com as teclas e as etapas do funil; abas navegáveis por ← →.
+67. Permissão explicada: "Apagar, Relatórios e Equipe são do gestor… Peça ao gestor".
+68. Textos do tour e da ajuda sem "prezado/efetuar/comparecer/veículo" (teste).
+
+### Copiloto da IA — avaliação com 10 conversas reais (modo "sugerir", nada executado nem gravado)
+Antes → depois (mesmas 10 conversas, Sonnet 5.5): uma pergunta por mensagem 8/10 → **10/10**; duas opções de horário quando quer agendar 8/10 → **10/10**;
+"Aqui é o atendimento da IndyCar" repetido em conversa já em andamento 7/10 → **1/10** (a única é conversa em que a loja nunca falou — correto);
+tamanho médio 351 → 297 caracteres; preço 0/10 e vocabulário proibido 0/10 nas duas; sem sugestão 0/10 (uma rodada intermediária saiu sem resposta — corrigido no item 74).
+69. Ficha da IA ganhou "SITUAÇÃO DA CONVERSA" calculada pelo sistema: quem falou por último, há quanto tempo o cliente espera, se a loja já se apresentou.
+70. Hora de cada mensagem no fuso de Brasília (antes ia em UTC, 3 h adiantada em relação ao "Hoje é…" — errava bom dia/boa tarde e o tempo de espera).
+71. Regra "UMA pergunta por mensagem" conferida pelo servidor: 2+ perguntas voltam para a IA reescrever.
+72. Se a IA insistir, a sugestão vem mesmo assim com o aviso "mais de uma pergunta — revise antes de enviar", mostrado no painel do copiloto.
+73. "Aqui é o atendimento da IndyCar" sai sozinho da sugestão quando a loja já falou com o cliente (mantém as quebras de linha).
+74. Cliente esperando e a IA terminou sem "responder": o copiloto cobra uma vez (se ainda couber volta) — sem laço e sem mandar bloco de texto vazio para a API.
+75. Prompt com o que aprendemos: respeitar a preferência de horário do cliente, não prometer peça reservada/estoque/nota/desconto/prazo (propor aguardando consultor ou tarefa), pós-venda pergunta como ficou, mover etapa só quando ficou para trás.
+76. Retorno do copiloto traz `recusadas_na_validacao` e `parou_por` (para entender sugestão que não veio).
+77. `scripts/avaliar-copiloto.mjs`: avalia N conversas reais com banco SÓ LEITURA (todo insert/update/upsert/delete/rpc vira de mentira), autonomia forçada em "sugerir" e checagens automáticas (preço, vocabulário, tamanho, perguntas, duas opções, abertura). Saída fora do Git (tem conversa real).
+
+### Preferências são de todos os apps (pedido do coordenador)
+78. `PATCH /api/eu` lê `perfis.preferencias` ATUAL do banco antes de gravar (antes usava a cópia do porteiro, até 60 s velha — o que outro app gravou no último minuto sumia).
+79. Merge profundo: gravar `notificacoes.espera` não apaga chave que outro app pôs dentro de `notificacoes`, nem `tema`, `tour_visto` ou chaves da Agenda/CRM.
+80. A resposta devolve as preferências já mescladas e a tela passa a usar esse valor.
+81. Caminho antigo da tela (servidor sem a rota): lê o valor atual do banco e mescla antes de gravar.
+
+### Erros em português claro, estados vazios e acessibilidade
+82. Qualquer aviso com erro técnico vira frase clara: "Failed to fetch" → "Sem conexão…", RLS → "Você não tem permissão para isso. Peça ao gestor.", JWT vencido → "Sua sessão venceu", tempo esgotado, HTML no lugar de JSON → "talvez acordando".
+83. Erro ao carregar conversas/mensagens mostra a frase clara (não o texto técnico).
+84. Chat vazio ensina: "Ctrl+K busca um cliente · ? abre a ajuda · ver o tour de novo".
+85. Ficha sem horário: "Use Agendar no topo do chat — ou peça ao ✨".
+86. Ficha sem serviço: "Quando a Agenda concluir um, ele aparece aqui com o valor".
+87. Versão da casca na Ajuda com contraste suficiente.
+88. `mobile-web-app-capable` no HTML (fim do aviso de descontinuado no console).
+
+### Testes e ferramentas
+89. `test/rede-entrega.test.js` (10): espera crescente, quando repetir e quando não, textos, entrega que não duplica, 409, trava velha, situação gravada.
+90. `test/ajuda.test.js` (5): passos por papel, uma vez por versão/papel, vocabulário, busca, `tour_visto` validado.
+91. `test/servidor.test.js` (+4): X-IndyCar-App em tudo, brotli/gzip + ETag/304, vendor só do arquivo listado (nada mais do node_modules), JSON grande em gzip, ordem dos scripts, CORE do SW existindo, reserva da CDN escapada.
+92. `test/copiloto.test.js` (+5) e `test/contexto.test.js` (+1): uma pergunta, reserva com aviso, apresentação, cobrança do "responder", situação e hora de Brasília.
+93. `test/rotas-equipe.test.js` (+2): merge profundo e PATCH que não apaga o que outro app guardou.
+94. Servidor de mentira: `?dormir=N` / `POST /api/_dormir` simulam o 503 do Render (HTML, sem a marca do app; o "banco" segue de pé).
+95. Servidor de mentira: `/api/_envios` conta envios e `/api/enviar` é idempotente como o de verdade.
+96. Servidor de mentira: `?tour=1` (tour como primeira vez) e `tour_visto` no PATCH; por padrão todo mundo já "viu" (os roteiros antigos não esbarram no tour).
+97. `scripts/roteiro-rodada4.cjs` (145 conferências em 1440 e 375 px): espera e volta, Tentar agora, JSON em português, envio esperando e saindo uma vez, retomada depois de recarregar, abrir com o servidor dormindo, primeira vez sem cópia, Recuperador, Ajuda, tour dos 3 papéis, avisos traduzidos, chat vazio.
+98. `scripts/roteiro-casca.cjs` (13): server.js real atrás de um "Render" que responde 503 — página abre da casca, Supabase do cache, preconnect, faixa, volta sozinha, sem erro de script.
+99. Roteiro antigo atualizado (a configuração pública e os nomes podem ficar no aparelho depois de "sair + limpar") — 220/220.
+100. `.gitignore`: capturas dos roteiros e saídas da avaliação da IA fora do repositório (que é público).
+101. Achado e corrigido no caminho: o `</script>` da reserva da CDN fechava o script embutido antes da hora (erro "Invalid or unexpected token" em todas as telas) — pego pelo roteiro antigo, agora com teste.
+102. Achado e corrigido: o servidor de mentira "acordava" o Render ao recarregar a página (o teste de abrir dormindo passava por engano).
+103. LEIA-ME: seção "Rodada 4" com o que muda para quem usa e para quem mantém (servidor acordando, entregas, casca, tour, ajuda, avaliação da IA, scripts).
+104. Leitor de tela: a faixa anuncia só a mudança de estado ("acordando", "voltou"); a contagem que muda a cada segundo fica fora do anúncio (antes de virar costume, falaria sem parar).
+105. Destaque do tour sem animação para quem pede menos movimento.
+106. Anotações de entrega com teto de 50 no aparelho (não enche o armazenamento).
+107. Memória de mensagens já vistas do Recuperador com teto (3.000 ids) — aba aberta o dia inteiro não cresce sem fim.
+108. Cache em memória dos arquivos comprimidos com teto (80 arquivos) no servidor.
+109. "Sair e limpar o aparelho" também apaga as entregas anotadas e a cópia dos nomes (tudo que começa com `indycar_`, menos o tema) — conferido no roteiro antigo.
+110. Ajuda é um diálogo com título ligado (aria-labelledby) e "×" com nome ("Fechar a ajuda"); lista de atalhos diz que "?" abre a Ajuda.
+111. Envio pendente não se repete em outra aba ao mesmo tempo: a retomada espera 20 s depois da anotação (a aba que enviou ainda pode estar esperando a resposta) e o servidor trava pelo id.
