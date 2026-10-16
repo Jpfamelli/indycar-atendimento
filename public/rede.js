@@ -123,7 +123,7 @@
     sondaTimer = null;
     if (estado === 'ok') return true;
     try {
-      const r = await fetchOriginal('/api/status', { cache: 'no-store' });
+      const r = await fetchOriginal(BASE() + 'api/status', { cache: 'no-store' });
       if (r.headers.get('x-indycar-app') || (r.ok && /json/.test(r.headers.get('content-type') || ''))) { marcarVolta(); return true; }
     } catch { /* ainda fora */ }
     if (estado !== 'ok' && esperando === 0) sondarDepois(estado === 'parado' ? 30_000 : 10_000);
@@ -145,10 +145,20 @@
   const sintetica = (corpo) => new Response(JSON.stringify(corpo), {
     status: corpo.status || 503, headers: { 'Content-Type': 'application/json; charset=utf-8', 'X-IndyCar-Sintetica': '1' } });
 
+  /* Rodada 5 (Central): o app pode estar montado num prefixo (/atendimento/). O prefixo vem do
+     <base href> (apps.js). Um pedido escrito como '/api/eu' vira '<prefixo>api/eu' aqui, num lugar
+     só — toda a tela continua escrevendo '/api/…' e funciona em qualquer montagem. */
+  const BASE = () => (raiz.IndyCarApps && raiz.IndyCarApps.base) || '/';
+  function noPrefixo(input) {
+    if (typeof input !== 'string') return input;
+    if (BASE() === '/' || !input.startsWith('/api/')) return input;
+    return BASE() + input.slice(1);
+  }
   function ehDoNossoServidor(input) {
     try {
       const u = new URL(typeof input === 'string' ? input : (input && input.url) || String(input), location.href);
-      return u.origin === location.origin && u.pathname.startsWith('/api/') && u.pathname !== '/api/_mock';
+      const api = BASE() + 'api/';
+      return u.origin === location.origin && u.pathname.startsWith(api) && u.pathname !== api + '_mock';
     } catch { return false; }
   }
 
@@ -158,6 +168,7 @@
    *  idempotente — repetir é seguro mesmo para POST (também pelo cabeçalho X-Idempotente: 1).
    */
   async function fetchComRetentativa(input, init = {}) {
+    input = noPrefixo(input);
     if (!ehDoNossoServidor(input)) return fetchOriginal(input, init);
     const metodo = String(init.method || (input && input.method) || 'GET').toUpperCase();
     let idempotente = !!init.idempotente;
@@ -273,6 +284,7 @@
     ...PURO,
     fetch: fetchComRetentativa,
     fetchOriginal,
+    noPrefixo,
     get estado() { return estado; },
     get esperando() { return esperando; },
     aoMudar(cb) { ouvintes.add(cb); return () => ouvintes.delete(cb); },

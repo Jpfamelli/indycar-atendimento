@@ -751,3 +751,129 @@ tamanho médio 351 → 297 caracteres; preço 0/10 e vocabulário proibido 0/10 
 13. Nomes dos tipos novos da fila do Comunicar (`patio_entrada`, `patio_extra`, `patio_pronto`, `area_cliente`) na ficha e no contexto.
 14. `lib/patio.js` (regras puras + leitura) e `test/patio.test.js` (11 testes: links, escolha da ordem, texto da IA sem R$/link, contexto, rpc da Área, rota com login).
 15. Mock: a Camila está com o carro em "Aguardando aprovação" com extra; rota de mentira da Área do Cliente; roteiro de navegador 1440/375 sem rolagem lateral.
+
+
+# Rodada 5 (16/10/2026) — a IA conduz o funil, IA em ação, preparo para a Central
+
+Verificado com `npm test` (**234 testes**, 0 falhas; 45 novos em `test/ia-funil.test.js`, `test/rotas.test.js`, `test/servidor.test.js`,
+`test/automacoes.test.js`, `test/contexto.test.js`), `node scripts/roteiro-rodada5.cjs` (**74/74** em 1440 e 375 px, inclusive o app
+montado em `/atendimento/` num segundo servidor de mentira), regressão `roteiro-rodada4.cjs` **145/145**, `roteiro-tela.cjs` **220/220**,
+`roteiro-casca.cjs` **13/13**, `npm run segredos` (0 segredos), `npm audit` (0), migração `at_ia_funil_v1` aplicada e o gatilho testado em
+DO-block revertido (mensagem de teste → 1 linha em `at_ia_fila` agendada para +8 s, 1 chamada HTTP na fila do pg_net, nada gravado), leitura
+só-leitura do banco real pelo `server.js` (fila vazia, `ia_config` com os campos novos, `hoje()` responde, `agenda_horarios_livres` devolve
+os horários no formato esperado) e `get_advisors` (nenhum aviso para os objetos `at_*`).
+
+## A IA conduz (`lib/ia-funil.js`, novo; `lib/ia-copiloto.js`; migração `at_ia_funil_v1`)
+1. Caminho que NÃO depende do servidor acordado: gatilho `at_ia_enfileirar` (AFTER INSERT em `whatsapp_mensagens`) grava cada mensagem do cliente em `at_ia_fila` e chama `at_ia_acordar()` — um `net.http_post` para `POST /api/ia/funil/acordar`, que acorda o Render gratuito quando ele dorme.
+2. Fila `at_ia_fila` (prefixo `at_`): conversa, mensagem, telefone normalizado, status pendente/processando/feita/pulada/erro, tentativas, `agendado_para` (+8 s para o cliente terminar de digitar), resultado em JSON. RLS ligado: equipe só lê (a tela mostra "a IA está respondendo"), o servidor grava com a chave de serviço. Entrou no `supabase_realtime`.
+3. Despertador `pg_cron` `at-ia-funil-despertar` (a cada minuto): só chama o servidor se há linha pendente há mais de 20 s (o "acorda" anterior se perdeu num 503). Sem fila não gasta hora do Render. Solta trava de "processando" com mais de 5 min, dá erro depois de 5 tentativas e aposenta fila com mais de 2 dias.
+4. `at_ia_acordar` no máximo 1× a cada 20 s (um pedido já acorda o Render e o servidor drena a fila inteira); as 3 funções novas são `security definer`, `search_path = ''` e sem EXECUTE para anon/authenticated.
+5. A rota do despertador é pública mas autenticada pelo MESMO token do webhook do CodeWords (`x-codewords-token`, comparação em tempo constante): nenhuma variável de ambiente nova.
+6. `ia_config` ganhou `funil_ativo`, `funil_autonomia` (por etapa), `funil_url` (a Central troca este endereço) e `funil_acordado_em`.
+7. O servidor drena a fila ao subir (acordou do 503? o que ficou para trás sai em 3 s), a cada 15 s enquanto houver fila, e na hora quando o banco avisa (`acordar()` com 1,5 s de espera e sem empilhar pedidos).
+8. Agrupa a fila por conversa: duas mensagens seguidas do cliente viram UMA leitura da IA; se ainda há linha agendada para o futuro (cliente digitando), espera a próxima rodada.
+9. `conduzir(conversaId)`: identifica o cliente pelo telefone com a rpc `cliente_360` quando a conversa está sem `cliente_id` e religa `conversas.cliente_id` (ação `vincular_cliente` em `ia_acoes`).
+10. Conversa de quem JÁ tem horário marcado nascida em "Primeiro contato" vai para "Agendado" no servidor (achado do simulador), registrada em `ia_acoes` como `mover_etapa` sem pessoa, com antes/depois para desfazer — sem tocar no gatilho `tocar_conversa`.
+11. Última mensagem já é da loja → "pulada: já respondida", sem gastar IA.
+12. Regras do sistema para passar para gente antes mesmo do julgamento da IA: PREÇO ("quanto custa/fica", "valor", "desconto", "parcela"…), URGÊNCIA ("parou", "não liga", "socorro", "na estrada", "AGORA"…), PEDIDO DE PESSOA ("falar com alguém", "é robô?"…) e RECLAMAÇÃO ("absurdo", "procon", "voltou o barulho"…).
+13. "Quero um orçamento" NÃO vai para humano de propósito: numa oficina isso é diagnóstico gratuito + horário, que a IA conduz; só a pergunta de valor passa ao consultor. "Tem garantia?" é dúvida comum (12 meses), não reclamação.
+14. Papel novo da IA (`PAPEL_FUNIL`): ela CONDUZ — pergunta carro e serviço (uma coisa por vez), completa a ficha, registra o interesse, oferece DUAS opções reais de horário respeitando o período pedido, chama `agendar` quando o cliente aceita e confirma com dia, hora e endereço; preço/urgência/pessoa/reclamação viram `marcar_aguardando_consultor` + resposta curta; nunca promete peça, estoque, desconto, prazo nem guincho.
+15. O prompt do funil recebe a autonomia por etapa, o motivo de humano detectado pelo sistema ("PASSE PARA HUMANO AGORA") e se há atendente na conversa (aí a mensagem vira sugestão).
+16. Autonomia POR ETAPA (meio-termo: 4 etapas × 3 níveis + "herdar o padrão"): responder, agendar (marcar/remarcar), crm (ficha, interesse, etapa), humano (aguardando consultor, tarefa). `niveisDoFunil()` e `decisaoDoFunil()` são regras puras testadas.
+17. `automatico` executa: a IA RESPONDE o cliente (mensagem na fila de saída `whatsapp_mensagens` com `gerada_por_ia`, entregue pelo mesmo entregador idempotente da tela), CRIA o agendamento (lead + horário amarrados), completa a ficha, registra interesse, move etapa, marca aguardando consultor e cria tarefa — tudo com `perfil_id` nulo em `ia_acoes` (foi a IA sozinha).
+18. `confirmar` deixa a proposta e AVISA quem está com a conversa pela rpc `notificar` (tipo `ia`, chave `ia-proposta:<conversa>:<run>`, link `/?conversa=`); sem dono, avisa gestores/admin e quem recebe leads com o app Atendimento. Um aviso por rodada da IA, com todas as propostas no corpo.
+19. `sugerir` só propõe: nada sai, nada muda, ninguém é avisado.
+20. Mesmo em `automatico`, SEMPRE pedem clique: cancelar horário, mensagem programada (retorno), religar mensagens de quem pediu PARAR, etapa de ganho/perda, valor no lead e tarefa para outra pessoa.
+21. Ordem de execução pensada: agenda → CRM → mensagem → humano. A mensagem vem depois da agenda para refletir o que aconteceu, e ANTES de "aguardando consultor" porque a mensagem de saída limpa a espera no banco (gatilho `marcar_espera_do_consultor`) — testado pela ordem no log do banco de mentira.
+22. Cliente aceitou um horário que acabou de ser ocupado (ou a IA tentou um horário inválido): a IA NÃO agenda e a mensagem que sai troca "Fechado!" por outras duas opções livres (`textoHorarioOcupado`, sem preço, uma pergunta); o texto original fica guardado em `entrada.texto_original`.
+23. Marcou de verdade e a mensagem da IA não cita o horário: sai a confirmação do sistema (dia, hora, endereço).
+24. Mensagem com aviso (mais de uma pergunta) NUNCA sai sozinha: vira proposta para a equipe.
+25. Atendente humano escreveu nos últimos 30 min: a IA não manda nada sozinha — a resposta vira "Aprovar e enviar" para ele (vale mesmo em `automatico`).
+26. Agendamento criado pela IA ganha CONSULTOR livre no horário (mesma regra da Agenda: um carro por consultor por meia hora, índice `agendamentos_slot_uk`), entre os livres o de menor carga no dia (`escolherConsultor`, pura, testada); lead nasce com `responsavel_id` = dono da conversa e observação "Agendado pela IA do atendimento (WhatsApp)".
+27. Cada rodada do funil grava em `ia_acoes` (tipo `copiloto`, `perfil_id` nulo): autonomia usada, motivo de humano, mensagens enviadas, propostas para confirmar e a próxima ação sugerida — o simulador (`--exigir-ia-automatica`) conta isso como "IA agiu sozinha".
+28. `executarAcao` em modo funil respeita `decisaoDoFunil` (403 "pede o clique de alguém da equipe" para o que não pode sozinho); no copiloto do atendente nada mudou.
+29. Executar uma proposta de `responder` com `enviar` (clique do atendente em "Aprovar e enviar") manda a mensagem ao cliente; sem `enviar` continua só pondo o texto no campo.
+30. Falha na IA (rede, 429, 503) vira linha `erro`/`pulada` na fila com o motivo — nunca derruba o servidor; o despertador tenta de novo até 5 vezes.
+31. `PUT /api/ia/config` aceita `funil_ativo`, `funil_autonomia` (valida cada etapa: herdar/sugerir/confirmar/automatico; "herdar" limpa) e `funil_url` (só endereços terminados em `/api/ia/funil/acordar`); a auditoria registra os campos e os níveis.
+32. `GET /api/ia/config` devolve `funil_niveis` (efetivos), `etapasFunil`, `niveis` e `funilDisponivel`; `GET /api/ia/uso` devolve `funil_ativo` e os níveis.
+33. Rotas novas: `POST /api/ia/funil/acordar` (token do webhook, 60/min por IP), `GET /api/ia/funil/estado` (equipe), `POST /api/ia/funil/processar` (gestor/admin, 6/min, auditado), `GET /api/ia/hoje` (equipe).
+34. `IA_FUNIL=0` desliga a IA do funil num servidor (testes locais); sem `ANTHROPIC_API_KEY` ela não liga.
+35. Teste do gatilho em produção sem sujar nada (DO-block revertido): mensagem de entrada → linha na fila com `telefone_e164`, agendada para +8 s, apontando para a mensagem; o HTTP de acordar entrou na fila do pg_net dentro da transação e foi desfeito junto.
+36. Contrato do Site (coordenador): mensagem do botão do site ("Olá! Vim pelo site… quero orçar: <serviço>. (site/<código>--<campanha>)") é lida pelo funil (`origemDoSite`): a IA recebe serviço e campanha, não pergunta o serviço de novo e registra o interesse; "quero orçar" do site não vira pedido de valor.
+37. Contrato da Agenda (coordenador): antes de marcar, o servidor consulta a função SQL `agenda_horarios_livres(p_dia, p_servico, p_consultor)` — não depende do Render acordado — e, se o dia está fechado ou o horário lotado lá, não marca e a mensagem oferece outras opções; sem a função ou com erro, vale só a nossa regra (`horarioLivreNaAgenda`). Conferido no banco real: a função devolve `horarios[{hora, fim, livres, consultores_livres}]` como o contrato diz.
+
+## Cliente da casa e telefone normalizado (`lib/contexto.js`)
+38. Conversa sem `cliente_id` → `cliente_360(p_telefone)` acha o cadastro pelo telefone (com/sem 55, com/sem o 9) antes de montar a ficha; a ficha devolve `ligadoPeloTelefone` para o funil religar a conversa.
+39. `clienteDaCasa` calculado (serviço feito, lead ganho ou agendamento concluído) e marcado no prompt: "CLIENTE DA CASA: cumprimente pelo nome, cite o carro, NÃO se apresente como a um desconhecido" — o achado do simulador (IA tratando cliente antigo como estranho).
+40. A linha "pode se apresentar" da situação só aparece para quem é novo de verdade; para cliente da casa vira "sem apresentação formal — vá direto ao assunto".
+41. A validação do `responder` tira a apresentação de desconhecido do texto quando o cliente é da casa, mesmo na primeira resposta da conversa.
+42. Buscas por telefone em `leads` e `posvenda_envios` passaram de `in(telefone, variantes)` para `eq(telefone_e164, dígitos)` (coluna gerada e indexada da rodada 5 do banco).
+43. Histórico na ficha: cliente com serviço concluído na agenda mas sem contagem na view aparece como "já fez serviço aqui", não "nunca fez".
+
+## Copiloto humano (`lib/ia-copiloto.js`, `public/copiloto.js`)
+44. "Próximo passo" calculado pelo sistema (`proximaAcao`, pura): aprovar o agendamento proposto, confirmar endereço, ligar para reclamação, montar orçamento, oferecer dois horários, lembrete na véspera, retomar conversa fria, responder quem espera, acompanhar.
+45. O painel mostra o "Próximo passo" acima do resumo; `/api/ia/copiloto` devolve `proxima_acao`, `niveis`, `enviadas` e `para_confirmar`.
+46. Respostas rápidas por intenção (sem IA, sem preço): agendar, orçamento, dúvida, reclamação, remarcar, cancelar, retorno, pós-venda, saudação, outro — com `{nome}` e os dois horários livres já trocados; um clique põe no campo.
+47. Cartão de `responder` com `enviar` vira "✉️ Aprovar e enviar" e mostra o texto que vai sair; executa mesmo em "só sugerir" (é o clique humano).
+48. Cabeçalho do copiloto mostra "a IA está respondendo…" quando a conversa está na fila (ouve `indycar:ia-fila` do app.js) e recarrega o histórico quando ela termina; ao trocar de conversa recalcula.
+49. Executar/recusar/desfazer no painel dispara `indycar:ia-acao` para a faixa de propostas da conversa acompanhar.
+50. Resumo da conversa em 3 linhas e pendências continuam; o funil usa o mesmo `resumir`.
+
+## Painel: IA em ação, autonomia, propostas na conversa (`public/index.html`, `public/app.js`, `public/styles.css`)
+51. Aba IA ganhou o cartão "Até onde a IA vai sozinha": chave "IA responde os clientes pelo WhatsApp", padrão em 3 pílulas (Só sugerir / Pedir um clique / Fazer sozinha) e tabela de 4 etapas com "Padrão · <nível efetivo>" + 3 níveis. Salva no clique, confirma "Salvo. Vale para a próxima mensagem".
+52. Só o administrador muda; atendente e gestor veem tudo desabilitado com o aviso "peça ao administrador". Texto fixo lembra o que SEMPRE pede clique.
+53. Selo do funil: "ligada" / "só copiloto" / "IA desligada".
+54. Cartão "IA em ação": totais do dia (conversas tocadas, mensagens enviadas, horários marcados, esperando clique, passados para gente, erros, na fila agora) e a lista por conversa com hora, ícone, resumo, texto enviado, situação (feito sozinha / esperando clique / recusado / deu erro / desfeito).
+55. Em cada ação: Aprovar (ou "✉️ Aprovar e enviar"), Recusar e ↶ Desfazer (só nas reversíveis executadas); "abrir conversa ›" leva à conversa certa.
+56. Botão "▶ Rodar a fila agora" para gestor/admin quando há fila (processa na hora e mostra quantas respondeu/pulou/erros); atendente não vê.
+57. Estado vazio que ensina: "A IA ainda não agiu hoje. Quando um cliente escrever, o que ela fizer aparece aqui — com desfazer."
+58. Faixa de propostas DENTRO da conversa (`#chatPropostas`): o que a IA deixou sozinha esperando clique, com Aprovar / Aprovar e enviar / Recusar; mostra o texto da mensagem proposta; até 4, o resto no copiloto.
+59. Aprovar na faixa recarrega mensagens, ficha e etapa; botões desabilitados enquanto a ação roda (sem clique duplo — pego pelo roteiro); erro em português.
+60. "a IA está respondendo…" no cabeçalho do chat e na lista de conversas (tag com giro) via tempo real da `at_ia_fila`; some quando a fila fecha e, se a conversa está aberta, mensagens e propostas chegam na hora.
+61. Estado inicial da fila lido em `GET /api/ia/funil/estado` ao entrar (quem já estava sendo respondido aparece marcado).
+62. Texto da aba IA e do "Como funciona" atualizados (conduz até onde você deixar; gente cuida de gente).
+63. Tudo em 375 px sem rolagem lateral (tabela de autonomia empilha, faixa compacta).
+
+## Follow-up automático (`lib/automacoes.js`)
+64. Automação nova "followup" no ciclo de 5 min: a loja respondeu e o cliente não voltou em 24 h (até 3 dias) → tarefa "Dar um retorno para <nome>" para o dono da conversa (origem `automacao`, prioridade normal, vence no fim do expediente), com a última mensagem nossa na descrição.
+65. Não cria para: cliente que ainda espera resposta (isso é o alerta de espera), horário marcado, conversa resolvida/fechada, cedo demais (< 24 h) e quem já ganhou tarefa automática na semana; até 30 por ciclo.
+66. `POST /api/automacoes/rodar {tarefa:'followup'}` roda à mão (admin).
+
+## Pronto para a IndyCar Central (onda B2) — `server.js`, `public/*`
+67. `server.js` exporta `handler` e `iniciar()`; `listen` só com `require.main === module` (importar não abre porta). `SO_FUNCOES=1` continua valendo para os scripts antigos.
+68. `req.prefixo` (posto pela Central) ou variável `PREFIXO` define onde o app está montado; `normalizarPrefixo` aceita "atendimento", "/atendimento" e "/atendimento/".
+69. O `index.html` sai com `<base href="<prefixo>">` injetado no servidor (cache e ETag por prefixo; CSP mantém `base-uri 'self'`).
+70. `GET /api/config` devolve `prefixo` e `funilIA`.
+71. `public/apps.js` (novo, carregado antes de tudo): o ÚNICO lugar com os endereços dos apps (Agenda, CRM, Atendimento, Comunicar, Orçador, Pátio, Site, Ads) e com `base`, `caminho()`, `url()`, `link(app, rel)` e `lista()`.
+72. `rede.js` reescreve todo `fetch('/api/…')` para dentro do prefixo (um lugar só; os 40 pontos da tela continuam iguais) e reconhece o `/api/` do prefixo como "nosso servidor" (novas tentativas no 503).
+73. `acesso.js` (apps do "sem acesso"/perfil), `tarefas.js` (links do sino) e `app.js` (links da ficha, "Abrir o Comunicar", copiar link da conversa, seletor do ecossistema) passaram a ler do `apps.js`; nenhum `onrender.com` solto fora das reservas.
+74. Seletor "Ecossistema IndyCar" montado pelo `apps.js` (ganhou o Pátio); dentro da Central o próprio Atendimento passa a ser a origem atual + prefixo.
+75. `index.html`, `manifest.json` (`start_url: "./"`, `scope: "./"`, ícones e atalhos relativos) e `casca.js` (`register('sw.js')`) sem nenhuma barra inicial.
+76. `sw.js` v16: tudo relativo à pasta dele (`RAIZ`): casca, arquivos, fronteira do `/api/` e clique na notificação; ignora pedidos de outro app no mesmo domínio.
+77. Servidor de mentira com `PREFIXO=atendimento` monta o mock em `/atendimento/` (404 fora dele) — é assim que o roteiro prova a tela no prefixo.
+78. Teste automático com um proxy mínimo (tira o prefixo e põe `req.prefixo`, como a Central): `/atendimento/` com a base certa, estáticos, `/api/status`, `/api/config.prefixo`, 404 fora, e sozinho continua em "/".
+
+## Testes e ferramentas
+79. `test/ia-funil.test.js` (29): regras de humano, site, textos sem resposta, humano recente, etapa "Agendado", níveis e decisões, texto de horário ocupado, próxima ação, consultor livre; a IA conduzindo em `automatico`/`confirmar`/`sugerir`/por etapa, preço→humano com a ordem certa, atendente recente, já respondida, desligada, disparo, religar cliente, cliente do site, dupla checagem com a Agenda, fila (agrupar/digitando/pulada/erro), `hoje()`, relógio da fila.
+80. `test/rotas.test.js` (+1): acordar com/sem token, estado, processar (403 para atendente, auditado), hoje, config por etapa (herdar, inválido 400, url 400), uso.
+81. `test/servidor.test.js` (+2 e ajustes): caminhos relativos no HTML/manifest/casca/SW, exportação de handler/iniciar, proxy do prefixo, rotas do funil (401 e token).
+82. `test/automacoes.test.js` (+1): follow-up com 6 casos; o ciclo roda as cinco.
+83. `test/contexto.test.js` (+1): religar pelo telefone via rpc, cliente da casa no prompt, telefone_e164.
+84. Servidor de mentira: `ia_config` com os campos novos, `GET/PUT /api/ia/config`, `/api/ia/hoje`, `/api/ia/funil/estado|processar`, fila com a Renata "processando", propostas da IA (agendar e "Aprovar e enviar"), executar que "envia" a mensagem, `/api/ia/acoes?conversaId=` filtrado como a rota real, `POST /api/_ia_reset`.
+85. `scripts/roteiro-rodada5.cjs` (74 conferências, 1440 e 375 px, mais o prefixo): lista/cabeçalho/copiloto com "IA respondendo", faixa de propostas (aprovar e enviar, recusar), tempo real da fila, aba IA (autonomia, salvar, IA em ação, desfazer, abrir conversa, Rodar a fila), atendente só leitura, e o app inteiro em `/atendimento/`.
+86. Link do Comunicar "Colar a chave no Atendimento" (`?aba=integracoes`): abre Configurações › Integrações direto, rola até a caixa da chave, destaca e põe o campo da chave em foco; quem não é admin vê "peça ao gestor"; o parâmetro sai do endereço. Vale para qualquer `?aba=<nome>` (aba que o papel não tem → aviso). Conferido no Chrome com admin e atendente.
+87. Cópia da migração em `scripts/sql/2026-10-16_at_ia_funil_v1.sql` com a explicação do caminho; LEIA-ME com a seção da rodada.
+
+## Como verifiquei
+- `npm test` 234/234; `npm run segredos` limpo; `npm audit` 0.
+- Dois mocks (`PORT=3225` e `PORT=3226 PREFIXO=atendimento`) + `node scripts/roteiro-rodada5.cjs` → 74/74; regressões `roteiro-rodada4.cjs` 145/145, `roteiro-tela.cjs` 220/220, `roteiro-casca.cjs` 13/13.
+- Banco real: migração aplicada; gatilho testado em DO-block revertido; `server.js` com `SO_FUNCOES=1` lendo `at_ia_fila`, `ia_config` e `hoje()` (só leitura); `agenda_horarios_livres` conferida; `get_advisors` sem avisos para `at_*`.
+- Em produção, depois de publicar: `/api/status`, `<base href="/">` no HTML, `POST /api/ia/funil/acordar` sem token → 401, e `select at_ia_acordar()` no banco → o servidor respondeu (ver relatório).
+
+## Pendências
+- A IA só manda mensagem se `funil_autonomia.responder` (ou o padrão) estiver em `automatico`. Em produção o padrão está em **confirmar** (seguro): ligar "Fazer sozinha" em Atendimento › IA é decisão do João. O simulador com `--exigir-ia-automatica` precisa disso ligado.
+- Render gratuito: a primeira mensagem depois de o servidor dormir leva o tempo de acordar (~30–60 s) antes da IA responder; o despertador do pg_cron garante que não se perde. Para resposta em segundos, Starter no Atendimento (RENDER.md).
+- Chave do CodeWords recusada (401): a mensagem da IA fica `falhou` em `whatsapp_mensagens` até a chave voltar — igual às dos atendentes.
+- Simulador (`indycar-ferramentas/simulador/cliente.mjs`): quando a IA agenda sozinha, o passo "IA propôs agendar" do copiloto não acha a proposta (o horário já foi marcado) — vale ajustar o cenário para pular `executarProposta` quando o agendamento já existe.
+- Edge Function `codewords-webhook` não foi alterada (a fila nasce no gatilho do banco, que vale para qualquer caminho de entrada).
+- A lista de horários livres mostrada à IA (`lib/horarios.js`) continua a nossa; a função da Agenda entra como dupla checagem no `agendar`. Trocar a lista inteira pela função SQL fica para a onda C/Central.

@@ -13,14 +13,9 @@
    ============================================================ */
 const Acesso = (() => {
   /* Os apps do ecossistema (os links do "sem acesso" e do menu) */
-  const APPS = {
-    atendimento: { nome: 'Atendimento', ico: '💬', url: 'https://indycar-atendimento.onrender.com' },
-    crm:         { nome: 'CRM',         ico: '📈', url: 'https://indycar-crm.onrender.com' },
-    agenda:      { nome: 'Agenda',      ico: '📅', url: 'https://indycar-agendamentos.onrender.com' },
-    comunicar:   { nome: 'Comunicar',   ico: '📣', url: 'https://indycar-posvenda.onrender.com' },
-    orcador:     { nome: 'Orçador',     ico: '🧾', url: 'https://indycar-orcador.netlify.app' },
-    ads:         { nome: 'Tráfego pago', ico: '🎯', url: null },   // ainda não publicado
-  };
+  /* Rodada 5: os endereços moram num lugar só (public/apps.js); aqui só a forma que esta tela usa. */
+  const APPS = Object.fromEntries(Object.entries((window.IndyCarApps && window.IndyCarApps.apps) || {})
+    .filter(([k]) => k !== 'site' && k !== 'patio').map(([k, v]) => [k, { nome: v.nome, ico: v.ico, url: v.url }]));
   const CORES = ['#e50914', '#f97316', '#f59e0b', '#22c55e', '#14b8a6', '#0ea5e9', '#3b82f6', '#a855f7', '#ec4899', '#64748b'];
   const K = { lembrar: 'indycar_lembrar_email', manter: 'indycar_manter_conectado', espera: 'indycar_login_espera' };
   const MAX_ERROS = 5;

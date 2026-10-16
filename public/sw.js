@@ -10,14 +10,19 @@
 //    (arquivos); demorou, deu 5xx/4xx ou caiu → cópia do cache.
 // As conversas vêm direto do Supabase (que não dorme), então com a casca de pé
 // o atendente segue lendo e respondendo enquanto o servidor acorda.
-const CACHE = 'indycar-atendimento-v15';
+const CACHE = 'indycar-atendimento-v16';
+
+/* Rodada 5 (Central): o service worker pode estar servido em /atendimento/sw.js. Tudo é
+   relativo à pasta dele (RAIZ): a casca, os arquivos e a fronteira do /api/. */
+const RAIZ = self.location.pathname.replace(/sw\.js$/, '');
 
 /* Se QUALQUER item desta lista faltar, o addAll rejeita e o service worker
    NÃO instala — o app deixa de ser instalável sem dizer por quê. Mantenha
    aqui só o que existe de verdade (o copiloto.js/.css do painel da IA também). */
-const CORE = ['/', '/styles.css', '/rede.js', '/vendor/supabase.js', '/app.js', '/acesso.js', '/equipe.js', '/tarefas.js',
-              '/ajuda.js', '/casca.js', '/copiloto.js', '/copiloto.css', '/manifest.json', '/logo.png',
-              '/icon-192.png', '/icon-512.png'];
+const ARQUIVOS = ['', 'styles.css', 'apps.js', 'rede.js', 'vendor/supabase.js', 'app.js', 'acesso.js', 'equipe.js', 'tarefas.js',
+                  'ajuda.js', 'casca.js', 'copiloto.js', 'copiloto.css', 'manifest.json', 'logo.png',
+                  'icon-192.png', 'icon-512.png'];
+const CORE = ARQUIVOS.map((u) => RAIZ + u);
 const LIMITE_PAGINA_MS = 4000;
 
 self.addEventListener('install', (e) => {
@@ -54,7 +59,7 @@ const PAGINA_OFFLINE = () => new Response('<!doctype html><meta charset="utf-8">
 function redePrimeiro(req, chave, limiteMs, ehPagina) {
   return new Promise((resolve) => {
     let entregue = false;
-    const doCache = () => caches.match(chave, { ignoreSearch: ehPagina }).then((m) => m || (ehPagina ? caches.match('/') : null));
+    const doCache = () => caches.match(chave, { ignoreSearch: ehPagina }).then((m) => m || (ehPagina ? caches.match(RAIZ) : null));
     const entregar = (r) => { if (!entregue && r) { entregue = true; resolve(r); } };
     const t = setTimeout(() => doCache().then((m) => entregar(m)), limiteMs);
     fetch(req).then((r) => {
@@ -74,11 +79,12 @@ self.addEventListener('fetch', (e) => {
      mudam a cada minuto; mostrar resposta velha aqui faria o atendente
      responder com base em mensagem que já não vale. Também não mexe em
      nada de fora (Supabase, fontes, CDN): o navegador cuida sozinho. */
-  if (e.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+  if (e.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith(RAIZ + 'api/')) return;
+  if (!url.pathname.startsWith(RAIZ)) return;   // outro app montado no mesmo domínio (Central): não é nosso
 
-  // a página em si (com ?conversa=… ou não) cai sempre na mesma casca "/"
+  // a página em si (com ?conversa=… ou não) cai sempre na mesma casca (a RAIZ)
   const ehPagina = e.request.mode === 'navigate';
-  e.respondWith(redePrimeiro(e.request, ehPagina ? '/' : e.request, ehPagina ? LIMITE_PAGINA_MS : 3000, ehPagina));
+  e.respondWith(redePrimeiro(e.request, ehPagina ? RAIZ : e.request, ehPagina ? LIMITE_PAGINA_MS : 3000, ehPagina));
 });
 
 /* A tela pergunta a versão (casca.js mostra em "Ajuda"). */
@@ -90,7 +96,7 @@ self.addEventListener('message', (e) => {
    traz o painel para a frente já na conversa. */
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const alvo = e.notification.data?.url || '/';
+  const alvo = e.notification.data?.url || RAIZ;
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((lista) => {
     const aberta = lista.find((c) => new URL(c.url).origin === self.location.origin);
     if (aberta) { aberta.focus(); return aberta.navigate ? aberta.navigate(alvo) : null; }

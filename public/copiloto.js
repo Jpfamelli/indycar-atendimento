@@ -69,8 +69,30 @@
     return j;
   }
 
+  /* Rodada 5 — respostas rápidas por intenção: texto pronto da casa, sem IA e sem preço.
+     {nome} vira o primeiro nome do cliente. */
+  const RAPIDAS = {
+    agendar: ['Tenho {h1} ou {h2}. Qual fica melhor pra você? 🏎', 'Fechado! Deixo reservado no seu nome — qualquer imprevisto me avisa que a gente remarca numa boa 👍'],
+    orcamento: ['Valor certinho quem passa é o consultor depois de ver o carro. O diagnóstico digital é gratuito (uns 30 min, com foto de tudo) — quer trazer?', 'Já pedi para o consultor montar o orçamento. Assim que sair eu te mando aqui 👍'],
+    duvida: ['Boa pergunta! Deixa eu confirmar isso certinho com a equipe e já te falo.', 'A gente fica na Av. Bandeirantes, 875 — Parque Paduan. Seg a sáb, 8h às 17h30.'],
+    reclamacao: ['Poxa, {nome}, sinto muito por isso. Vou passar agora para um consultor olhar com atenção e te retornar hoje.', 'Garantia de 12 meses em peças e mão de obra: pode trazer que a gente resolve sem custo.'],
+    remarcar: ['Sem problema! Tenho {h1} ou {h2}. Qual prefere?', 'Remarcado ✅ Te espero então — qualquer coisa é só avisar.'],
+    cancelar: ['Tudo bem, {nome}. Cancelo aqui — quando quiser voltar é só chamar que eu encaixo você 🏎', 'Antes de cancelar: ajuda se eu mudar o dia ou o horário?'],
+    retorno: ['Oi, {nome}! Está chegando a época da revisão. Tenho {h1} ou {h2}, qual fica melhor?'],
+    pos_venda: ['Oi, {nome}! Como ficou o carro depois do serviço? Qualquer coisa estranha me conta que a gente vê na garantia.'],
+    saudacao: ['Oi, {nome}! Aqui é o atendimento da IndyCar 🏎 Me conta: qual é o carro e o que ele está precisando?'],
+    outro: ['Entendi! Me conta um pouco mais do que o carro está fazendo que eu já te encaminho certinho.'],
+  };
+  function rapidasPara(r) {
+    const nome = (S.conversa?.nome || '').split(' ')[0] || 'tudo bem';
+    const hs = r?.horarios_sugeridos || [];
+    return (RAPIDAS[r?.intencao] || RAPIDAS.outro).map(t => t.replace(/{nome}/g, nome).replace(/{h1}/g, hs[0]?.rotulo || 'amanhã de manhã').replace(/{h2}/g, hs[1]?.rotulo || 'amanhã à tarde'));
+  }
+
   /* ---------------- estado ---------------- */
   const S = {
+    respondendo: false,       // a IA do funil está lendo esta conversa agora (at_ia_fila)
+    filaIA: [],               // conversas que a IA do funil está lendo agora (app.js avisa)
     conversa: null,           // {conversaId, nome, …}
     resultado: new Map(),     // conversaId -> último resultado do copiloto
     historico: [],
@@ -144,8 +166,10 @@
     const autonomia = S.uso?.autonomia || S.resultado.get(S.conversa?.conversaId)?.autonomia || 'confirmar';
     const ocupado = S.ocupado.has(a.id);
     const botoes = [];
-    if (a.status === 'proposta' && a.tipo !== 'responder') {
-      if (autonomia !== 'sugerir') botoes.push(`<button type="button" class="cop-btn cop-btn-sim" data-acao="executar" data-id="${esc(a.id)}" ${ocupado ? 'disabled' : ''} aria-label="Executar: ${esc(a.resumo)}">Executar</button>`);
+    const p = a.parametros || a.entrada || {};
+    const enviar = a.tipo === 'responder' && p.enviar;
+    if (a.status === 'proposta' && (a.tipo !== 'responder' || enviar)) {
+      if (autonomia !== 'sugerir' || enviar) botoes.push(`<button type="button" class="cop-btn cop-btn-sim" data-acao="executar" data-id="${esc(a.id)}" ${ocupado ? 'disabled' : ''} aria-label="${enviar ? 'Aprovar e enviar' : 'Executar'}: ${esc(a.resumo)}">${enviar ? '✉️ Aprovar e enviar' : 'Executar'}</button>`);
       botoes.push(`<button type="button" class="cop-btn" data-acao="recusar" data-id="${esc(a.id)}" ${ocupado ? 'disabled' : ''} aria-label="Recusar: ${esc(a.resumo)}">Recusar</button>`);
     }
     if (a.status === 'executada' && (a.reversivel || a.reversivel === undefined && ['agendar', 'remarcar', 'cancelar_agendamento', 'mover_etapa', 'atualizar_ficha', 'registrar_interesse', 'marcar_aguardando_consultor', 'agendar_retorno'].includes(a.tipo))) {
@@ -156,7 +180,7 @@
         <span class="cop-acao-tipo">${esc(nome)}</span>
         <span class="cop-st">${esc(a.automatica ? 'feito sozinho' : (STATUS[a.status] || a.status))}</span>
         ${compacto && a.created_at ? `<span class="cop-hora">${esc(hora(a.created_at))}</span>` : ''}</div>
-      <p class="cop-acao-resumo">${esc(a.resumo || '')}</p>
+      <p class="cop-acao-resumo">${esc(a.resumo || '')}${enviar && p.texto ? `<span class="cop-acao-det">“${esc(p.texto)}”</span>` : ''}</p>
       ${compacto ? '' : detalhes(a)}
       ${a.erro ? `<p class="cop-acao-erro">${esc(a.erro)}</p>` : ''}
       ${a.precisa_clique && a.status === 'proposta' && autonomia === 'automatico' ? '<p class="cop-acao-det">Esta sempre pede o seu clique.</p>' : ''}
@@ -178,6 +202,7 @@
     el.innerHTML = `
       <header class="cop-cab">
         <h2 class="cop-titulo"><span aria-hidden="true">✨</span> Copiloto</h2>
+        ${S.respondendo ? '<span class="cop-uso cop-respondendo" role="status"><span class="cop-gira" aria-hidden="true"></span> a IA está respondendo…</span>' : ''}
         ${uso ? `<span class="cop-uso${pouco ? ' pouco' : ''}" title="Chamadas à IA hoje (todas as pessoas)">${esc(uso.chamadas)}/${esc(uso.limite)} hoje</span>` : ''}
         ${uso && !uso.ativo ? '<span class="cop-uso pouco">IA desligada</span>' : ''}
       </header>
@@ -206,6 +231,7 @@
             ${r.intencao ? `<span class="cop-chip">${esc(INTENCAO[r.intencao] || r.intencao)}</span>` : ''}
             ${r.atualizadoEm ? `<span class="cop-hora">às ${esc(hora(r.atualizadoEm))}${r.auto ? ' · sozinho' : ''}</span>` : ''}
           </div>
+          ${r.proxima_acao?.texto ? `<p class="cop-proxima"><b>Próximo passo:</b> ${esc(r.proxima_acao.texto)}</p>` : ''}
           ${r.resumo ? `<p class="cop-resumo">${esc(r.resumo).replace(/\n/g, '<br>')}</p>` : ''}
           ${r.pendencias?.length ? `<ul class="cop-pend" aria-label="Pendências">${r.pendencias.map(p => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
           ${r.resposta_sugerida ? `
@@ -224,6 +250,10 @@
               <p class="cop-resposta-txt">${esc(S.confirmacao).replace(/\n/g, '<br>')}</p>
               <div class="cop-acao-botoes"><button type="button" class="cop-btn cop-btn-sim" data-acao="usar-conf">Usar no campo</button></div>
             </div>` : ''}
+          <div class="cop-rapidas">
+            <p class="cop-rot">Respostas rápidas (${esc(INTENCAO[r.intencao] || 'geral')})</p>
+            <div class="cop-chips">${rapidasPara(r).map((t, i) => `<button type="button" class="cop-chip cop-rapida" data-acao="rapida" data-i="${i}" title="${esc(t)}">${esc(t.length > 48 ? t.slice(0, 46) + '…' : t)}</button>`).join('')}</div>
+          </div>
           ${r.horarios_sugeridos?.length ? `
             <div class="cop-horarios">
               <p class="cop-rot">Horários livres</p>
@@ -289,6 +319,7 @@
       if (a) { a.status = tipo === 'executar' ? 'executada' : tipo === 'recusar' ? 'recusada' : 'desfeita'; a.erro = null; }
       if (tipo === 'executar' && j.texto_confirmacao) S.confirmacao = j.texto_confirmacao;
       avisar(j.mensagem || (tipo === 'recusar' ? 'Recusado.' : 'Feito.'), 'ok');
+      try { window.dispatchEvent(new CustomEvent('indycar:ia-acao', { detail: { id: idAcao, tipo } })); } catch { /* ignora */ }
       if (tipo !== 'recusar') await recarregar();
       await Promise.all([carregarHistorico(), carregarUso()]);
     } catch (e) {
@@ -322,6 +353,7 @@
       return;
     }
     if (acao === 'usar-conf' && S.confirmacao) return noCampo(S.confirmacao);
+    if (acao === 'rapida' && r) { const t = rapidasPara(r)[Number(b.dataset.i)]; if (t) noCampo(t); return; }
     if (acao === 'horario' && r?.horarios_sugeridos) {
       const h = r.horarios_sugeridos[Number(b.dataset.i)];
       if (h) noCampo(`Consigo ${h.rotulo}. Fica bom pra você? 😊`);
@@ -368,11 +400,18 @@
     clearTimeout(S.timer);
     S.carregando = false; S.erro = ''; S.confirmacao = null; S.historico = []; S.pedido = '';
     S.conversa = id ? { ...det } : null;
+    S.respondendo = !!(id && S.filaIA.includes(id));
     desenhar();
     if (id) { carregarUso().then(desenhar); carregarHistorico().then(desenhar); }
   }
 
   window.addEventListener('indycar:conversa', e => abrirConversa(e.detail || {}));
+  window.addEventListener('indycar:ia-fila', e => {
+    const lista = e.detail?.respondendo || [];
+    S.filaIA = lista;
+    const agora = !!(S.conversa && lista.includes(S.conversa.conversaId));
+    if (agora !== S.respondendo) { S.respondendo = agora; desenhar(); if (!agora) carregarHistorico().then(desenhar); }
+  });
 
   window.addEventListener('indycar:mensagem', e => {
     const d = e.detail || {};

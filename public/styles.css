@@ -2115,3 +2115,80 @@ button.app-chip:not(:disabled):hover{border-color:var(--vermelho);color:var(--te
 .btn-patio:focus-visible{outline:2px solid var(--vermelho);outline-offset:2px}
 .btn-patio:disabled{opacity:.6;cursor:wait}
 .area-bloco .ficha-sub{display:block}
+
+/* ============================================================
+   RODADA 5 (16/10/2026) — IA do funil: autonomia, IA em ação,
+   propostas na conversa e "a IA está respondendo"
+   ============================================================ */
+.cartao-largo{grid-column:1 / -1}
+.cartao-topo-linha{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.cartao-topo-linha h3{margin:0}
+.cartao-topo-linha h3 small{font-family:var(--fonte);font-weight:400;font-size:.78rem;color:var(--cinza);margin-left:6px}
+.autonomia-geral{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 6px}
+.autonomia-rotulo{font-family:var(--fonte-cond);font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:.78rem;color:var(--cinza)}
+.autonomia-tabela{width:100%;border-collapse:collapse;margin-top:10px;font-size:.9rem}
+.autonomia-tabela th{text-align:left;font-family:var(--fonte-cond);font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:.74rem;color:var(--cinza);padding:6px 8px;border-bottom:1px solid var(--linha)}
+.autonomia-tabela td{padding:9px 8px;border-bottom:1px solid var(--linha);vertical-align:middle}
+.autonomia-tabela td:first-child{min-width:150px}
+.autonomia-tabela .etapa-desc{display:block;color:var(--cinza);font-size:.78rem;margin-top:2px}
+.autonomia-tabela .segmento{flex-wrap:wrap}
+.seg.herdar{color:var(--cinza)}
+.seg.ativo.herdar{background:var(--superficie-2);color:var(--texto)}
+.seg[disabled]{opacity:.55;cursor:not-allowed}
+.autonomia-tabela .seg.nivel-sugerir.ativo{background:rgba(56,189,248,.18);color:var(--azul-txt,#7dd3fc)}
+.autonomia-tabela .seg.nivel-confirmar.ativo{background:rgba(245,158,11,.18);color:var(--amarelo-txt)}
+.autonomia-tabela .seg.nivel-automatico.ativo{background:rgba(37,211,102,.18);color:var(--verde-txt)}
+#autonomiaGeral .seg.ativo{background:linear-gradient(135deg,var(--vermelho),var(--vermelho-esc));color:#fff}
+
+.ia-totais{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:12px 0}
+.ia-total{padding:10px 12px;border-radius:12px;background:var(--superficie);border:1px solid var(--linha)}
+.ia-total b{display:block;font-family:var(--fonte-cond);font-size:1.5rem;font-weight:700;line-height:1.1;color:var(--texto-forte)}
+.ia-total span{font-size:.76rem;color:var(--cinza)}
+.ia-total.quente b{color:var(--vermelho-txt)}
+.ia-total.ok b{color:var(--verde-txt)}
+.ia-hoje-lista{display:flex;flex-direction:column;gap:10px}
+.ia-conv{border:1px solid var(--linha);border-radius:12px;padding:10px 12px;background:var(--superficie)}
+.ia-conv-topo{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.ia-conv-topo strong{font-size:.95rem}
+.ia-conv-topo .link{font-size:.8rem}
+.ia-conv ul{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.ia-acao{display:flex;align-items:flex-start;gap:8px;font-size:.86rem;flex-wrap:wrap}
+.ia-acao .quando{color:var(--cinza-2);font-size:.75rem;min-width:40px}
+.ia-acao .resumo{flex:1 1 220px;min-width:0}
+.ia-acao .texto-ia{display:block;color:var(--cinza);font-size:.8rem;margin-top:2px;white-space:pre-wrap}
+.ia-acao .tag{flex:none}
+.tag.ia-feita{background:rgba(37,211,102,.16);color:var(--verde-txt)}
+.tag.ia-proposta{background:rgba(245,158,11,.16);color:var(--amarelo-txt)}
+.tag.ia-erro{background:rgba(229,9,20,.16);color:var(--vermelho-txt)}
+.tag.ia-recusada,.tag.ia-desfeita{background:var(--superficie-2);color:var(--cinza)}
+.ia-acao .btn{padding:3px 9px;font-size:.76rem}
+
+/* propostas da IA esperando clique, dentro da conversa */
+.chat-propostas{display:flex;flex-direction:column;gap:6px;padding:8px 14px;border-bottom:1px solid var(--linha);
+  background:linear-gradient(90deg,rgba(229,9,20,.08),transparent)}
+.chat-propostas[hidden]{display:none}
+.proposta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.86rem}
+.proposta .proposta-ico{flex:none}
+.proposta .proposta-txt{flex:1 1 220px;min-width:0}
+.proposta .proposta-txt small{display:block;color:var(--cinza);font-size:.78rem;white-space:pre-wrap;max-height:4.2em;overflow:hidden}
+.proposta .btn{padding:4px 10px;font-size:.78rem}
+.proposta .btn-aprovar{background:linear-gradient(135deg,var(--verde),#1fb355);color:#06220f;border:0}
+.proposta .btn-aprovar:hover{filter:brightness(1.08)}
+.proposta[aria-busy="true"]{opacity:.6;pointer-events:none}
+
+/* "a IA está respondendo…" */
+.chat-ia{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;padding:2px 9px;border-radius:20px;
+  background:rgba(229,9,20,.14);color:var(--vermelho-txt);font-weight:600}
+.chat-ia .girando{width:10px;height:10px;border-width:2px}
+.tag.ia-respondendo{background:rgba(229,9,20,.14);color:var(--vermelho-txt);display:inline-flex;align-items:center;gap:4px}
+.tag.ia-respondendo .girando{width:9px;height:9px;border-width:2px}
+
+@media (max-width:600px){
+  .autonomia-tabela td{display:block;padding:8px 4px}
+  .autonomia-tabela td:first-child{border-bottom:0;padding-bottom:0}
+  .autonomia-tabela thead{display:none}
+  .chat-propostas{padding:8px 10px}
+}
+.chave-box.destaque-chave{animation:destaque-chave 1.6s ease-out 1}
+@keyframes destaque-chave{0%{box-shadow:0 0 0 3px var(--vermelho-luz)}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion:reduce){.chave-box.destaque-chave{animation:none}}

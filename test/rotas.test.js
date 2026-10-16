@@ -255,3 +255,52 @@ test('auditoria: executar e desfazer ação da IA e mudar a configuração da IA
     assert.deepEqual(c.detalhes.campos, ['autonomia'], 'só os campos conhecidos, nunca valores livres');
   } finally { await s.fechar(); }
 });
+
+/* ---------------- rodada 5: rotas da IA do funil ---------------- */
+test('funil: acordar com o token do webhook (sem login) dispara a fila; estado/hoje/processar com login; processar só gestor/admin; config aceita autonomia por etapa', async () => {
+  const t = tabelas();
+  const sb = criarSbFalso(t, { relogio: () => AGORA });
+  const ia = criarIAFalsa([fim]);
+  const contexto = CTX.criarContexto({ sb, agora: () => AGORA });
+  const copiloto = IA.criarCopiloto({ sb, contexto, criarIA: async () => ia, agora: () => AGORA });
+  const chamadas = [];
+  const funilFalso = { acordar: () => { chamadas.push('acordar'); return true; }, estado: async () => ({ ok: true, hoje: { pendente: 1 }, processando: [ID.conversa] }),
+    processarFila: async () => ({ conversas: 1, feitas: 1, puladas: 0, erros: 0 }), hoje: async () => ({ ok: true, totais: { conversas: 1 }, conversas: [] }) };
+  const auditados = [];
+  const tratar = criarRotasIA({ getSb: () => sb,
+    usuarioLogado: async req => { const m = /^Bearer (\w+)$/.exec(req.headers.authorization || ''); return m ? { id: ID.perfil, papel: m[1] } : null; },
+    dentroDoLimite: () => true, readBody: req => new Promise(r => { let d = ''; req.on('data', c => (d += c)); req.on('end', () => { try { r(d ? JSON.parse(d) : {}); } catch { r({}); } }); }),
+    copiloto, resumoDoDia: async () => ({ ok: true }), contexto, auditar: async a => { auditados.push(a); return { ok: true }; },
+    funil: () => funilFalso, tokenWebhook: async () => 'tok-secreto', ipDe: () => '1.2.3.4' });
+  const server = http.createServer(async (req, res) => { const u = new URL(req.url, 'http://x'); if (!(await tratar(req, res, u.pathname, u.searchParams))) { res.writeHead(404); res.end('{}'); } });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const pedir = async (m, c, { papel, corpo, cab = {} } = {}) => { const r = await fetch(base + c, { method: m, body: corpo ? JSON.stringify(corpo) : undefined, headers: { ...(papel ? { Authorization: `Bearer ${papel}` } : {}), 'Content-Type': 'application/json', ...cab } }); return { status: r.status, j: await r.json().catch(() => null) }; };
+  try {
+    assert.equal((await pedir('POST', '/api/ia/funil/acordar', { corpo: {} })).status, 401);
+    assert.equal((await pedir('POST', '/api/ia/funil/acordar', { corpo: {}, cab: { 'x-codewords-token': 'errado' } })).status, 401);
+    const ok = await pedir('POST', '/api/ia/funil/acordar', { corpo: { conversa_id: ID.conversa }, cab: { 'x-codewords-token': 'tok-secreto' } });
+    assert.equal(ok.status, 200); assert.equal(ok.j.acordou, true); assert.deepEqual(chamadas, ['acordar']);
+    assert.equal((await pedir('GET', '/api/ia/funil/estado')).status, 401);
+    const e = await pedir('GET', '/api/ia/funil/estado', { papel: 'atendente' });
+    assert.equal(e.status, 200); assert.deepEqual(e.j.processando, [ID.conversa]); assert.equal(e.j.disponivel, true);
+    assert.equal((await pedir('POST', '/api/ia/funil/processar', { papel: 'atendente', corpo: {} })).status, 403);
+    const p = await pedir('POST', '/api/ia/funil/processar', { papel: 'gestor', corpo: {} });
+    assert.equal(p.status, 200); assert.equal(p.j.feitas, 1);
+    assert.equal(auditados.find(a => a.acao === 'ia.funil.processar').tabela, 'at_ia_fila');
+    const h = await pedir('GET', '/api/ia/hoje', { papel: 'atendente' });
+    assert.equal(h.status, 200); assert.equal(h.j.totais.conversas, 1);
+    // config: níveis por etapa, "herdar" limpa, nível inválido 400, url só do despertador
+    const c1 = await pedir('PUT', '/api/ia/config', { papel: 'admin', corpo: { funil_autonomia: { responder: 'automatico', agendar: 'herdar', crm: 'confirmar' }, funil_ativo: false } });
+    assert.equal(c1.status, 200);
+    assert.deepEqual(c1.j.config.funil_autonomia, { responder: 'automatico', crm: 'confirmar' });
+    assert.equal(c1.j.config.funil_ativo, false);
+    assert.deepEqual(c1.j.config.funil_niveis, { responder: 'automatico', agendar: 'confirmar', crm: 'confirmar', humano: 'confirmar' });
+    assert.equal((await pedir('PUT', '/api/ia/config', { papel: 'admin', corpo: { funil_autonomia: { responder: 'tudo' } } })).status, 400);
+    assert.equal((await pedir('PUT', '/api/ia/config', { papel: 'admin', corpo: { funil_url: 'https://x.y/outra' } })).status, 400);
+    const g = await pedir('GET', '/api/ia/config', { papel: 'atendente' });
+    assert.deepEqual(g.j.etapasFunil, ['responder', 'agendar', 'crm', 'humano']); assert.equal(g.j.funilDisponivel, true);
+    const u = await pedir('GET', '/api/ia/uso', { papel: 'atendente' });
+    assert.equal(u.j.funil_ativo, false); assert.equal(u.j.niveis.responder, 'automatico');
+  } finally { await new Promise(r => server.close(r)); }
+});

@@ -37,6 +37,9 @@ import PAT from '../lib/patio.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const PORT = Number(process.env.PORT || 3211);
+/* Rodada 5 (Central): PREFIXO=/atendimento/ monta o mock num caminho, como a Central vai fazer
+   (o index.html recebe <base href> e todo caminho da tela vira relativo). */
+const PREFIXO = (() => { let p = String(process.env.PREFIXO || '/'); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; })();
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8',
   '.json':'application/json', '.png':'image/png', '.svg':'image/svg+xml' };
 
@@ -209,6 +212,25 @@ for (let i = 0; i < Number(process.env.MOCK_MUITAS || 0); i++) {
 }
 // ações do copiloto em memória (para executar / recusar / desfazer)
 const ACOES = new Map();
+/* Rodada 5 — IA do funil de mentira: propostas que a IA deixou SOZINHA (perfil null) esperando o clique,
+   o que ela já fez hoje e a fila (a Renata está sendo respondida agora). */
+const IA_CFG = { ativo: true, autonomia: 'confirmar', modelo_rapido: 'claude-sonnet-5-5', modelo_forte: 'claude-opus-5-5', limite_chamadas_dia: 500,
+  instrucoes_extras: null, funil_ativo: true, funil_autonomia: { responder: 'automatico', agendar: 'confirmar' }, funil_url: 'https://indycar-atendimento.onrender.com/api/ia/funil/acordar' };
+const niveisMock = () => Object.fromEntries(['responder', 'agendar', 'crm', 'humano'].map(e => [e, IA_CFG.funil_autonomia[e] || IA_CFG.autonomia]));
+const IA_HOJE = [
+  { id: 'ia-h1', tipo: 'responder', status: 'executada', resumo: 'Mensagem ao cliente', conversa_id: CONV.camila, created_at: h(0.3), executada_em: h(0.3), sozinha: true, automatica: true, enviada: true, reversivel: false, texto: 'Oi, Camila! Amanhã de manhã tenho 9h ou 10h30 para o Corolla. Qual fica melhor?' },
+  { id: 'ia-h2', tipo: 'agendar', status: 'proposta', resumo: 'Agendar Alinhamento 3D — ' + diaSP(1) + ' às 9h', conversa_id: CONV.camila, created_at: h(0.2), sozinha: true, automatica: false, enviada: false, reversivel: false, texto: null },
+  { id: 'ia-h3', tipo: 'atualizar_ficha', status: 'executada', resumo: 'Ficha: placa → FHR6F16', conversa_id: CONV.camila, created_at: h(0.3), executada_em: h(0.3), sozinha: true, automatica: true, enviada: false, reversivel: true, texto: null },
+  { id: 'ia-h4', tipo: 'marcar_aguardando_consultor', status: 'executada', resumo: 'Aguardando consultor: pediu valor do freio', conversa_id: CONV.jose, created_at: h(3), executada_em: h(3), sozinha: true, automatica: true, enviada: false, reversivel: true, texto: null },
+  { id: 'ia-h5', tipo: 'responder', status: 'executada', resumo: 'Mensagem ao cliente', conversa_id: CONV.jose, created_at: h(3), executada_em: h(3), sozinha: true, automatica: true, enviada: true, reversivel: false, texto: 'Bom dia, José! Valor certinho quem passa é o consultor — já estou chamando. 🏎' },
+  { id: 'ia-h6', tipo: 'mover_etapa', status: 'executada', resumo: 'Mover para "Agendado" (cliente já tem horário marcado)', conversa_id: CONV.marcos, created_at: h(5), executada_em: h(5), sozinha: true, automatica: true, enviada: false, reversivel: true, texto: null },
+];
+for (const a of IA_HOJE.filter(x => x.status === 'proposta')) ACOES.set(a.id, { ...a, parametros: {}, precisa_clique: true });
+ACOES.set('ia-h7', { id: 'ia-h7', tipo: 'responder', status: 'proposta', resumo: 'Mensagem ao cliente', conversa_id: CONV.camila, created_at: h(0.1), sozinha: true,
+  parametros: { texto: 'Fechado então: amanhã às 9h a gente te espera com o Corolla! 📍 Av. Bandeirantes, 875', enviar: true }, precisa_clique: true, reversivel: false });
+IA_HOJE.unshift({ ...ACOES.get('ia-h7'), automatica: false, enviada: false, texto: ACOES.get('ia-h7').parametros.texto });
+const IA_FILA = [{ id: 'fila-1', conversa_id: CONV.renata, status: 'processando', created_at: h(0.01), iniciado_em: h(0.01) }];
+DB.at_ia_fila = IA_FILA;
 
 // ------------------------------------------------- rodada 3: notificações, auditoria, papéis
 const PAPEL_PERFIL = { admin: U.admin, gestor: U.gestor, atendente: U.atendente, agenda: U.agenda, desativado: U.desativado,
@@ -583,7 +605,10 @@ function filtrarAuditoria(sp) {
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
-  const p = url.pathname, m = req.method;
+  // fora do prefixo? 404 (na Central, outro app responderia)
+  if (PREFIXO !== '/' && !url.pathname.startsWith(PREFIXO) && url.pathname + '/' !== PREFIXO) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('fora do prefixo ' + PREFIXO); }
+  const p = PREFIXO === '/' ? url.pathname : ('/' + url.pathname.slice(PREFIXO.length)).replace(/^\/{2,}/, '/') || '/';
+  const m = req.method;
   if (!p.startsWith('/api/')) {
     if (p === '/' || p === '/index.html') {
       const papel = url.searchParams.get('papel') || 'admin';
@@ -602,7 +627,8 @@ http.createServer(async (req, res) => {
       if (url.searchParams.get('envio') === 'ok') ultimoEnvio401 = false;
       const cfg = { perfil: eu && { id: eu.id, email: eu.email, nome: eu.nome, mfa_ativo: !!eu.mfa_ativo }, recuperar: url.searchParams.get('recuperar') === '1' };
       let html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')
-        .replace(/<script src="\/vendor\/supabase\.js"><\/script>/, () => DUBLE_SUPABASE.replace('__CFG__', JSON.stringify(cfg)))
+        .replace(/<script src="\/?vendor\/supabase\.js"><\/script>/, () => DUBLE_SUPABASE.replace('__CFG__', JSON.stringify(cfg)))
+        .replace(/<head([^>]*)>/i, (x) => `${x}\n  <base href="${PREFIXO}" />`)   // como o server.js faz
         .replace(/<link href="https:\/\/fonts\.googleapis\.com[^>]*>/, '');   // sem fonte externa no teste
       /* As duas tags do copiloto são do outro agente; se ainda não estiverem no
          index.html, o mock põe — assim dá para testar o contrato desde já. */
@@ -630,6 +656,7 @@ http.createServer(async (req, res) => {
   if (p === '/api/_mock') return json(res, 200, consultar(body, quemDoToken(req)));
   if (p === '/api/_dormir') { DORMINDO_ATE = Date.now() + Number(body.segundos || 0) * 1000; return json(res, 200, { ok: true }); }
   if (p === '/api/_envios') return json(res, 200, { envios: ENVIOS_FEITOS });
+  if (p === '/api/_ia_reset') { for (const k of [...ACOES.keys()]) if (!IA_HOJE.some(a => a.id === k)) ACOES.delete(k); for (const a of IA_HOJE) if (ACOES.has(a.id)) ACOES.get(a.id).status = a.status; ACOES.get('ia-h7').status = 'proposta'; IA_FILA.forEach(f => { f.status = 'processando'; }); return json(res, 200, { ok: true }); }
   if (dormindo()) {
     res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'x-render-routing': 'hibernate-wake-error' });
     return res.end('<html><body><h1>Service Unavailable</h1></body></html>');
@@ -963,25 +990,61 @@ http.createServer(async (req, res) => {
     const conv = DB.conversas.find(c => c.id === body.conversaId);
     const nome = (conv?.nome || 'cliente').split(' ')[0];
     const acoes = [
-      { id: 'ac' + Date.now(), tipo: 'mover_etapa', resumo: 'Mover para "Orçamento enviado"', parametros: { etapa_id: ETAPA.orc }, status: 'proposta', precisa_clique: true, reversivel: true },
-      { id: 'ad' + Date.now(), tipo: 'agendar', resumo: 'Agendar diagnóstico gratuito amanhã 09:00', parametros: { data: diaSP(1), hora: '09:00' }, status: 'proposta', precisa_clique: true, reversivel: true },
+      { id: 'ac' + Date.now(), tipo: 'mover_etapa', resumo: 'Mover para "Orçamento enviado"', parametros: { etapa_id: ETAPA.orc }, status: 'proposta', precisa_clique: true, reversivel: true, conversa_id: body.conversaId, perfil_id: quem.id },
+      { id: 'ad' + Date.now(), tipo: 'agendar', conversa_id: body.conversaId, perfil_id: quem.id, resumo: 'Agendar diagnóstico gratuito amanhã 09:00', parametros: { data: diaSP(1), hora: '09:00' }, status: 'proposta', precisa_clique: true, reversivel: true },
     ];
     acoes.forEach(a => ACOES.set(a.id, a));
     const hs = livres().slice(0, 2).map(({ data, hora, rotulo }) => ({ data, hora, rotulo }));
     return json(res, 200, { ok: true, id: 'cp' + Date.now(), resposta_acao_id: null, resposta_sugerida: `Oi, ${nome}! Pode trazer sim — amanhã às 9h fazemos o diagnóstico digital gratuito (uns 30 min). Quem conhece, Indyca! 🏎`,
       acoes, resumo: 'Quer levar o carro amanhã de manhã.', pendencias: ['Confirmar o horário'], intencao: 'agendar', temperatura: 'quente',
-      motivo_classificacao: 'Pediu horário para amanhã.', horarios_sugeridos: hs, autonomia: 'confirmar', modelo: 'mock',
+      motivo_classificacao: 'Pediu horário para amanhã.', horarios_sugeridos: hs, autonomia: IA_CFG.autonomia, niveis: niveisMock(),
+      proxima_acao: { tipo: 'aprovar', texto: 'Aprove o agendamento proposto pela IA — o horário já foi conferido como livre.' }, modelo: 'mock',
       tokens: { entrada: 1200, saida: 180 }, duracao_ms: 900, uso: { chamadas: 13, limite: 500 } });
   }
   if ((mm = /^\/api\/ia\/acoes\/([^/]+)\/(executar|recusar|desfazer)$/.exec(p))) {
     const a = ACOES.get(mm[1]) || { id: mm[1], tipo: 'desconhecida', resumo: '—' };
     a.status = mm[2] === 'executar' ? 'executada' : mm[2] === 'recusar' ? 'recusada' : 'desfeita';
     ACOES.set(a.id, a);
-    return json(res, 200, { ok: true, acao: a });
+    let mensagem = mm[2] === 'executar' ? 'Feito.' : mm[2] === 'recusar' ? 'Recusado.' : 'Desfeito.';
+    if (mm[2] === 'executar' && a.tipo === 'responder' && a.parametros?.enviar) {
+      const conv = DB.conversas.find(c => c.id === a.conversa_id);
+      if (conv) DB.whatsapp_mensagens.push({ id: 'ia-msg-' + Date.now(), conversa_id: conv.id, corpo: a.parametros.texto, direcao: 'saida', status: 'enviado', gerada_por_ia: true, created_at: new Date().toISOString() });
+      mensagem = '✉️ Mensagem enviada ao cliente.';
+    }
+    return json(res, 200, { ok: true, acao: a, tipo: a.tipo, mensagem });
   }
-  if (p === '/api/ia/acoes') return json(res, 200, { ok: true, acoes: [...ACOES.values()] });
+  if (p === '/api/ia/acoes') { const cid = url.searchParams.get('conversaId'); return json(res, 200, { ok: true, acoes: [...ACOES.values()].filter(a => !cid || a.conversa_id === cid) }); }
   if (p === '/api/ia/uso') return json(res, 200, { ok: true, chamadas: 12, limite: 500, tokens_entrada: 48000, tokens_saida: 6100, minhas: 4 });
-  if (p === '/api/ia/config') return json(res, 200, { ok: true, config: { ativo: true, autonomia: 'confirmar', modelo_rapido: 'claude-sonnet-5-5', modelo_forte: 'claude-opus-5-5' } });
+  if (p === '/api/ia/config' && m === 'GET') return json(res, 200, { ok: true, config: { ...IA_CFG, funil_niveis: niveisMock() }, podeEditar: admin, modelosPermitidos: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'],
+    etapasFunil: ['responder', 'agendar', 'crm', 'humano'], niveis: ['sugerir', 'confirmar', 'automatico'], funilDisponivel: true, iaConfigurada: true });
+  if (p === '/api/ia/config' && m === 'PUT') {
+    if (!admin) return json(res, 403, { ok: false, erro: 'Só o administrador muda a configuração da IA.' });
+    for (const k of ['ativo', 'autonomia', 'funil_ativo', 'instrucoes_extras', 'limite_chamadas_dia']) if (body[k] !== undefined) IA_CFG[k] = body[k];
+    if (body.funil_autonomia !== undefined) { IA_CFG.funil_autonomia = {}; for (const [k, v] of Object.entries(body.funil_autonomia || {})) if (v && v !== 'herdar') IA_CFG.funil_autonomia[k] = v; }
+    auditar(quem.id, 'config.ia', 'ia_config', 'true', { detalhes: { campos: Object.keys(body) } });
+    return json(res, 200, { ok: true, config: { ...IA_CFG, funil_niveis: niveisMock() } });
+  }
+  if (p === '/api/ia/hoje') {
+    const grupos = new Map();
+    for (const a of IA_HOJE) {
+      const c = DB.conversas.find(x => x.id === a.conversa_id);
+      if (!grupos.has(a.conversa_id)) grupos.set(a.conversa_id, { conversa_id: a.conversa_id, nome: c?.nome || null, telefone: c?.telefone || null, atribuida_a: c?.atribuida_a || null, acoes: [] });
+      const viva = ACOES.get(a.id);
+      grupos.get(a.conversa_id).acoes.push({ ...a, status: viva ? viva.status : a.status });
+    }
+    const todas = [...grupos.values()].flatMap(g => g.acoes);
+    return json(res, 200, { ok: true, desde: new Date(agora - 10 * 3600_000).toISOString(),
+      totais: { conversas: grupos.size, executadas: todas.filter(a => a.status === 'executada').length, propostas: todas.filter(a => a.status === 'proposta').length,
+        enviadas: todas.filter(a => a.enviada).length, agendamentos: todas.filter(a => a.tipo === 'agendar' && a.status === 'executada').length, humano: 1, erros: 0 },
+      fila: { pendente: 0, processando: IA_FILA.filter(f => f.status === 'processando').length, feita: 7, pulada: 2, erro: 0 },
+      processando: IA_FILA.filter(f => f.status === 'processando').map(f => f.conversa_id), conversas: [...grupos.values()] });
+  }
+  if (p === '/api/ia/funil/estado') return json(res, 200, { ok: true, disponivel: true, hoje: { pendente: 0, processando: IA_FILA.filter(f => f.status === 'processando').length, feita: 7, pulada: 2, erro: 0 }, processando: IA_FILA.filter(f => f.status === 'processando').map(f => f.conversa_id) });
+  if (p === '/api/ia/funil/processar') {
+    if (!gestor) return json(res, 403, { ok: false, erro: 'Só gestor ou administrador roda a fila da IA à mão.' });
+    IA_FILA.forEach(f => { f.status = 'feita'; });
+    return json(res, 200, { ok: true, conversas: 1, feitas: 1, puladas: 0, erros: 0 });
+  }
   if (p === '/api/conversa-por-telefone') {
     const t = String(url.searchParams.get('t') || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
     const conv = DB.conversas.find(c => c.telefone_e164 === t);

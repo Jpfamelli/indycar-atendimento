@@ -31,9 +31,9 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90' font-weight='bold' fill='%23e50914'>I</text></svg>" />
   <!-- Instalável: com isto o Chrome/Edge oferece "Instalar Atendimento" e o app
        abre em janela própria, sem barra de endereço. -->
-  <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
-  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -397,6 +397,8 @@
                 <div class="chat-linha-tags">
                   <div id="chatEtapa" class="chat-etapa"></div>
                   <div id="chatDono" class="chat-dono"></div>
+                  <!-- rodada 5: a IA do funil está lendo/respondendo esta conversa agora -->
+                  <span id="chatIA" class="chat-ia" hidden role="status"><i class="girando" aria-hidden="true"></i> a IA está respondendo…</span>
                   <!-- colegas com esta mesma conversa aberta agora (Realtime Presence) -->
                   <div id="chatPresenca" class="chat-presenca" hidden aria-live="polite"></div>
                 </div>
@@ -448,6 +450,10 @@
               </div>
             </div>
           </header>
+
+          <!-- Rodada 5: o que a IA do funil propôs para ESTA conversa e espera um clique
+               (agendar, enviar a resposta, registrar interesse…). Aprovar/Recusar aqui mesmo. -->
+          <div class="chat-propostas" id="chatPropostas" hidden aria-label="Propostas da IA para esta conversa" aria-live="polite"></div>
 
           <!-- Busca dentro da conversa: marca os trechos e anda entre eles -->
           <div class="busca-msg" id="buscaMsgBar" hidden role="search">
@@ -617,7 +623,7 @@
       <header class="pagina-topo">
         <div>
           <h1>Inteligência Artificial</h1>
-          <p>A IA lê o histórico do cliente no CRM e na agenda antes de sugerir a resposta.</p>
+          <p>A IA lê a ficha inteira (CRM, Agenda, Pátio, Comunicar) e conduz o atendimento até onde você deixar.</p>
         </div>
         <span class="selo" id="seloIA">verificando…</span>
       </header>
@@ -630,8 +636,10 @@
                 leva e traz e a especialidade em câmbio automático já estão na cabeça dela.</li>
             <li><b>Ela conhece o cliente.</b> Antes de escrever, consulta o que a pessoa
                 já gastou, os serviços feitos e se tem horário marcado.</li>
-            <li><b>Você tem a palavra final.</b> A sugestão cai no campo de texto —
-                você lê, ajusta e só então envia.</li>
+            <li><b>Ela conduz até onde você deixar.</b> Em "pedir um clique" ela prepara e avisa no sino;
+                em "fazer sozinha" ela responde, marca o horário e registra no CRM — tudo fica em <b>IA em ação</b>, com desfazer.</li>
+            <li><b>Gente cuida de gente.</b> Preço, urgência, "quero falar com alguém" e reclamação param na IA e
+                vão para um consultor na hora.</li>
           </ol>
         </div>
 
@@ -643,13 +651,40 @@
           <div id="iaResultado" class="ia-saida" hidden></div>
         </div>
 
-        <div class="cartao">
-          <h3>Resposta automática <span class="selo">em breve</span></h3>
-          <p class="cartao-sub">Hoje a IA <b>sugere</b> e você revisa antes de enviar — o botão
-            <b>✨ Sugerir</b> no chat. Ninguém responde ao cliente sem passar por você.</p>
-          <p class="aviso">Quem responde sozinho no WhatsApp é o <b>CodeWords</b>, do lado dele.
-            Uma chavinha para deixar a IA responder direto por aqui ainda não existe —
-            quando existir, ela aparece nesta parte.</p>
+        <!-- Rodada 5: a IA conduz o funil. Aqui o dono escolhe até onde ela vai sozinha. -->
+        <div class="cartao cartao-largo" id="cartaoAutonomia">
+          <h3>Até onde a IA vai sozinha <span class="selo" id="seloFunil">verificando…</span></h3>
+          <p class="cartao-sub">Quando o cliente escreve, a IA lê a ficha inteira e conduz: pergunta o carro, oferece dois horários
+            livres da Agenda, marca, confirma e registra no CRM. Preço, urgência, pedido para falar com gente e reclamação sempre
+            vão para um consultor. Nunca passa preço nem prazo.</p>
+          <label class="switch" id="rotuloFunilAtivo"><input type="checkbox" id="cfgFunilAtivo" /><span>IA responde os clientes pelo WhatsApp (IA do funil)</span></label>
+          <div class="autonomia-geral">
+            <span class="autonomia-rotulo">Padrão</span>
+            <div class="segmento" role="radiogroup" aria-label="Autonomia padrão da IA" id="autonomiaGeral">
+              <button type="button" class="seg" data-nivel="sugerir" role="radio" aria-checked="false" title="A IA só propõe; você faz pela tela">Só sugerir</button>
+              <button type="button" class="seg" data-nivel="confirmar" role="radio" aria-checked="false" title="A IA prepara e avisa; um clique executa">Pedir um clique</button>
+              <button type="button" class="seg" data-nivel="automatico" role="radio" aria-checked="false" title="A IA faz sozinha e registra tudo">Fazer sozinha</button>
+            </div>
+          </div>
+          <table class="autonomia-tabela" aria-label="Autonomia por etapa do funil">
+            <thead><tr><th scope="col">Etapa</th><th scope="col">Como a IA age</th></tr></thead>
+            <tbody id="autonomiaEtapas"></tbody>
+          </table>
+          <p class="aviso" id="autonomiaAviso">Cancelar horário, religar mensagens de quem pediu para parar, dar o lead como ganho/perdido e
+            tarefa para outra pessoa <b>sempre</b> pedem um clique, em qualquer nível. Só o administrador muda isto.</p>
+          <p class="form-msg" id="autonomiaMsg" hidden></p>
+        </div>
+
+        <div class="cartao cartao-largo" id="cartaoIaHoje">
+          <div class="cartao-topo-linha">
+            <h3>IA em ação <small id="iaHojeQuando"></small></h3>
+            <div class="int-acoes">
+              <button type="button" class="btn btn-ghost sm" id="btnIaHojeAtualizar" title="Recarregar">↻ Atualizar</button>
+              <button type="button" class="btn btn-ghost sm" id="btnIaFilaRodar" hidden title="Processa agora as mensagens que estão na fila da IA">▶ Rodar a fila agora</button>
+            </div>
+          </div>
+          <div class="ia-totais" id="iaHojeTotais" aria-live="polite"></div>
+          <div id="iaHojeLista" class="ia-hoje-lista"><p class="cartao-sub">Carregando o que a IA fez hoje…</p></div>
         </div>
       </div>
     </div>
@@ -1592,8 +1627,9 @@
 <!-- rede.js primeiro: ele fica na frente de toda chamada ao servidor (novas tentativas
      quando o Render está acordando). A biblioteca do Supabase vem do próprio servidor
      (versão travada, guardada pelo service worker); a CDN é só reserva. -->
+<script src="apps.js"></script>
 <script src="rede.js"></script>
-<script src="/vendor/supabase.js"></script>
+<script src="vendor/supabase.js"></script>
 <script>window.supabase || document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.0/dist/umd/supabase.js"><\/script>');</script>
 <script src="app.js"></script>
 <script src="acesso.js"></script>

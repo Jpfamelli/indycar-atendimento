@@ -49,14 +49,37 @@ test('horários livres da ficha descontam a agenda de todos os clientes', async 
 
 test('conversa sem cliente: procura leads pelo telefone e não quebra', async () => {
   const t = tabelas();
-  t.leads.push({ id: '33333333-3333-4333-8333-333333333334', cliente_id: null, telefone: '5512977776666', status: 'novo', servico: 'Freio', created_at: '2026-10-14T11:00:00Z' });
+  // rodada 5: a busca é pela coluna gerada telefone_e164 (exata e indexada), não mais por variantes do telefone
+  t.leads.push({ id: '33333333-3333-4333-8333-333333333334', cliente_id: null, telefone: '5512977776666', telefone_e164: '12977776666', status: 'novo', servico: 'Freio', created_at: '2026-10-14T11:00:00Z' });
   const sb = criarSbFalso(t);
   const ctx = CTX.criarContexto({ sb, agora: () => AGORA });
   const r = await ctx.montarContexto(ID.conversaSemCliente);
   assert.equal(r.ok, true);
   assert.equal(r.ficha.cliente, null);
   assert.equal(r.ficha.leadAberto.servico, 'Freio');
+  assert.equal(r.ficha.clienteDaCasa, false);
   assert.match(CTX.textoParaIA(r.ficha), /sem cadastro/);
+  assert.ok(r.ficha.avisos.some(a => /cliente 360/.test(a)), 'sem a rpc no dublê, só um aviso — a ficha não quebra');
+});
+
+test('rodada 5: conversa sem cliente_id é religada pelo telefone via rpc cliente_360; cliente da casa vai marcado para a IA', async () => {
+  const t = tabelas();
+  t.clientes.push({ id: ID.outroCliente, nome: 'Zé Carlos', telefone: '5512977776666', carro_modelo: 'Gol', carro_ano: '2015', aceita_mensagens: true, created_at: '2025-03-01T12:00:00Z' });
+  t.v_cliente_360.push({ id: ID.outroCliente, total_gasto: 400, servicos_feitos: 1, faltas: 0, total_leads: 1 });
+  const sb = criarSbFalso(t, { rpc: { cliente_360: (args) => ({ data: args.p_telefone === '12977776666' ? { cliente: { id: ID.outroCliente, nome: 'Zé Carlos' } } : { cliente: null }, error: null }) } });
+  const ctx = CTX.criarContexto({ sb, agora: () => AGORA });
+  const r = await ctx.montarContexto(ID.conversaSemCliente);
+  assert.equal(r.ok, true);
+  assert.equal(r.ficha.cliente.nome, 'Zé Carlos');
+  assert.equal(r.ficha.ligadoPeloTelefone, ID.outroCliente);
+  assert.equal(r.ficha.clienteDaCasa, true);
+  const txt = CTX.textoParaIA(r.ficha);
+  assert.match(txt, /CLIENTE DA CASA/);
+  assert.match(txt, /NÃO se apresente como a um desconhecido/);
+  assert.doesNotMatch(txt, /pode se apresentar/);
+  // cliente novo de verdade continua recebendo a apresentação
+  const r2 = await ctx.montarContexto(ID.conversa);
+  assert.equal(r2.ficha.clienteDaCasa, true, 'Camila já fez 2 serviços');
 });
 
 test('id inválido = 400; conversa inexistente = 404', async () => {

@@ -313,6 +313,7 @@ async function entrarNoApp(user) {
   ligarTempoReal();
   Recuperador.buscar('boot');           // marca o ponto de partida para recuperar o que chegar com o tempo real fora
   abrirPeloEndereco();                // ?conversa=<uuid> ou ?tel=<telefone> (links da Agenda, CRM, Comunicar)
+  abrirAbaPeloEndereco();             // rodada 5: ?aba=integracoes (botão "Colar a chave no Atendimento" do Comunicar)
   publicarApiIndyCar();
   filaOfflineProcessar();
   setTimeout(() => Entregas.retomar('boot'), 2500);   // entregas que ficaram pela metade na última vez
@@ -324,6 +325,7 @@ async function entrarNoApp(user) {
   prepararRelatorios();       // só acerta as datas; o relatório vem ao abrir a aba
   Acesso.depoisDeEntrar();     // menu do perfil, último acesso, vigia de desativação
   Tarefas.iniciar();           // sino, minhas tarefas, presença na conversa
+  IaFunil.iniciar();           // rodada 5: fila da IA do funil (quem está sendo respondido agora)
   Equipe.iniciar();            // telas Equipe e Auditoria (gestor/admin)
   // rodada 4: primeira vez (ou papel novo)? tour curto de boas-vindas
   setTimeout(() => { if (!modalAberto()) window.Ajuda?.iniciarTour(); }, 1200);
@@ -361,6 +363,7 @@ $$('.nav-item').forEach(b => b.addEventListener('click', () => {
   // relatório é caro de montar: só busca quando o atendente entra na aba
   if (aba === 'relatorios' && !RELATORIO) carregarRelatorios();
   if (aba === 'funil')  carregarFunil();
+  if (aba === 'ia')     IaFunil.abrirAba();
   if (aba === 'etapas') atualizarAbaEtapas();
   if (aba === 'tarefas') Tarefas.abrirAba();
   if (aba === 'equipe') Equipe.abrirEquipe();
@@ -741,7 +744,7 @@ function renderConversas() {
                  title="Ninguém responsável — um clique e o cliente é seu">★ Pegar</button>`}
           ${plaquinhaHtml(c)}
           <span class="tag ${esc(c.status)}">${esc(c.status)}</span>
-          ${c.ia_ativa ? '<span class="tag ia">✨ IA</span>' : ''}
+          ${IaFunil.respondendo(c.id) ? '<span class="tag ia-respondendo" title="A IA do funil está lendo e respondendo esta conversa agora"><i class="girando" aria-hidden="true"></i> IA respondendo</span>' : (c.ia_ativa ? '<span class="tag ia">✨ IA</span>' : '')}
           ${c.nao_lidas > 0 ? `<span class="nao-lidas" aria-hidden="true">${esc(String(c.nao_lidas))}</span>` : ''}
         </div>
       </div>
@@ -921,6 +924,7 @@ async function abrirConversa(id, { focarCampo = false } = {}) {
   renderDonoDoChat();
   renderBotaoAssumir();
   $('#copilotoSlot').hidden = false;          // contrato com o copiloto: sempre presente com conversa aberta
+  IaFunil.aoAbrirConversa(conv);              // rodada 5: propostas da IA esperando clique + "IA respondendo"
 
   // No celular, abrir a conversa troca a lista pelo chat
   $('.conversas-layout').classList.add('vendo-chat');
@@ -2059,7 +2063,7 @@ async function carregarFicha(conv) {
       <div class="ficha-bloco">
         <div class="ficha-titulo">
           Mensagens automáticas
-          <a class="ficha-link" href="${esc(fx?.comunicarUrl || 'https://indycar-posvenda.onrender.com')}"
+          <a class="ficha-link" href="${esc(fx?.comunicarUrl || URL_COMUNICAR)}"
              target="_blank" rel="noopener" title="Abrir o IndyCar Comunicar">Abrir no Comunicar ↗</a>
         </div>
         <label class="switch aceita${aceita ? '' : ' desligado'}">
@@ -2475,6 +2479,9 @@ function ligarTempoReal() {
           renderMensagens();
         }
       })
+    // rodada 5: a fila da IA do funil (tempo real) → "a IA está respondendo…" e propostas novas
+    .on('postgres_changes', { event:'*', schema:'public', table:'at_ia_fila' },
+      payload => IaFunil.aoMudarFila(payload))
     .on('postgres_changes', { event:'*', schema:'public', table:'conversas' },
       () => agendarRecargaLista())
     .on('postgres_changes', { event:'*', schema:'public', table:'etapas_funil' },
@@ -4818,7 +4825,7 @@ function desenharRelatorios(r) {
                   .map(([t, n]) => [ROTULO_ENVIO_TIPO[t] || t, num(n)]) })
             : '')
         : semDados('Nenhuma mensagem automática programada no período.'),
-      `<a class="btn btn-ghost sm" href="https://indycar-posvenda.onrender.com" target="_blank" rel="noopener">Abrir o Comunicar ↗</a>`));
+      `<a class="btn btn-ghost sm" href="${esc(URL_COMUNICAR)}" target="_blank" rel="noopener">Abrir o Comunicar ↗</a>`));
   }
 
   $('#relCorpo').innerHTML = partes.join('');
@@ -5205,6 +5212,12 @@ window.Rede?.aoMudar(d => { if (d.voltou && usuario) { verConexao(); verSaude();
 (() => {
   const sel = document.getElementById('ecoSeletor');
   if (!sel) return;
+  // rodada 5: as opções vêm do apps.js (um lugar só para os endereços)
+  if (window.IndyCarApps) {
+    sel.innerHTML = window.IndyCarApps.lista().map(a => a.chave === 'atendimento'
+      ? `<option value="${esc(a.url)}" data-atual="1" selected>● Atendimento (aqui)</option>`
+      : `<option value="${esc(a.url)}">${esc(a.nome)}</option>`).join('');
+  }
   const atual = sel.querySelector('[data-atual]')?.value;
   sel.addEventListener('change', () => {
     const url = sel.value;
@@ -5548,6 +5561,7 @@ function fecharConversa({ focarLista = false } = {}) {
   $('.conversas-layout').classList.remove('vendo-chat');
   $('#colFicha').classList.remove('aberta');
   $('#copilotoSlot').hidden = true;
+  IaFunil.aoFecharConversa();
   $('#fichaConteudo').hidden = true;
   const vazio = $('#fichaVazia');
   vazio.hidden = false;
@@ -5662,16 +5676,17 @@ async function copiarTexto(texto, aviso = '📋 Copiado') {
 }
 $('#btnCopiarLink')?.addEventListener('click', () => {
   if (!conversaAtual) return;
-  copiarTexto(`${location.origin}/?conversa=${conversaAtual.id}`, '🔗 Link da conversa copiado');
+  copiarTexto(window.IndyCarApps ? window.IndyCarApps.url(`?conversa=${conversaAtual.id}`) : `${location.origin}/?conversa=${conversaAtual.id}`, '🔗 Link da conversa copiado');
 });
 $('#chatTelefone')?.addEventListener('click', () => {
   if (conversaAtual) copiarTexto(telefoneBonito(conversaAtual.telefone), '📋 Telefone copiado');
 });
 
 /* ---------------- Ficha: links do cliente e edição na hora ---------------- */
-const URL_AGENDA = 'https://indycar-agendamentos.onrender.com';
-const URL_CRM = 'https://indycar-crm.onrender.com';
-const URL_COMUNICAR = 'https://indycar-posvenda.onrender.com';
+/* Rodada 5: endereços num lugar só (public/apps.js). */
+const URL_AGENDA = window.IndyCarApps?.link('agenda') || 'https://indycar-agendamentos.onrender.com';
+const URL_CRM = window.IndyCarApps?.link('crm') || 'https://indycar-crm.onrender.com';
+const URL_COMUNICAR = window.IndyCarApps?.link('comunicar') || 'https://indycar-posvenda.onrender.com';
 function linkComTelefone(base, tel) {
   try { const u = new URL(base); if (tel) u.searchParams.set('tel', tel); return u.href; } catch { return base; }
 }
@@ -6500,3 +6515,231 @@ document.addEventListener('click', (e) => {
   else if (alvo === 'equipe' && typeof Equipe !== 'undefined') Equipe.recarregar();
   else if (alvo === 'auditoria' && typeof Equipe !== 'undefined') Equipe.abrirAuditoria();
 });
+
+
+/* ============================================================
+   RODADA 5 (16/10/2026) — A IA CONDUZ O FUNIL
+   - "a IA está respondendo…" (tabela at_ia_fila em tempo real) no chat e na lista;
+   - propostas que a IA deixou SOZINHA esperando um clique, dentro da conversa
+     (Aprovar e enviar / Agendar / Recusar) — além do painel do copiloto;
+   - aba IA: autonomia (geral + por etapa, 3 níveis) e "IA em ação" (o que ela
+     fez hoje, por conversa, com desfazer).
+   Tudo pelas rotas do servidor (/api/ia/*); nenhuma chave no navegador.
+   ============================================================ */
+const IaFunil = (() => {
+  const RESPONDENDO = new Set();           // conversa_id com linha "processando" na fila
+  const TIPOS = {
+    agendar: ['📅', 'Agendar'], remarcar: ['🔁', 'Remarcar'], cancelar_agendamento: ['✖', 'Cancelar horário'],
+    mover_etapa: ['🏷', 'Etapa do funil'], atualizar_ficha: ['📝', 'Completar ficha'], registrar_interesse: ['🧾', 'Interesse no CRM'],
+    marcar_aguardando_consultor: ['⏳', 'Aguardando consultor'], agendar_retorno: ['🔔', 'Chamar de novo'], criar_tarefa: ['✓', 'Tarefa'],
+    responder: ['✉️', 'Mensagem ao cliente'], vincular_cliente: ['🔗', 'Cliente reconhecido'], copiloto: ['✨', 'Leitura da IA'],
+  };
+  const ETAPAS = [
+    ['responder', 'Responder o cliente', 'a mensagem que sai no WhatsApp'],
+    ['agendar', 'Marcar e remarcar horário', 'na Agenda, só horário livre de verdade'],
+    ['crm', 'Ficha, lead e etapa', 'completar cadastro, registrar interesse, mover o funil'],
+    ['humano', 'Passar para gente', 'aguardando consultor, tarefa para a equipe'],
+  ];
+  const NIVEL = { sugerir: 'Só sugerir', confirmar: 'Pedir um clique', automatico: 'Fazer sozinha' };
+  const STATUS = { proposta: ['esperando clique', 'ia-proposta'], executada: ['feito', 'ia-feita'], recusada: ['recusado', 'ia-recusada'], erro: ['deu erro', 'ia-erro'], desfeita: ['desfeito', 'ia-desfeita'] };
+  let cfg = null, podeEditar = false, ocupado = false, propostasConv = [];
+
+  async function api(metodo, url, corpo) {
+    const r = await fetch(url, { method: metodo, headers: await authCabecalhos(), body: corpo ? JSON.stringify(corpo) : undefined });
+    let j = {}; try { j = await r.json(); } catch { /* sem JSON */ }
+    if (!r.ok || j.ok === false) { const e = new Error(j.erro || `Erro ${r.status}`); e.status = r.status; throw e; }
+    return j;
+  }
+  const hora = iso => { try { return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+
+  /* ---------------- "a IA está respondendo" ---------------- */
+  function respondendo(convId) { return RESPONDENDO.has(convId); }
+  function pintarIndicador() {
+    const el = $('#chatIA');
+    if (el) el.hidden = !(conversaAtual && RESPONDENDO.has(conversaAtual.id));
+    try { window.dispatchEvent(new CustomEvent('indycar:ia-fila', { detail: { respondendo: [...RESPONDENDO] } })); } catch { /* ignora */ }
+  }
+  function aoMudarFila(payload) {
+    const n = payload?.new || {}, o = payload?.old || {};
+    const id = n.conversa_id || o.conversa_id;
+    if (!id) return;
+    if (n.status === 'processando') RESPONDENDO.add(id); else RESPONDENDO.delete(id);
+    pintarIndicador();
+    renderConversas();
+    // a IA terminou com a conversa aberta: mensagem nova e propostas chegam já
+    if (conversaAtual?.id === id && ['feita', 'pulada', 'erro'].includes(n.status)) {
+      carregarPropostas(conversaAtual);
+      if (n.status === 'feita') { carregarMensagens(); carregarFicha(conversaAtual); }
+    }
+  }
+  async function iniciar() {
+    try {
+      const j = await api('GET', '/api/ia/funil/estado');
+      RESPONDENDO.clear();
+      for (const id of j.processando || []) RESPONDENDO.add(id);
+      pintarIndicador(); renderConversas();
+    } catch { /* servidor sem a rota ou acordando: fica quieto */ }
+  }
+
+  /* ---------------- propostas na conversa ---------------- */
+  function aoAbrirConversa(conv) { pintarIndicador(); carregarPropostas(conv); }
+  function aoFecharConversa() { const el = $('#chatPropostas'); if (el) { el.hidden = true; el.innerHTML = ''; } const i = $('#chatIA'); if (i) i.hidden = true; propostasConv = []; }
+  async function carregarPropostas(conv) {
+    const el = $('#chatPropostas');
+    if (!el || !conv) return;
+    try {
+      const j = await api('GET', `/api/ia/acoes?conversaId=${encodeURIComponent(conv.id)}&limite=40`);
+      if (conversaAtual?.id !== conv.id) return;
+      // só o que a IA deixou SOZINHA (sem pessoa por trás) e ainda espera decisão
+      propostasConv = (j.acoes || []).filter(a => a.status === 'proposta' && !a.perfil_id && a.tipo !== 'copiloto');
+    } catch { propostasConv = []; }
+    renderPropostas();
+  }
+  function renderPropostas() {
+    const el = $('#chatPropostas');
+    if (!el) return;
+    if (!propostasConv.length) { el.hidden = true; el.innerHTML = ''; return; }
+    el.innerHTML = propostasConv.slice(0, 4).map(a => {
+      const [ico, nome] = TIPOS[a.tipo] || ['•', a.tipo];
+      const p = a.entrada || a.parametros || {};
+      const enviar = a.tipo === 'responder' && p.enviar;
+      return `<div class="proposta" data-id="${esc(a.id)}">
+        <span class="proposta-ico" aria-hidden="true">${esc(ico)}</span>
+        <span class="proposta-txt"><b>✨ IA propôs:</b> ${esc(enviar ? 'enviar esta mensagem' : (a.resumo || nome))}${enviar && p.texto ? `<small>${esc(p.texto)}</small>` : ''}</span>
+        <button type="button" class="btn sm btn-aprovar" data-acao="executar" ${ocupado ? 'disabled' : ''} aria-label="Aprovar: ${esc(a.resumo || nome)}">${enviar ? '✉️ Aprovar e enviar' : '✓ Aprovar'}</button>
+        <button type="button" class="btn btn-ghost sm" data-acao="recusar" ${ocupado ? 'disabled' : ''} aria-label="Recusar: ${esc(a.resumo || nome)}">Recusar</button>
+      </div>`;
+    }).join('') + (propostasConv.length > 4 ? `<p class="aviso">+ ${propostasConv.length - 4} no painel do copiloto (✨)</p>` : '');
+    el.hidden = false;
+  }
+  $('#chatPropostas')?.addEventListener('click', async ev => {
+    const b = ev.target.closest('[data-acao]'); if (!b || ocupado) return;
+    const linha = b.closest('.proposta'); const id = linha?.dataset.id; if (!id) return;
+    ocupado = true; linha.setAttribute('aria-busy', 'true'); $('#chatPropostas').setAttribute('aria-busy', 'true');
+    try {
+      const j = await api('POST', `/api/ia/acoes/${encodeURIComponent(id)}/${b.dataset.acao}`, b.dataset.acao === 'recusar' ? { motivo: 'recusado na conversa' } : undefined);
+      toast(j.mensagem || (b.dataset.acao === 'recusar' ? 'Recusado.' : 'Feito.'));
+      propostasConv = propostasConv.filter(a => a.id !== id);
+      renderPropostas();
+      if (b.dataset.acao === 'executar' && conversaAtual) { await Promise.all([carregarMensagens(), carregarFicha(conversaAtual)]); renderEtapaDoChat(); }
+    } catch (e) { toast('⚠️ ' + erroLegivel(e.message)); }
+    finally { ocupado = false; linha?.removeAttribute('aria-busy'); $('#chatPropostas')?.removeAttribute('aria-busy'); renderPropostas(); }
+  });
+  // o painel do copiloto executou/recusou algo: a faixa acompanha
+  window.addEventListener('indycar:ia-acao', () => { if (conversaAtual) carregarPropostas(conversaAtual); });
+
+  /* ---------------- aba IA: autonomia ---------------- */
+  function nivelDaEtapa(e) { return (cfg?.funil_autonomia || {})[e] || 'herdar'; }
+  function renderAutonomia() {
+    const selo = $('#seloFunil');
+    if (cfg && selo) { const on = cfg.ativo && cfg.funil_ativo !== false; selo.textContent = on ? 'ligada' : (cfg.ativo ? 'só copiloto' : 'IA desligada'); selo.className = 'selo ' + (on ? 'on' : 'off'); }
+    const sw = $('#cfgFunilAtivo'); if (sw) { sw.checked = cfg ? cfg.funil_ativo !== false : false; sw.disabled = !podeEditar; }
+    $$('#autonomiaGeral .seg').forEach(b => { const on = b.dataset.nivel === cfg?.autonomia; b.classList.toggle('ativo', on); b.setAttribute('aria-checked', String(on)); b.disabled = !podeEditar; });
+    const tb = $('#autonomiaEtapas'); if (!tb) return;
+    tb.innerHTML = ETAPAS.map(([k, nome, desc]) => {
+      const atual = nivelDaEtapa(k), efetivo = atual === 'herdar' ? (cfg?.autonomia || 'confirmar') : atual;
+      return `<tr data-etapa="${k}"><td><b>${esc(nome)}</b><span class="etapa-desc">${esc(desc)}</span></td>
+        <td><div class="segmento" role="radiogroup" aria-label="Autonomia: ${esc(nome)}">
+          <button type="button" class="seg herdar${atual === 'herdar' ? ' ativo' : ''}" data-nivel="herdar" role="radio" aria-checked="${atual === 'herdar'}" ${podeEditar ? '' : 'disabled'} title="Segue o padrão (${esc(NIVEL[efetivo])})">Padrão${atual === 'herdar' ? ' · ' + esc(NIVEL[efetivo]) : ''}</button>
+          ${['sugerir', 'confirmar', 'automatico'].map(n => `<button type="button" class="seg nivel-${n}${atual === n ? ' ativo' : ''}" data-nivel="${n}" role="radio" aria-checked="${atual === n}" ${podeEditar ? '' : 'disabled'}>${esc(NIVEL[n])}</button>`).join('')}
+        </div></td></tr>`;
+    }).join('');
+    const aviso = $('#autonomiaAviso');
+    if (aviso && !podeEditar) aviso.textContent = 'Só o administrador muda a autonomia. Peça a ele se precisar de outro ajuste.';
+  }
+  async function salvarAutonomia(muda) {
+    const msg = $('#autonomiaMsg');
+    try {
+      const j = await api('PUT', '/api/ia/config', muda);
+      cfg = j.config || cfg; renderAutonomia();
+      if (msg) { msg.hidden = false; msg.className = 'form-msg ok'; msg.textContent = '✓ Salvo. Vale para a próxima mensagem que chegar.'; setTimeout(() => { msg.hidden = true; }, 3500); }
+    } catch (e) { if (msg) { msg.hidden = false; msg.className = 'form-msg erro'; msg.textContent = '⚠️ ' + erroLegivel(e.message); } }
+  }
+  $('#autonomiaGeral')?.addEventListener('click', ev => { const b = ev.target.closest('[data-nivel]'); if (b && podeEditar && b.dataset.nivel !== cfg?.autonomia) salvarAutonomia({ autonomia: b.dataset.nivel }); });
+  $('#autonomiaEtapas')?.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-nivel]'); const tr = ev.target.closest('tr[data-etapa]');
+    if (!b || !tr || !podeEditar) return;
+    const fa = { ...(cfg?.funil_autonomia || {}) };
+    if (b.dataset.nivel === 'herdar') delete fa[tr.dataset.etapa]; else fa[tr.dataset.etapa] = b.dataset.nivel;
+    salvarAutonomia({ funil_autonomia: fa });
+  });
+  $('#cfgFunilAtivo')?.addEventListener('change', ev => { if (podeEditar) salvarAutonomia({ funil_ativo: ev.target.checked }); });
+
+  /* ---------------- aba IA: IA em ação ---------------- */
+  async function carregarConfig() {
+    try { const j = await api('GET', '/api/ia/config'); cfg = j.config || null; podeEditar = !!j.podeEditar; }
+    catch { cfg = cfg || null; podeEditar = false; }
+    renderAutonomia();
+  }
+  async function carregarHoje() {
+    const lista = $('#iaHojeLista'), tot = $('#iaHojeTotais'); if (!lista) return;
+    try {
+      const j = await api('GET', '/api/ia/hoje');
+      const t = j.totais || {};
+      tot.innerHTML = [
+        ['conversas', 'conversas tocadas', ''], ['enviadas', 'mensagens enviadas', 'ok'], ['agendamentos', 'horários marcados', 'ok'],
+        ['propostas', 'esperando clique', t.propostas ? 'quente' : ''], ['humano', 'passados para gente', ''], ['erros', 'erros', t.erros ? 'quente' : ''],
+      ].map(([k, r, cls]) => `<div class="ia-total ${cls}"><b>${esc(String(t[k] ?? 0))}</b><span>${esc(r)}</span></div>`).join('')
+        + (j.fila ? `<div class="ia-total"><b>${esc(String((j.fila.pendente || 0) + (j.fila.processando || 0)))}</b><span>na fila agora</span></div>` : '');
+      $('#iaHojeQuando').textContent = j.desde ? 'desde ' + new Date(j.desde).toLocaleDateString('pt-BR') : '';
+      const btnFila = $('#btnIaFilaRodar'); if (btnFila) btnFila.hidden = !ehGestorAqui() || !((j.fila?.pendente || 0) + (j.fila?.processando || 0));
+      if (!j.conversas?.length) { lista.innerHTML = '<div class="vazio estado-vazio"><span class="vazio-ico" aria-hidden="true">✨</span><p>A IA ainda não agiu hoje. Quando um cliente escrever, o que ela fizer aparece aqui — com desfazer.</p></div>'; return; }
+      lista.innerHTML = j.conversas.map(c => `<div class="ia-conv">
+        <div class="ia-conv-topo"><strong>${esc(c.nome || telefoneBonito(c.telefone) || 'Cliente')}</strong>
+          <span>${c.conversa_id ? `<button type="button" class="link" data-abrir="${esc(c.conversa_id)}">abrir conversa ›</button>` : ''}${RESPONDENDO.has(c.conversa_id) ? ' <span class="tag ia-respondendo"><i class="girando"></i> respondendo</span>' : ''}</span></div>
+        <ul>${c.acoes.map(a => { const [ico, nome] = TIPOS[a.tipo] || ['•', a.tipo]; const [rot, cls] = STATUS[a.status] || [a.status, '']; return `<li class="ia-acao" data-id="${esc(a.id)}">
+            <span class="quando">${esc(hora(a.created_at))}</span><span aria-hidden="true">${esc(ico)}</span>
+            <span class="resumo">${esc(a.tipo === 'responder' ? nome : (a.resumo || nome))}${a.texto ? `<span class="texto-ia">“${esc(a.texto)}”</span>` : ''}${a.erro ? `<span class="texto-ia">⚠ ${esc(a.erro)}</span>` : ''}</span>
+            <span class="tag ${cls}">${esc(a.automatica && a.status === 'executada' ? 'feito sozinha' : rot)}</span>
+            ${a.status === 'proposta' ? `<button type="button" class="btn sm btn-aprovar" data-ia="executar">${a.tipo === 'responder' ? '✉️ Aprovar e enviar' : '✓ Aprovar'}</button><button type="button" class="btn btn-ghost sm" data-ia="recusar">Recusar</button>` : ''}
+            ${a.status === 'executada' && a.reversivel ? '<button type="button" class="btn btn-ghost sm" data-ia="desfazer">↶ Desfazer</button>' : ''}
+          </li>`; }).join('')}</ul></div>`).join('');
+    } catch (e) { lista.innerHTML = `<p class="aviso">⚠️ ${esc(erroLegivel(e.message))}</p>`; }
+  }
+  $('#iaHojeLista')?.addEventListener('click', async ev => {
+    const abrir = ev.target.closest('[data-abrir]');
+    if (abrir) { $$('.nav-item').find(b => b.dataset.aba === 'conversas')?.click(); return abrirConversa(abrir.dataset.abrir); }
+    const b = ev.target.closest('[data-ia]'); if (!b || ocupado) return;
+    const id = b.closest('[data-id]')?.dataset.id; if (!id) return;
+    ocupado = true; b.disabled = true;
+    try { const j = await api('POST', `/api/ia/acoes/${encodeURIComponent(id)}/${b.dataset.ia}`, b.dataset.ia === 'recusar' ? { motivo: 'recusado em IA em ação' } : undefined); toast(j.mensagem || 'Feito.'); await carregarHoje(); if (conversaAtual) carregarPropostas(conversaAtual); }
+    catch (e) { toast('⚠️ ' + erroLegivel(e.message)); b.disabled = false; }
+    finally { ocupado = false; }
+  });
+  $('#btnIaHojeAtualizar')?.addEventListener('click', () => carregarHoje());
+  $('#btnIaFilaRodar')?.addEventListener('click', async () => {
+    const b = $('#btnIaFilaRodar'); b.disabled = true;
+    try { const j = await api('POST', '/api/ia/funil/processar'); toast(`▶ Fila: ${j.feitas || 0} respondida(s), ${j.puladas || 0} pulada(s), ${j.erros || 0} erro(s)`); await carregarHoje(); }
+    catch (e) { toast('⚠️ ' + erroLegivel(e.message)); } finally { b.disabled = false; }
+  });
+  function abrirAba() { carregarConfig(); carregarHoje(); }
+
+  return { iniciar, abrirAba, aoAbrirConversa, aoFecharConversa, aoMudarFila, respondendo, carregarPropostas, carregarHoje };
+})();
+
+/* ---------------- rodada 5: ?aba=<nome> abre a aba certa (link de outro app) ----------------
+   O Comunicar manda para "?aba=integracoes" quando a chave do CodeWords precisa ser trocada:
+   abre Configurações › Integrações com o campo da chave em foco. Quem não é admin vê
+   "peça ao gestor" (o cartão da chave já é só de admin). O parâmetro sai do endereço depois. */
+function abrirAbaPeloEndereco() {
+  let aba;
+  try { aba = new URLSearchParams(location.search).get('aba'); } catch { return; }
+  if (!aba) return;
+  const botao = document.querySelector(`.nav-item[data-aba="${CSS.escape(aba)}"]`);
+  try { const u = new URL(location.href); u.searchParams.delete('aba'); history.replaceState(null, '', u.pathname + (u.searchParams.toString() ? '?' + u.searchParams : '') + u.hash); } catch { /* ignora */ }
+  if (!botao || botao.hidden) { toast('⚠️ Essa tela não está disponível para o seu papel.'); return; }
+  botao.click();
+  if (aba !== 'integracoes') return;
+  if (perfil?.papel !== 'admin') {
+    toast('🔑 Trocar a chave do CodeWords é só do administrador — peça ao gestor.');
+    return;
+  }
+  setTimeout(() => {
+    const campo = $('#chaveNova');
+    const caixa = $('#chaveBox');
+    caixa?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    caixa?.classList.add('destaque-chave');
+    campo?.focus();
+    toast('🔑 Cole a chave nova do CodeWords e clique em "Testar e salvar".');
+  }, 300);
+}

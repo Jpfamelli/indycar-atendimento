@@ -24,7 +24,7 @@
     document.body.appendChild(el);
   }
 
-  navigator.serviceWorker.register('/sw.js').then((reg) => {
+  navigator.serviceWorker.register('sw.js').then((reg) => {
     // confere de tempos em tempos se saiu versão nova (app aberto o dia inteiro)
     setInterval(() => { if (!document.hidden && navigator.onLine !== false) reg.update().catch(() => {}); }, 30 * 60_000);
   }).catch(() => { /* sem service worker o app funciona igual; só não instala */ });

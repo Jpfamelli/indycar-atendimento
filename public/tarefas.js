@@ -11,11 +11,8 @@
    Tabelas tarefas/notificacoes direto pelo supabase-js (o RLS já libera).
    ============================================================ */
 const Tarefas = (() => {
-  const LINKS_APP = {
-    atendimento: 'https://indycar-atendimento.onrender.com', crm: 'https://indycar-crm.onrender.com',
-    agenda: 'https://indycar-agendamentos.onrender.com', comunicar: 'https://indycar-posvenda.onrender.com',
-    orcador: 'https://indycar-orcador.netlify.app',
-  };
+  /* Rodada 5: endereços dos apps num lugar só (public/apps.js). */
+  const LINKS_APP = new Proxy({}, { get: (_, app) => (window.IndyCarApps ? window.IndyCarApps.link(app) : null) || '' });
   const ICO_NOTIF = { tarefa: '✓', conversa: '↪', aguardando: '⏳', lead: '📈', sistema: '⚙️', ia: '✨' };
   const PRIO = { 1: { nome: 'Alta', cls: 'prio-1' }, 2: { nome: 'Normal', cls: 'prio-2' }, 3: { nome: 'Baixa', cls: 'prio-3' } };
 

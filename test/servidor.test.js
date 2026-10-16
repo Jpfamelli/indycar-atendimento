@@ -195,10 +195,16 @@ test('server.js: JSON grande sai em gzip; pequeno cru', async () => {
   });
 });
 
-test('index.html: rede.js antes de tudo, Supabase local com reserva da CDN, casca.js e sw v14 com tudo no CORE', () => {
+test('index.html: apps.js e rede.js antes de tudo, Supabase local com reserva da CDN, casca.js e sw com tudo no CORE (caminhos relativos)', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
-  const iRede = html.indexOf('<script src="rede.js"></script>'), iSb = html.indexOf('<script src="/vendor/supabase.js"></script>'), iApp = html.indexOf('<script src="app.js"></script>');
-  assert.ok(iRede > 0 && iRede < iSb && iSb < iApp);
+  const iApps = html.indexOf('<script src="apps.js"></script>'), iRede = html.indexOf('<script src="rede.js"></script>'), iSb = html.indexOf('<script src="vendor/supabase.js"></script>'), iApp = html.indexOf('<script src="app.js"></script>');
+  assert.ok(iApps > 0 && iApps < iRede && iRede < iSb && iSb < iApp);
+  // rodada 5 (Central): nada com barra inicial no HTML, no manifest nem no registro do SW
+  assert.ok(!/(href|src)="\/[a-z]/i.test(html), 'index.html sem caminho absoluto');
+  const man = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'public', 'manifest.json'), 'utf8'));
+  assert.equal(man.start_url, './'); assert.equal(man.scope, './');
+  assert.ok(man.icons.every(i => !i.src.startsWith('/')) && man.shortcuts.every(x => x.url.startsWith('./')));
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'public', 'casca.js'), 'utf8'), /register\('sw\.js'\)/);
   assert.match(html, /supabase-js@2\.112\.0/);
   // a reserva da CDN escreve um <script> dentro de outro: o fechamento TEM de ir escapado
   const reserva = html.split('\n').find(l => l.includes('document.write'));
@@ -206,10 +212,75 @@ test('index.html: rede.js antes de tudo, Supabase local com reserva da CDN, casc
   assert.equal(reserva.split('</script>').length, 2, 'só o fechamento do script embutido');
   assert.match(html, /<script src="casca\.js" defer><\/script>/);
   const sw = fs.readFileSync(path.join(__dirname, '..', 'public', 'sw.js'), 'utf8');
-  const core = JSON.parse(/const CORE = (\[[\s\S]*?\]);/.exec(sw)[1].replace(/'/g, '"'));
+  // rodada 5: a lista é relativa à pasta do sw.js (RAIZ) — funciona em "/" e em "/atendimento/"
+  const core = JSON.parse(/const ARQUIVOS = (\[[\s\S]*?\]);/.exec(sw)[1].replace(/'/g, '"'));
   for (const f of core) {
-    const arq = f === '/' ? 'index.html' : f.startsWith('/vendor/') ? null : f.slice(1);
+    const arq = f === '' ? 'index.html' : f.startsWith('vendor/') ? null : f;
     if (arq) assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', arq)), `CORE ${f} existe`);
   }
-  assert.ok(core.includes('/rede.js') && core.includes('/vendor/supabase.js') && core.includes('/casca.js'));
+  assert.ok(core.includes('apps.js') && core.includes('rede.js') && core.includes('vendor/supabase.js') && core.includes('casca.js'));
+  assert.ok(!core.some(f => f.startsWith('/')), 'nada com barra inicial');
+  assert.match(sw, /const RAIZ = self\.location\.pathname/);
+  assert.match(sw, /startsWith\(RAIZ \+ 'api\/'\)/);
+});
+
+/* ---------------- rodada 5: pronto para a Central (prefixo) e IA do funil ---------------- */
+test('server.js exporta handler/iniciar e não abre porta ao ser importado; montado em /atendimento/ atrás de um proxy mínimo funciona com <base href>', async () => {
+  assert.equal(typeof app.handler, 'function');
+  assert.equal(typeof app.iniciar, 'function');
+  assert.equal(app.normalizarPrefixo('atendimento'), '/atendimento/');
+  assert.equal(app.normalizarPrefixo('/atendimento'), '/atendimento/');
+  assert.equal(app.normalizarPrefixo(''), '/');
+  // proxy mínimo = o que a Central vai fazer: tira o prefixo de req.url e põe req.prefixo
+  const http = require('node:http');
+  const proxy = http.createServer((req, res) => {
+    if (!req.url.startsWith('/atendimento')) { res.writeHead(404); return res.end('outro app'); }
+    req.prefixo = '/atendimento/';
+    req.url = req.url.slice('/atendimento'.length) || '/';
+    return app.handler(req, res);
+  });
+  await new Promise(r => proxy.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${proxy.address().port}`;
+  try {
+    const r = await fetch(base + '/atendimento/');
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.match(html, /<base href="\/atendimento\/" \/>/, 'base injetada com o prefixo');
+    assert.match(r.headers.get('content-security-policy'), /base-uri 'self'/);
+    const raiz = await (await fetch(base + '/atendimento/')).headers.get('etag');
+    assert.ok(raiz, 'ETag por prefixo');
+    for (const f of ['styles.css', 'apps.js', 'rede.js', 'sw.js', 'manifest.json', 'vendor/supabase.js', 'copiloto.js']) {
+      const x = await fetch(`${base}/atendimento/${f}`);
+      assert.equal(x.status, 200, f);
+    }
+    const st = await (await fetch(base + '/atendimento/api/status')).json();
+    assert.equal(st.app, 'atendimento');
+    const cfg = await (await fetch(base + '/atendimento/api/config')).json();
+    assert.equal(cfg.prefixo, '/atendimento/');
+    const fora = await fetch(base + '/crm/');
+    assert.equal(fora.status, 404);
+    // sozinho (sem proxy) a base é "/" e a ETag é outra
+    await new Promise(r => app.server.listen(0, '127.0.0.1', r));
+    try {
+      const so = await fetch(`http://127.0.0.1:${app.server.address().port}/`);
+      assert.match(await so.text(), /<base href="\/" \/>/);
+      assert.notEqual(so.headers.get('etag'), raiz);
+    } finally { await new Promise(r => app.server.close(r)); }
+  } finally { await new Promise(r => proxy.close(r)); }
+});
+
+test('IA do funil: /api/ia/funil/acordar é pública mas exige o token do webhook; estado/hoje/processar exigem login', async () => {
+  await comServidor(async base => {
+    const semToken = await fetch(base + '/api/ia/funil/acordar', { method: 'POST', body: '{}' });
+    assert.equal(semToken.status, 401);
+    assert.equal((await semToken.json()).codigo, 'token-invalido');
+    const errado = await fetch(base + '/api/ia/funil/acordar', { method: 'POST', body: '{}', headers: { 'x-codewords-token': 'xyz' } });
+    assert.equal(errado.status, 401);
+    for (const [m, c] of [['GET', '/api/ia/funil/estado'], ['POST', '/api/ia/funil/processar'], ['GET', '/api/ia/hoje']]) {
+      const r = await fetch(base + c, { method: m, body: m === 'GET' ? undefined : '{}' });
+      assert.equal(r.status, 401, `${m} ${c}`);
+    }
+    const seg = require('../lib/rotas-ia.js').segredosIguais;
+    assert.equal(seg('abc', 'abc'), true); assert.equal(seg('abc', 'abd'), false); assert.equal(seg('', ''), false); assert.equal(seg(undefined, 'x'), false);
+  });
 });

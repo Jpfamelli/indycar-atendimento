@@ -453,3 +453,41 @@ node scripts/roteiro-rodada4.cjs           # 145 conferências (1440 e 375 px)
 node scripts/roteiro-casca.cjs             # server.js real atrás de um "Render" que responde 503
 node scripts/avaliar-copiloto.mjs <ids>    # IA com conversas reais, banco SÓ LEITURA, modo "sugerir" (custa tokens)
 ```
+
+---
+
+## 🧠 Rodada 5 (16/10/2026) — a IA conduz o funil
+
+Quando o cliente escreve, o banco grava a mensagem na fila `at_ia_fila` e **acorda o servidor**
+(`POST /api/ia/funil/acordar`, com o mesmo token do webhook do CodeWords). O servidor lê a ficha
+inteira (`cliente_360` pelo telefone), decide se é caso de gente (preço, urgência, pedir pessoa,
+reclamação) e conduz: pergunta o carro, oferece **dois horários livres de verdade**, marca o horário
+(lead + agendamento + consultor livre, conferido também na função da Agenda `agenda_horarios_livres`),
+confirma por mensagem e registra tudo em `ia_acoes`. Mensagem do botão do site ("Olá! Vim pelo site…
+quero orçar: X (site/código)") já chega com serviço e campanha identificados.
+
+**Até onde ela vai** (Atendimento › IA › "Até onde a IA vai sozinha", só admin): padrão
+*Só sugerir / Pedir um clique / Fazer sozinha* e, por etapa, *Responder · Marcar horário · Ficha, lead
+e etapa · Passar para gente*. Em "pedir um clique" o dono da conversa recebe o aviso no sino e aprova
+dentro da conversa (faixa "✨ IA propôs…") ou em **IA em ação** (o que ela fez hoje, com desfazer).
+Cancelar horário, religar quem pediu PARAR, ganho/perda e tarefa para outra pessoa sempre pedem clique.
+
+| O quê | Onde |
+|---|---|
+| Motor do funil (fila, humano, site, conduzir, IA em ação) | `lib/ia-funil.js` · `test/ia-funil.test.js` |
+| Papel da IA no funil, autonomia por etapa, envio da resposta, consultor livre | `lib/ia-copiloto.js` (`PAPEL_FUNIL`, `niveisDoFunil`, `decisaoDoFunil`) |
+| Fila, gatilho, despertador (pg_cron a cada minuto, só com fila) | `scripts/sql/2026-10-16_at_ia_funil_v1.sql` |
+| Rotas | `POST /api/ia/funil/acordar` (token) · `GET /api/ia/funil/estado` · `POST /api/ia/funil/processar` (gestor) · `GET /api/ia/hoje` |
+| Tela | aba IA (autonomia + IA em ação), `#chatPropostas`, `#chatIA`, copiloto ("Próximo passo", respostas rápidas, "Aprovar e enviar") |
+| Follow-up automático (cliente sumiu 24 h → tarefa) | `lib/automacoes.js` (`followUp24h`) |
+
+Variáveis: `IA_FUNIL=0` desliga neste servidor. Nada novo no Render: o token do webhook já existe no banco.
+
+### Preparo para a IndyCar Central
+`server.js` exporta `{ handler, iniciar }` (`listen` só em `node server.js`); a Central tira o prefixo de
+`req.url`, põe `req.prefixo` e o servidor injeta `<base href>` no HTML. A tela usa caminhos relativos;
+`public/apps.js` é o único lugar com os endereços dos apps e com o prefixo; `rede.js` leva todo
+`fetch('/api/…')` para dentro do prefixo; `sw.js` e `manifest.json` são relativos. Testar:
+`PORT=3226 PREFIXO=atendimento node scripts/mock-server.mjs` → http://localhost:3226/atendimento/ e
+`node scripts/roteiro-rodada5.cjs`. Quando a Central entrar no ar, trocar `ia_config.funil_url`
+(`PUT /api/ia/config {funil_url}`) para o endereço novo do despertador.

@@ -16,6 +16,7 @@ const PAT  = require('./lib/patio.js');
 // Copiloto: ficha completa, IA com ferramentas, resumo do dia e as rotas
 const CTX  = require('./lib/contexto.js');
 const IA   = require('./lib/ia-copiloto.js');
+const FUN  = require('./lib/ia-funil.js');
 const RD   = require('./lib/resumo-dia.js');
 const { criarRotasIA } = require('./lib/rotas-ia.js');
 // Rodada 3: segurança, acesso por app, central da equipe, auditoria, rodízio, tarefas, automações
@@ -53,6 +54,19 @@ const SUPABASE_URL      = process.env.SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 // sem MODELO_IA no .env, o modelo vem de ia_config.modelo_rapido (ver modeloRapido())
 const MODELO_IA         = process.env.MODELO_IA || '';
+
+/* Rodada 5 — preparo para a IndyCar Central (onda B2): este app pode ser montado
+   num prefixo (ex.: /atendimento/). A Central tira o prefixo de `req.url` e põe
+   `req.prefixo`; sozinho, vale a variável PREFIXO ou "/". A tela recebe o prefixo
+   pelo <base href> injetado no index.html e monta todos os caminhos relativos. */
+function normalizarPrefixo(p) {
+  let s = String(p || '/').trim();
+  if (!s.startsWith('/')) s = '/' + s;
+  if (!s.endsWith('/')) s += '/';
+  return s.replace(/\/{2,}/g, '/');
+}
+const PREFIXO_PADRAO = normalizarPrefixo(process.env.PREFIXO || '/');
+const prefixoDe = req => normalizarPrefixo(req && req.prefixo ? req.prefixo : PREFIXO_PADRAO);
 
 const MIME = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8',
                '.js':'text/javascript; charset=utf-8', '.png':'image/png',
@@ -155,6 +169,21 @@ function lerEstatico(file, cb) {
     });
   });
 }
+/* HTML com o <base href="<prefixo>"> injetado (um cache por prefixo; a ETag muda junto).
+   Com base, "styles.css", "api/eu", "manifest.json" resolvem dentro do prefixo da Central. */
+const HTML_CACHE = new Map();   // `${file}|${prefixo}` -> { mtime, buf, etag, br, gz }
+function htmlComBase(file, item, prefixo) {
+  const chave = `${file}|${prefixo}`;
+  const c = HTML_CACHE.get(chave);
+  if (c && c.mtime === item.mtime) return c;
+  let html = item.buf.toString('utf8');
+  if (!/<base\s/i.test(html)) html = html.replace(/<head([^>]*)>/i, m => `${m}\n  <base href="${prefixo.replace(/"/g, '')}" />`);
+  const buf = Buffer.from(html, 'utf8');
+  const novo = { mtime: item.mtime, buf, etag: '"' + crypto.createHash('sha1').update(buf).digest('base64url').slice(0, 20) + '"' };
+  if (HTML_CACHE.size > 20) HTML_CACHE.clear();
+  HTML_CACHE.set(chave, novo);
+  return novo;
+}
 function corpoComprimido(item, cod) {
   if (cod === 'br') return item.br || (item.br = zlib.brotliCompressSync(item.buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } }));
   if (cod === 'gzip') return item.gz || (item.gz = zlib.gzipSync(item.buf, { level: 9 }));
@@ -178,9 +207,10 @@ function serveStatic(req, res, urlPath) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('não encontrado');
     }
   }
-  lerEstatico(file, (err, item) => {
+  lerEstatico(file, (err, lido) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('não encontrado'); }
     const ext = path.extname(file);
+    const item = ext === '.html' ? htmlComBase(file, lido, prefixoDe(req)) : lido;
     const tipo = MIME[ext] || 'application/octet-stream';
     const cab = { 'Content-Type': tipo, 'X-Content-Type-Options': 'nosniff', ETag: item.etag, Vary: 'Accept-Encoding',
       // HTML e service worker sempre frescos (versão nova chega na hora); vendor travado = 1 dia; o resto, 1 h com revalidação
@@ -488,16 +518,43 @@ async function criarClienteIA() {
   return CLIENTE_IA;
 }
 
-let COPILOTO = null, CONTEXTO = null, RESUMO_DIA = null;
+let COPILOTO = null, CONTEXTO = null, RESUMO_DIA = null, FUNIL_IA = null;
 function copiloto() {
   const sb = adminSupabase();
   if (!sb) return null;
   if (!COPILOTO) {
     CONTEXTO = CTX.criarContexto({ sb });
-    COPILOTO = IA.criarCopiloto({ sb, contexto: CONTEXTO, criarIA: criarClienteIA, persona: PERSONA });
+    COPILOTO = IA.criarCopiloto({ sb, contexto: CONTEXTO, criarIA: criarClienteIA, persona: PERSONA, enviarMensagem: enviarPelaIA });
     RESUMO_DIA = RD.criarResumoDoDia({ sb, criarIA: criarClienteIA, copiloto: COPILOTO });
   }
   return COPILOTO;
+}
+/* Rodada 5: a IA do funil (lib/ia-funil.js). IA_FUNIL=0 desliga neste servidor. */
+function funilIA() {
+  if (process.env.IA_FUNIL === '0') return null;
+  const cop = copiloto();
+  if (!cop) return null;
+  if (!FUNIL_IA) FUNIL_IA = FUN.criarFunil({ sb: adminSupabase(), copiloto: cop, contexto: CONTEXTO });
+  return FUNIL_IA;
+}
+/**
+ * A IA manda uma mensagem ao cliente: grava na fila de saída (`whatsapp_mensagens`, como a tela
+ * faz, com gerada_por_ia) e pede ao entregador para mandar pelo CodeWords sem duplicar.
+ * Com a chave do CodeWords recusada a linha fica "falhou" — e sai quando a chave voltar
+ * pela retomada da tela, igual às mensagens dos atendentes.
+ */
+async function enviarPelaIA({ conversa, cliente_id = null, texto, acao_id = null }) {
+  const sb = adminSupabase();
+  if (!sb) return { ok: false, status: 503, erro: 'Servidor sem a chave do banco.' };
+  const corpo = String(texto || '').trim().slice(0, 4000);
+  if (!corpo) return { ok: false, status: 400, erro: 'Mensagem vazia.' };
+  const { data: linha, error } = await sb.from('whatsapp_mensagens').insert({
+    conversa_id: conversa.id, cliente_id: cliente_id || conversa.cliente_id || null, telefone: conversa.telefone, nome: conversa.nome || null,
+    corpo, direcao: 'saida', status: 'pendente', gerada_por_ia: true,
+  }).select('id,created_at').single();
+  if (error) return { ok: false, status: 503, erro: 'Não consegui registrar a mensagem: ' + error.message };
+  const r = await ENTREGADOR.entregar({ telefone: conversa.telefone, corpo, nome: conversa.nome || null, conversaId: conversa.id }, linha.id);
+  return { ok: !!r.ok, mensagem_id: linha.id, erro: r.ok ? null : (r.erro || 'o WhatsApp não confirmou'), desligado: !!r.desligado, acao_id };
 }
 
 /** Modelo do dia a dia: MODELO_IA do .env manda; senão ia_config.modelo_rapido. */
@@ -2150,6 +2207,15 @@ const ROTAS_IA = criarRotasIA({
   contexto: new Proxy({}, { get: (_, k) => (copiloto(), CONTEXTO)[k] }),
   resumoDoDia: (...a) => (copiloto(), RESUMO_DIA)(...a),
   auditar: (...a) => AUDITORIA().registrar(...a),
+  // rodada 5: IA do funil + o token do webhook (o banco se autentica com ele ao acordar o servidor)
+  funil: () => funilIA(),
+  tokenWebhook: async () => {
+    const sb = adminSupabase();
+    if (!sb) return null;
+    const { data } = await sb.from('codewords_config').select('token_webhook').eq('id', true).maybeSingle();
+    return typeof data?.token_webhook === 'string' ? data.token_webhook.trim() : null;
+  },
+  ipDe: req => IP_DE(req),
 });
 
 /* ------------------------------------------------------------
@@ -2178,7 +2244,7 @@ const ROTAS_EQUIPE = criarRotasEquipe({
 const ENTREGADOR = criarEntregador({ banco: () => adminSupabase(), enviar: d => enviarPeloCodeWords(d) });
 
 /* Rotas que respondem sem login (o resto de /api/ passa pelo porteiro). */
-const ROTAS_PUBLICAS = new Set(['/api/config', '/api/primeiro-acesso', '/api/webhook/codewords', '/api/status']);
+const ROTAS_PUBLICAS = new Set(['/api/config', '/api/primeiro-acesso', '/api/webhook/codewords', '/api/status', '/api/ia/funil/acordar']);
 /* Rotas que ainda respondem com a verificação em duas etapas pendente
    (a tela precisa saber quem é para pedir o código). */
 const LIVRES_DE_MFA = new Set(['/api/eu']);
@@ -2192,7 +2258,8 @@ const IP_DE = req => SEG.ipDoCliente(req, { confiarProxy: ATRAS_DO_PROXY });
 /* ------------------------------------------------------------
    Servidor
    ------------------------------------------------------------ */
-const server = http.createServer(async (req, res) => {
+/* `handler` é o que a IndyCar Central monta num prefixo (ela reescreve req.url e põe req.prefixo). */
+const handler = async (req, res) => {
   try {
     // cabeçalhos de segurança em TODA resposta (API e arquivos)
     SEG.aplicarCabecalhos(res, SEG.cabecalhosBase({ https: ehHttps(req) }));
@@ -2261,6 +2328,8 @@ const server = http.createServer(async (req, res) => {
         configurado: !!(SUPABASE_URL && SUPABASE_ANON_KEY),
         iaConfigurada: !!process.env.ANTHROPIC_API_KEY,
         modeloIA: await modeloRapido(),   // o nome do modelo não é segredo; a chave é
+        prefixo: prefixoDe(req),          // rodada 5: onde este app está montado (a Central muda)
+        funilIA: !!funilIA(),
       });
     }
 
@@ -2935,15 +3004,33 @@ const server = http.createServer(async (req, res) => {
     // nada de detalhe interno (mensagem do banco, pilha) para fora: só um código para o suporte
     json(res, 500, SEG.erroSeguro(err));
   }
-});
+};
+const server = http.createServer(handler);
 
-/* Com SO_FUNCOES=1 o arquivo só exporta as funções (para scripts de conferência
-   contra o banco real, sem abrir porta). Em produção nada muda: `node server.js`. */
-module.exports = { ENTREGADOR, lerSaude, fichaDoCliente, testarChaveCodeWords, lerChaveMascarada, salvarChaveCodeWords, server,
-                   copiloto, criarClienteIA, sugerirResposta, montarRelatorio, PERSONA,
+/**
+ * Liga o que roda em segundo plano (rodada 5: separado do `listen`, para a Central chamar).
+ * - sincronia com o aparelho (SINCRONIA=0 desliga);
+ * - automações (só na nuvem ou AUTOMACOES=1);
+ * - IA do funil (a fila `at_ia_fila`; IA_FUNIL=0 desliga) — só com a chave da IA.
+ */
+function iniciar({ log = console.log } = {}) {
+  const ligado = { sincronia: false, automacoes: false, funil: false };
+  if (adminSupabase() && process.env.SINCRONIA !== '0') { ligarSincronizacaoPeriodica(); ligado.sincronia = true; }
+  const ligarAutomacoes = process.env.AUTOMACOES === '1' || (!!process.env.RENDER && process.env.AUTOMACOES !== '0');
+  if (adminSupabase() && ligarAutomacoes) { AUTOMACOES().ligar(); ligado.automacoes = true; log('   🤖 Automações ligadas (a cada 5 min)'); }
+  if (process.env.ANTHROPIC_API_KEY && funilIA()) { funilIA().ligar(); ligado.funil = true; log('   🧠 IA do funil ligada (fila at_ia_fila)'); }
+  return ligado;
+}
+
+/* Exporta o handler (a Central monta em /atendimento/), o `iniciar` e as funções que os scripts
+   de conferência usam. `listen` só quando este arquivo é o programa principal
+   (`node server.js`); SO_FUNCOES=1 continua valendo para os scripts antigos. */
+module.exports = { handler, iniciar, server, PREFIXO_PADRAO, normalizarPrefixo,
+                   ENTREGADOR, lerSaude, fichaDoCliente, testarChaveCodeWords, lerChaveMascarada, salvarChaveCodeWords,
+                   copiloto, funilIA, enviarPelaIA, criarClienteIA, sugerirResposta, montarRelatorio, PERSONA,
                    ACESSO, LIMITE, AUDITORIA, EQUIPE, RODIZIO, TAREFAS, AUTOMACOES };
-if (process.env.SO_FUNCOES !== '1') server.listen(PORT, HOST, () => {
-  console.log(`\n💬 IndyCar Atendimento em http://localhost:${PORT}`);
+if (require.main === module && process.env.SO_FUNCOES !== '1') server.listen(PORT, HOST, () => {
+  console.log(`\n💬 IndyCar Atendimento em http://localhost:${PORT}${PREFIXO_PADRAO === '/' ? '' : PREFIXO_PADRAO}`);
   console.log(SUPABASE_URL && SUPABASE_ANON_KEY
     ? '   🗄️  Supabase conectado'
     : '   ⚠️  Falta configurar SUPABASE_URL e SUPABASE_ANON_KEY no .env');
@@ -2951,11 +3038,5 @@ if (process.env.SO_FUNCOES !== '1') server.listen(PORT, HOST, () => {
     ? '   ✨ IA pronta'
     : '   ⚠️  Sem ANTHROPIC_API_KEY — a aba de IA fica desativada');
   console.log(HOST === '127.0.0.1' ? '   (acessível só neste computador)\n' : `   exposto em ${HOST}\n`);
-  // Puxa do aparelho o que o Carlos respondeu — o webhook não recebe isso
-  // SINCRONIA=0 desliga a sincronia com o aparelho (testes e conferências locais só de leitura)
-  if (adminSupabase() && process.env.SINCRONIA !== '0') ligarSincronizacaoPeriodica();
-  /* Automações (alerta de espera, resumo do dia, dono inválido, limpeza):
-     só na nuvem (Render) ou com AUTOMACOES=1 — nunca sozinhas num teste local. */
-  const ligarAutomacoes = process.env.AUTOMACOES === '1' || (!!process.env.RENDER && process.env.AUTOMACOES !== '0');
-  if (adminSupabase() && ligarAutomacoes) { AUTOMACOES().ligar(); console.log('   🤖 Automações ligadas (a cada 5 min)'); }
+  iniciar();
 });

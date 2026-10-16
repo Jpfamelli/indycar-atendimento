@@ -137,12 +137,57 @@ test('limpeza: lidas há 60+ dias, eventos 120+ dias (cópias de exclusão ficam
   assert.equal((await cedo.aut.limpar()).pulou, 'antes das 3h');
 });
 
-test('ciclo: roda as quatro, uma falha não derruba as outras, e não roda duas vezes ao mesmo tempo', async () => {
+test('ciclo: roda as cinco, uma falha não derruba as outras, e não roda duas vezes ao mesmo tempo', async () => {
   const m = montar();
   m.sb.rpc = async () => { throw new Error('rpc fora'); };
   const [a, b] = await Promise.all([m.aut.ciclo(), m.aut.ciclo()]);
   assert.equal(b.pulou, 'já rodando');
-  assert.deepEqual(Object.keys(a), ['espera', 'donos', 'resumo', 'limpeza']);
+  assert.deepEqual(Object.keys(a), ['espera', 'donos', 'followup', 'resumo', 'limpeza']);
   assert.equal(a.espera.erro, 'falhou');
   assert.equal(a.donos.corrigidas, 1);
+});
+
+/* ---------------- rodada 5: follow-up quando o cliente some ---------------- */
+test('follow-up 24 h: loja respondeu e o cliente sumiu → tarefa para o dono; com horário marcado, resolvida ou já com tarefa não cria; uma por semana', async () => {
+  const m = montar({ ajustar: t => {
+    const h = n => new Date(QUARTA_10H.getTime() - n * 3600_000).toISOString();
+    t.conversas.push(
+      // c4: respondemos há 30 h e nada → tarefa
+      { id: 'c4000000-0000-4000-8000-000000000004', nome: 'Sumido', telefone: '5512900000004', atribuida_a: ID.ana, cliente_id: 'cl4', status: 'aberta', tipo: 'atendimento', ultima_mensagem_em: h(30), created_at: h(40) },
+      // c5: respondemos há 30 h, mas tem horário marcado → não
+      { id: 'c5000000-0000-4000-8000-000000000005', nome: 'Marcado', telefone: '5512900000005', atribuida_a: ID.ana, cliente_id: 'cl5', status: 'aberta', tipo: 'atendimento', ultima_mensagem_em: h(30), created_at: h(40) },
+      // c6: a última é do CLIENTE (ele quem espera) → é caso da espera, não do follow-up
+      { id: 'c6000000-0000-4000-8000-000000000006', nome: 'Esperando', telefone: '5512900000006', atribuida_a: null, cliente_id: null, status: 'aberta', tipo: 'atendimento', ultima_mensagem_em: h(30), created_at: h(40) },
+      // c7: respondemos há 6 h → cedo demais
+      { id: 'c7000000-0000-4000-8000-000000000007', nome: 'Cedo', telefone: '5512900000007', atribuida_a: ID.ana, cliente_id: null, status: 'aberta', tipo: 'atendimento', ultima_mensagem_em: h(6), created_at: h(10) },
+      // c8: já tem tarefa automática desta semana → não repete
+      { id: 'c8000000-0000-4000-8000-000000000008', nome: 'Repetido', telefone: '5512900000008', atribuida_a: null, cliente_id: null, status: 'aberta', tipo: 'atendimento', ultima_mensagem_em: h(30), created_at: h(40) },
+      // c9: fechou → não
+      { id: 'c9000000-0000-4000-8000-000000000009', nome: 'Fechou', telefone: '5512900000009', atribuida_a: ID.ana, cliente_id: null, status: 'aberta', tipo: 'atendimento', desfecho: 'fechou', ultima_mensagem_em: h(30), created_at: h(40) },
+    );
+    t.whatsapp_mensagens.push(
+      { conversa_id: 'c4000000-0000-4000-8000-000000000004', direcao: 'saida', corpo: 'Posso te ajudar com mais algo?', created_at: h(30) },
+      { conversa_id: 'c5000000-0000-4000-8000-000000000005', direcao: 'saida', corpo: 'Até quinta!', created_at: h(30) },
+      { conversa_id: 'c6000000-0000-4000-8000-000000000006', direcao: 'entrada', corpo: 'Oi?', created_at: h(30) },
+      { conversa_id: 'c7000000-0000-4000-8000-000000000007', direcao: 'saida', corpo: 'Já te respondo', created_at: h(6) },
+      { conversa_id: 'c8000000-0000-4000-8000-000000000008', direcao: 'saida', corpo: 'Qualquer coisa me chama', created_at: h(30) },
+      { conversa_id: 'c9000000-0000-4000-8000-000000000009', direcao: 'saida', corpo: 'Obrigado!', created_at: h(30) },
+    );
+    t.tarefas.push({ id: 't8', conversa_id: 'c8000000-0000-4000-8000-000000000008', status: 'feita', origem: 'automacao', created_at: h(50) });
+    t.agendamentos.push({ id: 'a5', cliente_id: 'cl5', status: 'confirmado', data: '2026-10-20', created_at: h(30) });
+  } });
+  const r = await m.aut.followUp24h();
+  assert.equal(r.tarefas, 1, JSON.stringify(r));
+  const t = m.db.tarefas.filter(x => x.origem === 'automacao' && x.status === 'aberta');
+  assert.equal(t.length, 1);
+  assert.equal(t[0].titulo, 'Dar um retorno para Sumido');
+  assert.equal(t[0].responsavel_id, ID.ana);
+  assert.equal(t[0].conversa_id, 'c4000000-0000-4000-8000-000000000004');
+  assert.match(t[0].descricao, /há 30 h/);
+  assert.ok(t[0].vence_em, 'vence no fim do expediente');
+  // rodar de novo não duplica
+  const r2 = await m.aut.followUp24h();
+  assert.equal(r2.tarefas, 0);
+  const c = await m.aut.ciclo();
+  assert.ok('followup' in c, 'entrou no ciclo');
 });
