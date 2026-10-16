@@ -1952,6 +1952,14 @@ async function carregarFicha(conv) {
           </div>
         </div>` : ''}
 
+      ${fx?.ok && fx.patio ? blocoDoPatioHtml(fx.patio) : ''}
+
+      ${fx?.ok ? `<div class="ficha-bloco area-bloco">
+        <div class="ficha-titulo">Área do Cliente</div>
+        <small class="ficha-sub">Histórico do carro, revisões, pedir horário e indicar amigo — pelo celular.</small>
+        <button type="button" class="btn-patio" id="btnAreaCliente">🔗 Gerar link e colar no chat</button>
+      </div>` : ''}
+
       <div class="ficha-bloco">
         <div class="ficha-titulo">Revisão</div>
         ${fx && !fx.ok ? `<div class="vazio" style="padding:10px">${esc(fx.erro || 'Não consegui ler o Comunicar.')}</div>`
@@ -2088,9 +2096,59 @@ async function carregarFicha(conv) {
       </datalist>`;
 
     ligarEdicaoDaFicha(conv, f, listaLeads, cli);
+    ligarPatioDaFicha(conv, fx);
   } catch (err) {
     alvo.innerHTML = `<div class="vazio">Não consegui carregar a ficha: ${esc(err.message)}</div>`;
   }
+}
+
+/* ---- PÁTIO (16/10/2026): o carro DENTRO da oficina -------------------------
+   Vem pronto do servidor (/api/clientes/:id/ficha → patio): etapa real, há
+   quanto tempo, previsão (só se a equipe registrou), extras esperando o cliente
+   e o link de acompanhamento — que vai para o campo da mensagem com um clique
+   (nunca é enviado sozinho). */
+const URGENCIA_PATIO = { seguranca: '⚠️ segurança', recomendado: 'recomendado', pode_esperar: 'pode esperar' };
+function blocoDoPatioHtml(p) {
+  const entregue = p.etapa === 'entregue';
+  const prev = p.previsao_entrega ? new Date(p.previsao_entrega) : null;
+  const prevTxt = prev && !Number.isNaN(prev.getTime())
+    ? prev.toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  const atrasada = prev && !entregue && p.etapa !== 'pronto' && prev < new Date();
+  return `<div class="ficha-bloco patio-bloco patio-${esc(p.tom || 'andamento')}" id="fichaPatio">
+      <div class="ficha-titulo">${entregue ? 'Saiu do pátio' : 'No pátio agora'}
+        <a class="ficha-link" href="${esc(p.abrir)}" target="_blank" rel="noopener" title="Abrir a ordem no IndyCar Pátio">Abrir no Pátio ↗</a></div>
+      <div class="patio-etapa">
+        <b>${esc(p.etapa_rotulo)}</b>
+        <small>${p.tempo_na_etapa && !entregue ? 'há ' + esc(p.tempo_na_etapa) + ' · ' : ''}ordem nº ${esc(p.numero ?? '—')}${p.placa ? ' · ' + esc(p.placa) : ''}</small>
+      </div>
+      ${!entregue && p.etapa !== 'pronto' ? `<div class="ficha-linha"><span>Previsão</span><b>${prevTxt
+        ? esc(prevTxt) + (atrasada ? ' <span class="tag atrasada">passou</span>' : '')
+        : '<span class="ficha-faltando">sem previsão — não prometa prazo</span>'}</b></div>` : ''}
+      ${p.extras_pendentes?.length ? `<div class="patio-extras" aria-label="Extras esperando o cliente">
+        ${p.extras_pendentes.map(e => `<div class="ficha-linha"><span>⏳ ${esc(e.descricao)} <small class="ficha-sub">${esc(URGENCIA_PATIO[e.urgencia] || e.urgencia || '')}</small></span>
+          <b>${e.valor ? brl(e.valor) : '—'}</b></div>`).join('')}</div>` : ''}
+      ${p.extras_aprovados || p.extras_recusados ? `<small class="ficha-sub">${p.extras_aprovados ? `✅ ${p.extras_aprovados} aprovado${p.extras_aprovados > 1 ? 's' : ''} (${brl(p.valor_aprovado)})` : ''}${p.extras_aprovados && p.extras_recusados ? ' · ' : ''}${p.extras_recusados ? `✖ ${p.extras_recusados} recusado${p.extras_recusados > 1 ? 's' : ''}` : ''}</small>` : ''}
+      ${p.link_cliente && !entregue ? `<button type="button" class="btn-patio" id="btnPatioLink">📋 Colar link de acompanhamento no chat</button>
+        <small class="ficha-sub">${p.link_visto_em ? 'O cliente já abriu o link.' : 'O cliente ainda não abriu o link.'}</small>` : ''}
+    </div>`;
+}
+function ligarPatioDaFicha(conv, fx) {
+  $('#btnPatioLink')?.addEventListener('click', () => {
+    if (inserirNoCampo(fx?.patio?.texto_link || fx?.patio?.link_cliente || '')) toast('📋 Link de acompanhamento no campo — revise e envie');
+  });
+  $('#btnAreaCliente')?.addEventListener('click', async (ev) => {
+    const b = ev.currentTarget;
+    b.disabled = true;
+    try {
+      const r = await fetch(`/api/clientes/${encodeURIComponent(conv.cliente_id)}/area-cliente`, {
+        method: 'POST', headers: { ...(await authCabecalhos()), 'Content-Type': 'application/json' }, body: '{}' });
+      if (r.status === 401) { await sessaoMorreu(); return; }
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.erro || 'Não consegui gerar o link agora.');
+      if (inserirNoCampo(j.texto || j.link)) toast('🔗 Link da Área do Cliente no campo — revise e envie');
+    } catch (e) { toast('⚠️ ' + e.message); }
+    finally { b.disabled = false; }
+  });
 }
 
 /* Parte da ficha que o navegador não enxerga (fila do Comunicar, regras de
@@ -2107,7 +2165,8 @@ async function fichaDoServidor(clienteId) {
 const ROTULO_ENVIO = { pendente: 'na fila', enviado: 'enviada', falhou: 'falhou', cancelado: 'cancelada', pulado: 'pulada' };
 const ROTULO_ENVIO_TIPO = { aniversario: 'Aniversário', posvenda: 'Pós-venda', retorno: 'Retorno de revisão',
   campanha: 'Campanha', avulsa: 'Avulsa', lembrete: 'Lembrete de horário', orcamento: 'Orçamento',
-  nao_fechou: 'Não fechou', reativacao: 'Reativação', avaliacao: 'Avaliação' };
+  nao_fechou: 'Não fechou', reativacao: 'Reativação', avaliacao: 'Avaliação',
+  patio_entrada: 'Pátio: carro recebido', patio_extra: 'Pátio: extra para aprovar', patio_pronto: 'Pátio: carro pronto', area_cliente: 'Área do Cliente' };
 const ROTULO_RESPOSTA = { positiva: 'positiva', negativa: 'negativa', parar: 'pediu para parar', neutra: 'neutra' };
 const ICONE_RESPOSTA = { positiva: '👍', negativa: '👎', parar: '🔕', neutra: '💬' };
 

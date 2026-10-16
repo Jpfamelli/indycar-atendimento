@@ -2091,3 +2091,27 @@ button.app-chip:not(:disabled):hover{border-color:var(--vermelho);color:var(--te
 .chat-vazio-dica kbd{font:inherit;font-size:.76rem;border:1px solid var(--linha);border-radius:5px;padding:0 5px;background:var(--superficie)}
 .chat-vazio-dica .link{background:none;border:0;color:var(--vermelho-txt);font:inherit;cursor:pointer;text-decoration:underline;padding:4px}
 .ajuda-versao{color:var(--cinza)}
+
+/* ============================================================
+   PÁTIO (16/10/2026) — "No pátio agora" e "Área do Cliente" na ficha
+   ============================================================ */
+.patio-bloco{border:1px solid var(--linha);border-left:4px solid var(--vermelho);border-radius:12px;padding:10px 12px;background:var(--superficie)}
+.patio-bloco.patio-ok{border-left-color:var(--verde)}
+.patio-bloco.patio-atencao{border-left-color:var(--amarelo)}
+.patio-bloco.patio-feito{border-left-color:var(--linha)}
+.patio-etapa{display:flex;flex-direction:column;gap:2px;margin:4px 0 8px}
+.patio-etapa b{font-family:'Barlow Condensed',system-ui,sans-serif;font-size:1.25rem;letter-spacing:.01em;line-height:1.1}
+.patio-etapa small{color:var(--texto-fraco);font-size:.76rem}
+.patio-ok .patio-etapa b{color:var(--verde-txt)}
+.patio-atencao .patio-etapa b{color:var(--amarelo-txt)}
+.patio-extras{display:grid;gap:2px;margin:6px 0}
+.btn-patio{
+  display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin:8px 0 4px;
+  border:1px solid var(--vermelho);border-radius:10px;background:transparent;color:var(--vermelho-txt);
+  padding:8px 12px;font-size:.82rem;font-weight:700;cursor:pointer;
+  transition:background-color .15s,color .15s;
+}
+.btn-patio:hover{background:var(--vermelho);color:#fff}
+.btn-patio:focus-visible{outline:2px solid var(--vermelho);outline-offset:2px}
+.btn-patio:disabled{opacity:.6;cursor:wait}
+.area-bloco .ficha-sub{display:block}

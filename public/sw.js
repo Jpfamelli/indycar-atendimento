@@ -10,7 +10,7 @@
 //    (arquivos); demorou, deu 5xx/4xx ou caiu → cópia do cache.
 // As conversas vêm direto do Supabase (que não dorme), então com a casca de pé
 // o atendente segue lendo e respondendo enquanto o servidor acorda.
-const CACHE = 'indycar-atendimento-v14';
+const CACHE = 'indycar-atendimento-v15';
 
 /* Se QUALQUER item desta lista faltar, o addAll rejeita e o service worker
    NÃO instala — o app deixa de ser instalável sem dizer por quê. Mantenha

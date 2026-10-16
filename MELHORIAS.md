@@ -734,3 +734,20 @@ tamanho médio 351 → 297 caracteres; preço 0/10 e vocabulário proibido 0/10 
 110. Ajuda é um diálogo com título ligado (aria-labelledby) e "×" com nome ("Fechar a ajuda"); lista de atalhos diz que "?" abre a Ajuda.
 111. Envio pendente não se repete em outra aba ao mesmo tempo: a retomada espera 20 s depois da anotação (a aba que enviou ainda pode estar esperando a resposta) e o servidor trava pelo id.
 112. ETag fraca (`W/"…"`, como a borda do Render/Cloudflare devolve) e lista de ETags também dão 304 — achado conferindo em produção; com teste.
+
+## Pátio (16/10/2026)
+1. Ficha do cliente ganhou o bloco **"No pátio agora"**: etapa real da ordem do IndyCar Pátio, há quanto tempo está nela, nº da ordem e placa, com a cor da situação (andamento, esperando, pronto).
+2. Previsão de entrega só a que a equipe registrou; sem ela, a ficha avisa "sem previsão — não prometa prazo"; previsão vencida aparece marcada "passou".
+3. Extras esperando a aprovação do cliente (descrição, urgência e valor) e o resumo dos aprovados/recusados.
+4. **"Colar link de acompanhamento no chat"**: um clique põe o texto pronto com o link no campo (revisa e envia; nunca sai sozinho); mostra se o cliente já abriu o link.
+5. "Abrir no Pátio ↗" leva direto à ordem (`/?os=<id>`); carro entregue há até 2 dias aparece como "Saiu do pátio".
+6. Bloco **"Área do Cliente"**: "Gerar link e colar no chat" chama `cliente_gerar_acesso` pelo servidor (o token aparece uma vez), monta `{link_base}/minha/?c=<token>` e cola o convite no campo.
+7. Rota `POST /api/clientes/:id/area-cliente`: só equipe logada, uuid validado, limite 10/min, auditada como `cliente.area_link` sem o link/token.
+8. A ficha do servidor (`/api/clientes/:id/ficha`) traz `patio` lido com a chave de serviço; erro no Pátio não derruba a ficha.
+9. **Copiloto conhece a OS em andamento** (`lib/contexto.js` → `ficha.patio`): o prompt ganha "CARRO NA OFICINA" com a etapa real, se está pronto ou não e os extras pendentes.
+10. A IA não promete prazo: sem previsão registrada ela diz que avisa quando ficar pronto; previsão vencida não é repetida; "pronto" vira "pode retirar (seg–sáb, 8h às 17h30)".
+11. Para a IA vão só etapa e descrição: nenhum valor de extra, nenhum link nem token do cliente (a tela do atendente é que tem o link).
+12. Regra nova no system prompt do copiloto para "meu carro está pronto?".
+13. Nomes dos tipos novos da fila do Comunicar (`patio_entrada`, `patio_extra`, `patio_pronto`, `area_cliente`) na ficha e no contexto.
+14. `lib/patio.js` (regras puras + leitura) e `test/patio.test.js` (11 testes: links, escolha da ordem, texto da IA sem R$/link, contexto, rpc da Área, rota com login).
+15. Mock: a Camila está com o carro em "Aguardando aprovação" com extra; rota de mentira da Área do Cliente; roteiro de navegador 1440/375 sem rolagem lateral.

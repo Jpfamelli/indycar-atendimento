@@ -12,6 +12,7 @@ const fs   = require('node:fs');
 const path = require('node:path');
 // Regras puras da ficha, da chave do CodeWords e do Comunicar (testadas em test/)
 const COM  = require('./lib/comunicar.js');
+const PAT  = require('./lib/patio.js');
 // Copiloto: ficha completa, IA com ferramentas, resumo do dia e as rotas
 const CTX  = require('./lib/contexto.js');
 const IA   = require('./lib/ia-copiloto.js');
@@ -2002,6 +2003,15 @@ async function regrasDeRetorno(sb) {
   return REGRAS_CACHE.lista;
 }
 
+/* Pátio (16/10/2026): leitura da ordem do carro e link da Área do Cliente (chave de serviço). */
+let _patio = null;
+function patioDoServidor() {
+  const sb = adminSupabase();
+  if (!sb) return null;
+  if (!_patio) _patio = PAT.criarPatio({ sb });
+  return _patio;
+}
+
 async function fichaDoCliente(clienteId) {
   const sb = adminSupabase();
   if (!sb) return { ok: false, erro: 'Servidor sem SUPABASE_SERVICE_ROLE_KEY — a ficha completa não carrega.' };
@@ -2013,7 +2023,7 @@ async function fichaDoCliente(clienteId) {
   if (!cliente) return { ok: false, erro: 'Cliente não encontrado.' };
 
   const telefones = COM.variantesDoTelefone(cliente.telefone_e164 || cliente.telefone);
-  const [c360, ultimo, regras, envios] = await Promise.all([
+  const [c360, ultimo, regras, envios, pat] = await Promise.all([
     sb.from('v_cliente_360').select('total_gasto,servicos_feitos,faltas,total_leads,ultimo_servico_em,proximo_horario')
       .eq('id', clienteId).maybeSingle(),
     sb.from('agendamentos').select('id,servico,inicio_em,valor,consultor_id')
@@ -2030,6 +2040,7 @@ async function fichaDoCliente(clienteId) {
         .order('enviar_em', { ascending: false }).limit(5);
       return data || [];
     })(),
+    patioDoServidor().lerPatio({ clienteId }),
   ]);
 
   const ultimoServico = ultimo?.data || null;
@@ -2049,6 +2060,8 @@ async function fichaDoCliente(clienteId) {
     revisao,
     envios: envios.map(e => ({ ...e, rotulo: COM.ROTULO_TIPO[e.tipo] || e.tipo || 'Mensagem' })),
     comunicarUrl: 'https://indycar-posvenda.onrender.com',
+    // carro na oficina agora (ou entregue há até 2 dias), com o link do cliente
+    patio: pat?.ordem ? { ...pat.ordem, texto_link: PAT.textoDoAcompanhamento({ nome: cliente.nome, veiculo: pat.ordem.veiculo || cliente.carro_modelo, link: pat.ordem.link_cliente }) } : null,
   };
 }
 
@@ -2792,6 +2805,29 @@ const server = http.createServer(async (req, res) => {
         }
         const r = await fichaDoCliente(id);
         return json(res, r.ok ? 200 : (r.erro === 'Cliente não encontrado.' ? 404 : 503), r);
+      }
+    }
+
+    // ---- Área do Cliente: gera um link NOVO (o token aparece uma vez só) ----
+    {
+      const m = /^\/api\/clientes\/([^/]+)\/area-cliente$/.exec(pathname);
+      if (m && req.method === 'POST') {
+        const quem = await usuarioLogado(req);
+        if (!quem) return json(res, 401, { erro: 'Faça login.' });
+        await readBody(req);
+        const id = decodeURIComponent(m[1]);
+        if (!COM.ehUuid(id)) return json(res, 400, { erro: 'id de cliente inválido' });
+        if (!dentroDoLimite(`area:${quem.id}`, 10, 60_000)) {
+          return json(res, 429, { erro: 'Muitos links seguidos. Espere um minuto.' });
+        }
+        const pt = patioDoServidor();
+        if (!pt) return json(res, 503, { erro: 'Servidor sem SUPABASE_SERVICE_ROLE_KEY.' });
+        const r = await pt.gerarLinkDaArea(id);
+        if (!r.ok) return json(res, r.status || 503, { erro: r.erro });
+        const { data: cli } = await adminSupabase().from('clientes').select('nome').eq('id', id).maybeSingle();
+        // o link (com o token) nunca entra na auditoria
+        await auditar({ perfil: quem.id, acao: 'cliente.area_link', tabela: 'cliente_acesso', registro: id, detalhes: { app: 'atendimento' } });
+        return json(res, 200, { ok: true, link: r.link, texto: PAT.textoDaArea({ nome: cli?.nome, link: r.link }) });
       }
     }
 

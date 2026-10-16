@@ -33,6 +33,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import PAT from '../lib/patio.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const PORT = Number(process.env.PORT || 3211);
@@ -885,7 +886,21 @@ http.createServer(async (req, res) => {
       cliente: { id: cli.id, nome: cli.nome, nascimento: cli.nascimento, aceita_mensagens: cli.aceita_mensagens !== false,
         aceita_mensagens_em: cli.aceita_mensagens_em, aceita_mensagens_motivo: cli.aceita_mensagens_motivo },
       resumo: r360, ultimoServico: ultimo, revisao: ultimo ? { prevista, ...regra, regraId: null } : null, envios,
-      comunicarUrl: 'https://indycar-posvenda.onrender.com' });
+      comunicarUrl: 'https://indycar-posvenda.onrender.com',
+      // Pátio (16/10): a Camila está com o carro na oficina, com um extra esperando
+      patio: cli.id === CLI.camila ? (() => {
+        const o = PAT.resumoDaOs({ id: '44444444-4444-4444-8444-444444444444', numero: 57, etapa: 'aguardando_aprovacao', etapa_em: d(0.06),
+          veiculo: 'Corolla', placa: 'GFK3H26', servico: 'Troca de pastilhas', token_publico: 'ab12cd34ef56ab12cd34ef56', created_at: d(0.2) },
+          [{ os_id: '44444444-4444-4444-8444-444444444444', descricao: 'Disco de freio dianteiro', urgencia: 'seguranca', status: 'pendente', valor: 680 },
+           { os_id: '44444444-4444-4444-8444-444444444444', descricao: 'Fluido de freio', urgencia: 'recomendado', status: 'aprovado', valor: 120 }]);
+        return { ...o, texto_link: PAT.textoDoAcompanhamento({ nome: cli.nome, veiculo: o.veiculo, link: o.link_cliente }) };
+      })() : null });
+  }
+  if ((mm = /^\/api\/clientes\/([^/]+)\/area-cliente$/.exec(p)) && m === 'POST') {
+    const cli = DB.clientes.find(c => c.id === mm[1]);
+    if (!cli) return json(res, 404, { erro: 'Cliente não encontrado.' });
+    const link = PAT.linkArea('https://indycar-patio.netlify.app', 'f00dbabe' + Date.now().toString(16));
+    return json(res, 200, { ok: true, link, texto: PAT.textoDaArea({ nome: cli.nome, link }) });
   }
   if (p === '/api/codewords/chave' && m === 'GET') {
     if (!admin) return json(res, 403, { erro: 'Só o administrador vê a chave.' });
